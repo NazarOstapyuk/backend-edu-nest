@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git check-ignore *)",
+      "Bash(git worktree *)",
+      "Bash(npm install *)",
+      "Bash(npx jest *)",
+      "Bash(docker compose *)",
+      "Bash(docker *)",
+      "PowerShell(Start-Process \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker.exe\" -WindowStyle Hidden; Start-Sleep -Seconds 3)",
+      "PowerShell(Get-Command *)",
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Force)",
+      "Bash(Select-Object Name)",
+      "PowerShell(&\"C:\\\\Program Files\\\\Docker\\\\cli-plugins\\\\docker-desktop.exe\")",
+      "Bash(Get-ChildItem *)",
+      "Bash(npx prisma *)",
+      "Bash(Select-Object FullName)",
+      "Bash(npm test *)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(dir /s /b \"D:\\\\IT\\\\backend-edu-nest\\\\.worktrees\\\\feature-auth-users\\\\src\")",
+      "Bash(node -e \"const ms = require\\('./node_modules/@types/jsonwebtoken/node_modules/ms/package.json'\\); console.log\\(JSON.stringify\\(ms\\)\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/@types/jsonwebtoken/package.json'\\).version\\)\")"
+    ]
+  }
+}
