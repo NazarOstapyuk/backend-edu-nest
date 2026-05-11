@@ -74,13 +74,22 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
 
+    if (dto.login && dto.login !== user.login) {
+      const existing = await this.prisma.user.findUnique({
+        where: { login: dto.login },
+      });
+      if (existing) throw new ConflictException('Login already taken');
+    }
+
     const data: {
+      login?: string;
       password?: string;
       role?: Role;
       firstName?: string;
       lastName?: string;
       isActive?: boolean;
     } = {};
+    if (dto.login !== undefined) data.login = dto.login;
     if (dto.password) data.password = await bcrypt.hash(dto.password, 10);
     if (dto.role !== undefined) data.role = dto.role;
     if (dto.firstName !== undefined) data.firstName = dto.firstName;

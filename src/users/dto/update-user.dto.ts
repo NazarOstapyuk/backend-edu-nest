@@ -11,6 +11,11 @@ import { Role } from '@prisma/client';
 
 export class UpdateUserDto {
   @IsString()
+  @IsNotEmpty()
+  @IsOptional()
+  login?: string;
+
+  @IsString()
   @MinLength(6)
   @IsOptional()
   password?: string;
