@@ -18,6 +18,12 @@ enum Gender {
   female
 }
 
+enum SubscriptionStatus {
+  active
+  finished
+  cancelled
+}
+
 model User {
   id           String   @id @default(uuid())
   login        String   @unique
@@ -43,17 +49,61 @@ model Group {
 }
 
 model Child {
-  id        String   @id @default(uuid())
-  firstName String
-  lastName  String
-  birthDate DateTime
-  gender    Gender
+  id            String         @id @default(uuid())
+  firstName     String
+  lastName      String
+  birthDate     DateTime
+  gender        Gender
 
-  groupId   String?
-  group     Group?   @relation(fields: [groupId], references: [id])
+  groupId       String?
+  group         Group?         @relation(fields: [groupId], references: [id])
 
-  parents   User[]   @relation("ChildParents")
+  parents       User[]         @relation("ChildParents")
+  subscriptions Subscription[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model SubscriptionType {
+  id              String         @id @default(uuid())
+  name            String         @unique
+  pricePerSession Decimal        @db.Decimal(10, 2)
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  subscriptions   Subscription[]
+}
+
+model Subscription {
+  id                 String             @id @default(uuid())
+  childId            String
+  child              Child              @relation(fields: [childId], references: [id])
+
+  subscriptionTypeId String
+  subscriptionType   SubscriptionType   @relation(fields: [subscriptionTypeId], references: [id])
+
+  totalSessions      Int
+  remainingSessions  Int
+  pricePerSession    Decimal            @db.Decimal(10, 2)
+  totalPrice         Decimal            @db.Decimal(10, 2)
+
+  status             SubscriptionStatus @default(active)
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  attendances        Attendance[]
+}
+
+model Attendance {
+  id             String       @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+
+  date           DateTime     @default(now())
+  note           String?
+
+  createdAt      DateTime     @default(now())
 }
