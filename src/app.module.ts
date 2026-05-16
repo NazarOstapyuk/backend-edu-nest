@@ -8,6 +8,7 @@ import { GroupsModule } from './groups/groups.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SeedModule } from './seed/seed.module';
 import { SubscriptionTypesModule } from './subscription-types/subscription-types.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { UsersModule } from './users/users.module';
     GroupsModule,
     ChildrenModule,
     SubscriptionTypesModule,
+    SubscriptionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -48,6 +48,7 @@ export class AttendancesService {
     }
 
     const sub = await this.prisma.subscription.findUnique({ where: { id: subscriptionId } });
+    if (!sub) throw new NotFoundException('Subscription not found');
 
     return this.prisma.$transaction(async (tx) => {
       await tx.attendance.delete({ where: { id: attendanceId } });

@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { SubscriptionsService } from './subscriptions.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
