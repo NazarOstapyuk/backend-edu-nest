@@ -47,13 +47,13 @@ export class GroupsService {
           ? { connect: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
       },
-      include: { teachers: { omit: { password: true, refreshToken: true } } },
+      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
     });
   }
 
   async findAll() {
     return this.prisma.group.findMany({
-      include: { teachers: { omit: { password: true, refreshToken: true } } },
+      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
     });
   }
 
@@ -78,7 +78,7 @@ export class GroupsService {
           ? { set: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
       },
-      include: { teachers: { omit: { password: true, refreshToken: true } } },
+      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
     });
   }
 

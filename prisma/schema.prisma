@@ -6,6 +6,18 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  root
+  admin
+  teacher
+  parent
+}
+
+enum Gender {
+  male
+  female
+}
+
 model User {
   id           String   @id @default(uuid())
   login        String   @unique
@@ -18,19 +30,30 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   groups       Group[]  @relation("GroupTeachers")
+  children     Child[]  @relation("ChildParents")
 }
 
 model Group {
   id        String   @id @default(uuid())
   name      String   @unique
   teachers  User[]   @relation("GroupTeachers")
+  children  Child[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-enum Role {
-  root
-  admin
-  teacher
-  parent
+model Child {
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  birthDate DateTime
+  gender    Gender
+
+  groupId   String?
+  group     Group?   @relation(fields: [groupId], references: [id])
+
+  parents   User[]   @relation("ChildParents")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
