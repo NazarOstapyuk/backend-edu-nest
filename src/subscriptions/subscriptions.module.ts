@@ -8,7 +8,11 @@ import { SubscriptionsService } from './subscriptions.service';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [SubscriptionsController, AttendancesController, ChildSubscriptionsController],
+  controllers: [
+    SubscriptionsController,
+    AttendancesController,
+    ChildSubscriptionsController,
+  ],
   providers: [SubscriptionsService, AttendancesService],
 })
 export class SubscriptionsModule {}
