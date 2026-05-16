@@ -1,8 +1,9 @@
-import { IsInt, IsPositive, IsUUID } from 'class-validator';
+import { IsArray, IsInt, IsPositive, IsUUID } from 'class-validator';
 
 export class CreateSubscriptionDto {
-  @IsUUID()
-  childId: string;
+  @IsArray()
+  @IsUUID('4', { each: true })
+  childIds: string[];
 
   @IsUUID()
   subscriptionTypeId: string;
