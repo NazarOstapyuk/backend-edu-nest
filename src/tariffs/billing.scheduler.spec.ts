@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { BillingScheduler } from './billing.scheduler';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { BillingService } from './billing.service';
 
 describe('BillingScheduler', () => {
   let billing: { runAll: jest.Mock };
@@ -20,9 +23,9 @@ describe('BillingScheduler', () => {
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     scheduler = new BillingScheduler(
-      billing as any,
-      prisma as any,
-      config as any,
+      billing as unknown as BillingService,
+      prisma as unknown as PrismaService,
+      config as unknown as ConfigService,
     );
   });
 
