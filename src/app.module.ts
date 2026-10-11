@@ -9,6 +9,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { SeedModule } from './seed/seed.module';
 import { SubscriptionTypesModule } from './subscription-types/subscription-types.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { FinanceModule } from './finance/finance.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     ChildrenModule,
     SubscriptionTypesModule,
     SubscriptionsModule,
+    FinanceModule,
   ],
   controllers: [AppController],
   providers: [AppService],
