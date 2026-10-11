@@ -20,6 +20,7 @@ export class CreateChargeDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/)
   @MaxLength(255)
   description: string;
 

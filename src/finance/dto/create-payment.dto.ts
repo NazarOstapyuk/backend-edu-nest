@@ -25,6 +25,7 @@ export class CreatePaymentDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/)
   @MaxLength(255)
   reference: string;
 
