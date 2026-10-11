@@ -43,6 +43,12 @@ model User {
   paymentsVoided     Payment[]    @relation("PaymentVoidedBy")
   allocationsCreated Allocation[] @relation("AllocationCreatedBy")
   allocationsVoided  Allocation[] @relation("AllocationVoidedBy")
+  tariffPricesCreated  TariffPrice[]          @relation("TariffPriceCreatedBy")
+  enrollmentsCreated   Enrollment[]           @relation("EnrollmentCreatedBy")
+  adjustmentsCreated   EnrollmentAdjustment[] @relation("AdjustmentCreatedBy")
+  adjustmentsVoided    EnrollmentAdjustment[] @relation("AdjustmentVoidedBy")
+  adaptationsCreated   AdaptationVisit[]      @relation("AdaptationCreatedBy")
+  adaptationsVoided    AdaptationVisit[]      @relation("AdaptationVoidedBy")
 }
 
 model Group {
@@ -68,6 +74,8 @@ model Child {
   subscriptions Subscription[]
   charges       Charge[]
   payments      Payment[]
+  enrollments      Enrollment[]
+  adaptationVisits AdaptationVisit[]
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -166,6 +174,8 @@ model Charge {
   voidReason  String?
 
   allocations Allocation[]
+  billedPeriod    BilledPeriod?
+  adaptationVisit AdaptationVisit?
 
   @@index([childId, category])
   @@index([sourceType, sourceId])
@@ -217,4 +227,142 @@ model Allocation {
 
   @@index([paymentId])
   @@index([chargeId])
+}
+
+enum TariffUnit {
+  month
+  hour
+  session
+  package
+}
+
+enum BillingMode {
+  anniversary
+  calendar_prorated
+  calendar_full
+}
+
+enum AdjustmentType {
+  custom_price
+  discount_percent
+  discount_amount
+  pause
+}
+
+model Tariff {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  category         FinanceCategory
+  unit             TariffUnit
+  packageSize      Int?
+  billingMode      BillingMode       @default(calendar_full)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  prices           TariffPrice[]
+  enrollments      Enrollment[]
+  adaptationVisits AdaptationVisit[]
+}
+
+model TariffPrice {
+  id            String   @id @default(uuid())
+  tariffId      String
+  tariff        Tariff   @relation(fields: [tariffId], references: [id])
+  price         Decimal  @db.Decimal(10, 2)
+  effectiveFrom DateTime @db.Date
+  createdById   String
+  createdBy     User     @relation("TariffPriceCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@unique([tariffId, effectiveFrom])
+}
+
+model Enrollment {
+  id            String                 @id @default(uuid())
+  childId       String
+  child         Child                  @relation(fields: [childId], references: [id])
+  tariffId      String
+  tariff        Tariff                 @relation(fields: [tariffId], references: [id])
+  startDate     DateTime               @db.Date
+  endDate       DateTime?              @db.Date
+  billingMode   BillingMode?
+  note          String?
+  createdById   String
+  createdBy     User                   @relation("EnrollmentCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  adjustments   EnrollmentAdjustment[]
+  billedPeriods BilledPeriod[]
+
+  @@index([childId])
+}
+
+model EnrollmentAdjustment {
+  id           String         @id @default(uuid())
+  enrollmentId String
+  enrollment   Enrollment     @relation(fields: [enrollmentId], references: [id])
+  type         AdjustmentType
+  value        Decimal?       @db.Decimal(10, 2)
+  startDate    DateTime       @db.Date
+  endDate      DateTime?      @db.Date
+  reason       String
+  createdById  String
+  createdBy    User           @relation("AdjustmentCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime       @default(now())
+
+  voidedAt     DateTime?
+  voidedById   String?
+  voidedBy     User?          @relation("AdjustmentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason   String?
+
+  @@index([enrollmentId])
+}
+
+model BilledPeriod {
+  id           String     @id @default(uuid())
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id])
+  periodStart  DateTime   @db.Date
+  periodEnd    DateTime   @db.Date
+  amount       Decimal    @db.Decimal(10, 2)
+  chargeId     String?    @unique
+  charge       Charge?    @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  note         String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([enrollmentId, periodStart])
+}
+
+model AdaptationVisit {
+  id          String    @id @default(uuid())
+  childId     String
+  child       Child     @relation(fields: [childId], references: [id])
+  tariffId    String
+  tariff      Tariff    @relation(fields: [tariffId], references: [id])
+  date        DateTime  @db.Date
+  hours       Decimal   @db.Decimal(5, 2)
+  ratePerHour Decimal   @db.Decimal(10, 2)
+  amount      Decimal   @db.Decimal(10, 2)
+  note        String?
+  chargeId    String    @unique
+  charge      Charge    @relation(fields: [chargeId], references: [id])
+  createdById String
+  createdBy   User      @relation("AdaptationCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?     @relation("AdaptationVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([childId])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
