@@ -122,7 +122,8 @@ export class TariffsService {
         name: dto.name,
         billingMode: dto.billingMode,
         isActive: dto.isActive,
-        validityDays: dto.validityDays,
+        validityDays:
+          tariff.unit === TariffUnit.package ? dto.validityDays : undefined,
       },
       include: tariffInclude,
     });

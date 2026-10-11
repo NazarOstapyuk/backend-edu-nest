@@ -193,6 +193,40 @@ describe('TariffsService', () => {
     });
   });
 
+  describe('update validityDays', () => {
+    it('writes validityDays for a package tariff', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ unit: TariffUnit.package, packageSize: 4 }),
+      );
+      mockPrisma.tariff.update.mockResolvedValue(
+        tariff({ unit: TariffUnit.package, packageSize: 4 }),
+      );
+
+      await service.update('t1', { validityDays: 30 });
+
+      const arg = (
+        mockPrisma.tariff.update.mock.calls[0] as [
+          { data: { validityDays?: number } },
+        ]
+      )[0];
+      expect(arg.data.validityDays).toBe(30);
+    });
+
+    it('ignores validityDays for a non-package tariff', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.tariff.update.mockResolvedValue(tariff());
+
+      await service.update('t1', { validityDays: 30 });
+
+      const arg = (
+        mockPrisma.tariff.update.mock.calls[0] as [
+          { data: { validityDays?: number } },
+        ]
+      )[0];
+      expect(arg.data.validityDays).toBeUndefined();
+    });
+  });
+
   describe('delete', () => {
     it('refuses to delete a tariff in use', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
