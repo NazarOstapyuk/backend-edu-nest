@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PaymentStatus, Prisma } from '@prisma/client';
+import { Allocation, PaymentStatus, Prisma } from '@prisma/client';
 import { activeAllocated, money, sumMoney } from './finance-calc';
 
 export interface AllocationItem {
@@ -66,7 +66,7 @@ export async function applyAllocations(
     throw new BadRequestException('Allocation exceeds payment free amount');
   }
 
-  const allocations = [];
+  const allocations: Allocation[] = [];
   for (const item of items) {
     allocations.push(
       await tx.allocation.create({
