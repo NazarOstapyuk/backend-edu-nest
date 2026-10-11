@@ -106,6 +106,22 @@ export class EnrollmentsService {
     if (endDate.getTime() < enrollment.startDate.getTime()) {
       throw new BadRequestException('End date must not be before start date');
     }
+    const others = await this.prisma.enrollment.findMany({
+      where: {
+        childId: enrollment.childId,
+        tariffId: enrollment.tariffId,
+        id: { not: id },
+      },
+    });
+    if (
+      others.some((o) =>
+        overlaps(enrollment.startDate, endDate, o.startDate, o.endDate),
+      )
+    ) {
+      throw new BadRequestException(
+        'Enrollment overlaps an existing enrollment on this tariff',
+      );
+    }
     await this.prisma.enrollment.update({ where: { id }, data: { endDate } });
     return this.listForChild(enrollment.childId);
   }

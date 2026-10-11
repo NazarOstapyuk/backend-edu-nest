@@ -249,4 +249,19 @@ describe('EnrollmentsService', () => {
       data: { endDate: day('2026-12-31') },
     });
   });
+
+  it('rejects ending into a later enrollment on the same tariff', async () => {
+    mockPrisma.enrollment.findUnique.mockResolvedValue(loaded());
+    mockPrisma.enrollment.findMany.mockResolvedValueOnce([
+      { startDate: day('2027-01-01'), endDate: null },
+    ]);
+
+    await expect(service.end('e1', { endDate: '2027-02-01' })).rejects.toThrow(
+      'Enrollment overlaps an existing enrollment on this tariff',
+    );
+    expect(mockPrisma.enrollment.findMany).toHaveBeenCalledWith({
+      where: { childId: 'child-1', tariffId: 't1', id: { not: 'e1' } },
+    });
+    expect(mockPrisma.enrollment.update).not.toHaveBeenCalled();
+  });
 });
