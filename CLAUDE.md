@@ -88,6 +88,18 @@ Spec: `docs/superpowers/specs/2026-10-11-tariffs-design.md`. Code in `src/tariff
 - A tariff's billingMode cannot change while it has enrollments (400) — changing it would shift the period grid and double-bill; create a new tariff instead.
 - Recalculation zeroes a period only when it starts after the enrollment endDate; an off-grid billed period returns 400 "Billed period no longer matches the enrollment schedule".
 
+### Domain: classes and packages
+
+Spec: `docs/superpowers/specs/2026-10-11-classes-packages-design.md`. Code in `src/classes/`:
+
+- `Direction` has a missed-lesson rule (`no_charge`, `always`, `unexcused_only`); `ClassGroup` has teachers, members (`ClassGroupMember` with start/end dates), a single-lesson tariff (unit `session`) and a package tariff (unit `package`).
+- `Package` = sessions bought for a direction (charge `sourceType = extra_package`); remaining = `sessionsTotal − usedBefore − active SessionUsage`, never stored. Validity from `Tariff.validityDays`; extensions are separate rows.
+- `consumption.ts` is pure: whether a mark consumes, which package (expiring first), package state. Keep rules there and test without mocks.
+- Marking (`LessonsService.mark`) runs in one transaction: lock the `Lesson` row, then the child's `Package` rows (`ORDER BY id FOR UPDATE`). No usable package → single-lesson charge (`sourceType = extra_session`).
+- Corrections void the old attendance + usage (+ single charge via `voidChargeInTx`). Teachers: own groups only (`assertGroupAccess`), corrections only on the lesson day; admins need a reason after the lesson day.
+- Legacy `Subscription`s are migrated once (`POST /legacy/subscriptions/migrate`, idempotent) into packages with `needsReconciliation`; reconciliation creates an `opening_balance` charge for the unpaid part. The old subscriptions module is read-only legacy.
+- Teachers cannot be deleted while they teach a class group (the m2m join table cascades, so the user delete guard counts class groups).
+
 ## Module conventions
 
 **Reference module: `src/children/`** (module + controller + service + `dto/` + `service.spec.ts`). For transactions and nested routes see `src/subscriptions/`. Copy these patterns, don't invent new ones.
