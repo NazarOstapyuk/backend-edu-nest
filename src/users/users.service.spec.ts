@@ -1,6 +1,10 @@
 // src/users/users.service.spec.ts
 import { Test } from '@nestjs/testing';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,7 +15,11 @@ const mockPrisma = {
     create: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
+  charge: { count: jest.fn() },
+  payment: { count: jest.fn() },
+  allocation: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -31,14 +39,20 @@ describe('UsersService', () => {
   describe('create', () => {
     it('throws ForbiddenException when admin tries to create root', async () => {
       await expect(
-        service.create({ login: 'x', password: 'pass123', role: Role.root }, Role.admin),
+        service.create(
+          { login: 'x', password: 'pass123', role: Role.root },
+          Role.admin,
+        ),
       ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws ConflictException when login already exists', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'existing' });
       await expect(
-        service.create({ login: 'taken', password: 'pass123', role: Role.teacher }, Role.admin),
+        service.create(
+          { login: 'taken', password: 'pass123', role: Role.teacher },
+          Role.admin,
+        ),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -76,8 +90,41 @@ describe('UsersService', () => {
         refreshToken: null,
       });
       await expect(
-        service.create({ login: 'root2', password: 'pass123', role: Role.root }, Role.root),
+        service.create(
+          { login: 'root2', password: 'pass123', role: Role.root },
+          Role.root,
+        ),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe('delete', () => {
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: Role.admin,
+      });
+      mockPrisma.charge.count.mockResolvedValue(0);
+      mockPrisma.payment.count.mockResolvedValue(0);
+      mockPrisma.allocation.count.mockResolvedValue(0);
+    });
+
+    it('deletes a user without financial records', async () => {
+      mockPrisma.user.delete.mockResolvedValue({});
+
+      const result = await service.delete('u1');
+
+      expect(result).toEqual({ message: 'User deleted' });
+      expect(mockPrisma.charge.count).toHaveBeenCalledWith({
+        where: { OR: [{ createdById: 'u1' }, { voidedById: 'u1' }] },
+      });
+    });
+
+    it('throws BadRequestException when user has financial records', async () => {
+      mockPrisma.allocation.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
   });
 });

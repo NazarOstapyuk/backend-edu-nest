@@ -15,6 +15,8 @@ const mockPrisma = {
   },
   user: { findMany: jest.fn() },
   group: { findUnique: jest.fn() },
+  charge: { count: jest.fn() },
+  payment: { count: jest.fn() },
 };
 
 describe('ChildrenService', () => {
@@ -222,6 +224,8 @@ describe('ChildrenService', () => {
 
   describe('delete', () => {
     it('deletes a child and returns a message', async () => {
+      mockPrisma.charge.count.mockResolvedValue(0);
+      mockPrisma.payment.count.mockResolvedValue(0);
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
@@ -231,6 +235,17 @@ describe('ChildrenService', () => {
       expect(mockPrisma.child.delete).toHaveBeenCalledWith({
         where: { id: 'child-1' },
       });
+    });
+
+    it('throws BadRequestException when child has financial records', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.charge.count.mockResolvedValue(0);
+      mockPrisma.payment.count.mockResolvedValue(2);
+
+      await expect(service.delete('child-1')).rejects.toThrow(
+        'Cannot delete: child has financial records',
+      );
+      expect(mockPrisma.child.delete).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when child does not exist', async () => {

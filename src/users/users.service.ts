@@ -1,5 +1,6 @@
 // src/users/users.service.ts
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -61,6 +62,18 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
     if (user.role === Role.root)
       throw new ForbiddenException('Cannot delete root user');
+
+    const author = { OR: [{ createdById: id }, { voidedById: id }] };
+    const counts = await Promise.all([
+      this.prisma.charge.count({ where: author }),
+      this.prisma.payment.count({ where: author }),
+      this.prisma.allocation.count({ where: author }),
+    ]);
+    if (counts.some((count) => count > 0)) {
+      throw new BadRequestException(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+    }
 
     await this.prisma.user.delete({ where: { id } });
     return { message: 'User deleted' };
