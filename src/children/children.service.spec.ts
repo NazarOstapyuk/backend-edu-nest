@@ -4,7 +4,6 @@ import { Gender, Role } from '@prisma/client';
 import { ChildrenService } from './children.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChildDto } from './dto/create-child.dto';
-import { UpdateChildDto } from './dto/update-child.dto';
 
 const mockPrisma = {
   child: {
@@ -70,6 +69,10 @@ describe('ChildrenService', () => {
         include: {
           group: true,
           parents: { omit: { password: true, refreshToken: true } },
+          subscriptions: {
+            include: { subscriptionType: true },
+            orderBy: { createdAt: 'desc' },
+          },
         },
       });
     });
@@ -88,7 +91,10 @@ describe('ChildrenService', () => {
       mockPrisma.user.findMany.mockResolvedValue([]);
 
       await expect(
-        service.create({ ...baseDto, parentIds: ['00000000-0000-0000-0000-000000000001'] }),
+        service.create({
+          ...baseDto,
+          parentIds: ['00000000-0000-0000-0000-000000000001'],
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -98,7 +104,10 @@ describe('ChildrenService', () => {
       ]);
 
       await expect(
-        service.create({ ...baseDto, parentIds: ['00000000-0000-0000-0000-000000000001'] }),
+        service.create({
+          ...baseDto,
+          parentIds: ['00000000-0000-0000-0000-000000000001'],
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -117,6 +126,10 @@ describe('ChildrenService', () => {
         include: {
           group: true,
           parents: { omit: { password: true, refreshToken: true } },
+          subscriptions: {
+            include: { subscriptionType: true },
+            orderBy: { createdAt: 'desc' },
+          },
         },
       });
     });
@@ -134,10 +147,17 @@ describe('ChildrenService', () => {
 
     it('updates a child successfully', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(existingChild);
-      const updated = { ...existingChild, firstName: 'Petro', group: null, parents: [] };
+      const updated = {
+        ...existingChild,
+        firstName: 'Petro',
+        group: null,
+        parents: [],
+      };
       mockPrisma.child.update.mockResolvedValue(updated);
 
-      const result = await service.update('child-1', { firstName: 'Petro' } as UpdateChildDto);
+      const result = await service.update('child-1', {
+        firstName: 'Petro',
+      });
 
       expect(result).toEqual(updated);
       expect(mockPrisma.child.update).toHaveBeenCalledWith({
@@ -153,15 +173,23 @@ describe('ChildrenService', () => {
         include: {
           group: true,
           parents: { omit: { password: true, refreshToken: true } },
+          subscriptions: {
+            include: { subscriptionType: true },
+            orderBy: { createdAt: 'desc' },
+          },
         },
       });
     });
 
     it('disconnects group when groupId is null', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(existingChild);
-      mockPrisma.child.update.mockResolvedValue({ ...existingChild, group: null, parents: [] });
+      mockPrisma.child.update.mockResolvedValue({
+        ...existingChild,
+        group: null,
+        parents: [],
+      });
 
-      await service.update('child-1', { groupId: null } as UpdateChildDto);
+      await service.update('child-1', { groupId: null });
 
       expect(mockPrisma.child.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -173,9 +201,9 @@ describe('ChildrenService', () => {
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.update('missing', {} as UpdateChildDto),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.update('missing', {})).rejects.toThrow(
+        NotFoundException,
+      );
 
       expect(mockPrisma.child.update).not.toHaveBeenCalled();
     });
@@ -185,7 +213,9 @@ describe('ChildrenService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.update('child-1', { groupId: 'missing-group' } as UpdateChildDto),
+        service.update('child-1', {
+          groupId: 'missing-group',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -198,13 +228,17 @@ describe('ChildrenService', () => {
       const result = await service.delete('child-1');
 
       expect(result).toEqual({ message: 'Child deleted' });
-      expect(mockPrisma.child.delete).toHaveBeenCalledWith({ where: { id: 'child-1' } });
+      expect(mockPrisma.child.delete).toHaveBeenCalledWith({
+        where: { id: 'child-1' },
+      });
     });
 
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.delete('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.delete('missing')).rejects.toThrow(
+        NotFoundException,
+      );
 
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
     });

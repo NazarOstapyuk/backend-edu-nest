@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Role, SubscriptionStatus } from '@prisma/client';
 import { SubscriptionsService } from './subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +12,7 @@ const mockPrisma = {
   child: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn(),
   },
   subscriptionType: {
     findUnique: jest.fn(),
@@ -35,11 +40,15 @@ describe('SubscriptionsService', () => {
   });
 
   describe('create', () => {
-    const dto = { childId: 'child-1', subscriptionTypeId: 'type-1', totalSessions: 10 };
+    const dto = {
+      childIds: ['child-1'],
+      subscriptionTypeId: 'type-1',
+      totalSessions: 10,
+    };
     const child = { id: 'child-1', firstName: 'Ivan' };
     const type = { id: 'type-1', name: 'Football', pricePerSession: 100 };
 
-    it('creates subscription and fixes price from type at creation time', async () => {
+    it('creates one subscription per child and fixes price from type', async () => {
       const created = {
         id: 'sub-1',
         childId: 'child-1',
@@ -51,16 +60,14 @@ describe('SubscriptionsService', () => {
         status: SubscriptionStatus.active,
         child,
         subscriptionType: type,
-        createdAt: new Date(),
-        updatedAt: new Date(),
       };
-      mockPrisma.child.findUnique.mockResolvedValue(child);
       mockPrisma.subscriptionType.findUnique.mockResolvedValue(type);
+      mockPrisma.child.findMany.mockResolvedValue([child]);
       mockPrisma.subscription.create.mockResolvedValue(created);
 
       const result = await service.create(dto);
 
-      expect(result).toEqual(created);
+      expect(result).toEqual([created]);
       expect(mockPrisma.subscription.create).toHaveBeenCalledWith({
         data: {
           childId: 'child-1',
@@ -74,15 +81,15 @@ describe('SubscriptionsService', () => {
       });
     });
 
-    it('throws NotFoundException when child does not exist', async () => {
-      mockPrisma.child.findUnique.mockResolvedValue(null);
+    it('throws NotFoundException when a child does not exist', async () => {
+      mockPrisma.subscriptionType.findUnique.mockResolvedValue(type);
+      mockPrisma.child.findMany.mockResolvedValue([]);
 
       await expect(service.create(dto)).rejects.toThrow(NotFoundException);
       expect(mockPrisma.subscription.create).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when subscription type does not exist', async () => {
-      mockPrisma.child.findUnique.mockResolvedValue(child);
       mockPrisma.subscriptionType.findUnique.mockResolvedValue(null);
 
       await expect(service.create(dto)).rejects.toThrow(NotFoundException);
@@ -120,7 +127,9 @@ describe('SubscriptionsService', () => {
       const parent = { id: 'parent-1', role: Role.parent, login: 'parent' };
       mockPrisma.child.findFirst.mockResolvedValue(null);
 
-      await expect(service.findByChild('child-1', parent)).rejects.toThrow(ForbiddenException);
+      await expect(service.findByChild('child-1', parent)).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(mockPrisma.subscription.findMany).not.toHaveBeenCalled();
     });
   });
@@ -142,16 +151,23 @@ describe('SubscriptionsService', () => {
     });
 
     it('throws BadRequestException when subscription is not active', async () => {
-      mockPrisma.subscription.findUnique.mockResolvedValue({ id: 'sub-1', status: SubscriptionStatus.finished });
+      mockPrisma.subscription.findUnique.mockResolvedValue({
+        id: 'sub-1',
+        status: SubscriptionStatus.finished,
+      });
 
-      await expect(service.cancel('sub-1')).rejects.toThrow(BadRequestException);
+      await expect(service.cancel('sub-1')).rejects.toThrow(
+        BadRequestException,
+      );
       expect(mockPrisma.subscription.update).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when subscription does not exist', async () => {
       mockPrisma.subscription.findUnique.mockResolvedValue(null);
 
-      await expect(service.cancel('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.cancel('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });
