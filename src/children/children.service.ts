@@ -115,11 +115,13 @@ export class ChildrenService {
   async delete(id: string) {
     const child = await this.prisma.child.findUnique({ where: { id } });
     if (!child) throw new NotFoundException('Child not found');
-    const [charges, payments] = await Promise.all([
+    const counts = await Promise.all([
       this.prisma.charge.count({ where: { childId: id } }),
       this.prisma.payment.count({ where: { childId: id } }),
+      this.prisma.enrollment.count({ where: { childId: id } }),
+      this.prisma.adaptationVisit.count({ where: { childId: id } }),
     ]);
-    if (charges + payments > 0) {
+    if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
         'Cannot delete: child has financial records',
       );

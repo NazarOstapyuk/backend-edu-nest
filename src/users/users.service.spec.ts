@@ -20,6 +20,10 @@ const mockPrisma = {
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
   allocation: { count: jest.fn() },
+  tariffPrice: { count: jest.fn() },
+  enrollment: { count: jest.fn() },
+  enrollmentAdjustment: { count: jest.fn() },
+  adaptationVisit: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -107,6 +111,10 @@ describe('UsersService', () => {
       mockPrisma.charge.count.mockResolvedValue(0);
       mockPrisma.payment.count.mockResolvedValue(0);
       mockPrisma.allocation.count.mockResolvedValue(0);
+      mockPrisma.tariffPrice.count.mockResolvedValue(0);
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.enrollmentAdjustment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
     });
 
     it('deletes a user without financial records', async () => {
@@ -124,6 +132,15 @@ describe('UsersService', () => {
       mockPrisma.allocation.count.mockResolvedValue(1);
 
       await expect(service.delete('u1')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user created tariff records', async () => {
+      mockPrisma.enrollmentAdjustment.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
   });

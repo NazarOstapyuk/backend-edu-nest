@@ -17,6 +17,8 @@ const mockPrisma = {
   group: { findUnique: jest.fn() },
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
+  enrollment: { count: jest.fn() },
+  adaptationVisit: { count: jest.fn() },
 };
 
 describe('ChildrenService', () => {
@@ -200,6 +202,19 @@ describe('ChildrenService', () => {
       );
     });
 
+    it('throws BadRequestException when child has enrollments', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.charge.count.mockResolvedValue(0);
+      mockPrisma.payment.count.mockResolvedValue(0);
+      mockPrisma.enrollment.count.mockResolvedValue(1);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+
+      await expect(service.delete('child-1')).rejects.toThrow(
+        'Cannot delete: child has financial records',
+      );
+      expect(mockPrisma.child.delete).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
@@ -226,6 +241,8 @@ describe('ChildrenService', () => {
     it('deletes a child and returns a message', async () => {
       mockPrisma.charge.count.mockResolvedValue(0);
       mockPrisma.payment.count.mockResolvedValue(0);
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
@@ -241,6 +258,8 @@ describe('ChildrenService', () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.charge.count.mockResolvedValue(0);
       mockPrisma.payment.count.mockResolvedValue(2);
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
 
       await expect(service.delete('child-1')).rejects.toThrow(
         'Cannot delete: child has financial records',

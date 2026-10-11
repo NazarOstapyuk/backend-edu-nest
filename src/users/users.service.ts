@@ -68,6 +68,10 @@ export class UsersService {
       this.prisma.charge.count({ where: author }),
       this.prisma.payment.count({ where: author }),
       this.prisma.allocation.count({ where: author }),
+      this.prisma.tariffPrice.count({ where: { createdById: id } }),
+      this.prisma.enrollment.count({ where: { createdById: id } }),
+      this.prisma.enrollmentAdjustment.count({ where: author }),
+      this.prisma.adaptationVisit.count({ where: author }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
