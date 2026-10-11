@@ -3,10 +3,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChargeSource, Prisma, TariffUnit } from '@prisma/client';
+import {
+  ChargeSource,
+  FinanceCategory,
+  Prisma,
+  TariffUnit,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { formatMoney } from '../finance/finance-calc';
+import { formatMoney, money } from '../finance/finance-calc';
 import { voidChargeInTx } from '../finance/void-charge';
 import { priceOn } from '../tariffs/billing-engine';
 import { kyivToday, toDay, uaDay } from '../tariffs/dates';
@@ -18,6 +23,7 @@ import {
 } from './consumption';
 import { ExtendPackageDto } from './dto/extend-package.dto';
 import { PurchasePackageDto } from './dto/purchase-package.dto';
+import { ReconcilePackageDto } from './dto/reconcile-package.dto';
 
 export const packageInclude = {
   direction: { select: { id: true, name: true } },
@@ -209,5 +215,79 @@ export class PackagesService {
       return pkg.childId;
     });
     return this.listForChild(childId);
+  }
+
+  async reconcile(id: string, dto: ReconcilePackageDto, userId: string) {
+    const pkg = await this.prisma.package.findUnique({
+      where: { id },
+      include: {
+        direction: { select: { name: true } },
+        legacySubscription: { select: { totalPrice: true } },
+      },
+    });
+    if (!pkg) throw new NotFoundException('Package not found');
+    if (!pkg.needsReconciliation || !pkg.legacySubscription) {
+      throw new BadRequestException('Package does not need reconciliation');
+    }
+
+    const total = pkg.legacySubscription.totalPrice;
+    let due = new Prisma.Decimal(0);
+    if (dto.outcome === 'not_paid') due = new Prisma.Decimal(total);
+    if (dto.outcome === 'paid_partial') {
+      const paid = dto.paidAmount ? money(dto.paidAmount) : null;
+      if (!paid || paid.lte(0) || paid.gte(total))
+        throw new BadRequestException('Invalid paid amount');
+      due = new Prisma.Decimal(total).minus(paid);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.package.updateMany({
+        where: { id, needsReconciliation: true },
+        data: {
+          needsReconciliation: false,
+          reconciledAt: new Date(),
+          reconciledById: userId,
+          reconciliationNote: dto.note?.trim() || null,
+        },
+      });
+      if (count === 0)
+        throw new BadRequestException('Package does not need reconciliation');
+      if (due.gt(0)) {
+        await tx.charge.create({
+          data: {
+            childId: pkg.childId,
+            category: FinanceCategory.extra_classes,
+            amount: due,
+            description: `Початковий залишок (звірка): ${pkg.direction.name}`,
+            sourceType: ChargeSource.opening_balance,
+            sourceId: pkg.id,
+            createdById: userId,
+          },
+        });
+      }
+    });
+    return this.listForChild(pkg.childId);
+  }
+
+  async reconciliationList() {
+    const packages = await this.prisma.package.findMany({
+      where: { needsReconciliation: true, voidedAt: null },
+      include: {
+        child: { select: { id: true, firstName: true, lastName: true } },
+        direction: { select: { name: true } },
+        legacySubscription: { select: { totalPrice: true } },
+        extensions: { select: { newExpiresAt: true, createdAt: true } },
+        usages: { select: { voidedAt: true } },
+      },
+      orderBy: { purchaseDate: 'asc' },
+    });
+    return packages.map((p) => ({
+      id: p.id,
+      child: p.child,
+      directionName: p.direction.name,
+      sessionsTotal: p.sessionsTotal,
+      remaining: packageRemaining(p),
+      totalPrice: formatMoney(p.legacySubscription?.totalPrice ?? 0),
+    }));
   }
 }

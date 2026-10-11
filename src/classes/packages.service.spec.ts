@@ -221,4 +221,103 @@ describe('PackagesService', () => {
       );
     });
   });
+
+  describe('reconcile', () => {
+    const legacy = (over: Record<string, unknown> = {}) => ({
+      id: 'p1',
+      childId: 'child-1',
+      needsReconciliation: true,
+      direction: { name: 'Футбол' },
+      legacySubscription: { totalPrice: d('1000') },
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrisma.package.updateMany.mockResolvedValue({ count: 1 });
+    });
+
+    it('creates no charge for paid_full', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(legacy());
+
+      await service.reconcile('p1', { outcome: 'paid_full' }, 'u1');
+
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+      expect(
+        firstArg<{ where: Record<string, unknown> }>(
+          mockPrisma.package.updateMany,
+        ).where,
+      ).toEqual({
+        id: 'p1',
+        needsReconciliation: true,
+      });
+    });
+
+    it('charges the unpaid rest for paid_partial', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(legacy());
+
+      await service.reconcile(
+        'p1',
+        { outcome: 'paid_partial', paidAmount: '400', note: 'зошит' },
+        'u1',
+      );
+
+      const charge = firstArg<{
+        data: Record<string, unknown> & { amount: Prisma.Decimal };
+      }>(mockPrisma.charge.create);
+      expect(charge.data).toMatchObject({
+        childId: 'child-1',
+        category: FinanceCategory.extra_classes,
+        description: 'Початковий залишок (звірка): Футбол',
+        sourceType: ChargeSource.opening_balance,
+        sourceId: 'p1',
+        createdById: 'u1',
+      });
+      expect(charge.data.amount.toFixed(2)).toBe('600.00');
+    });
+
+    it('charges the full price for not_paid', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(legacy());
+
+      await service.reconcile('p1', { outcome: 'not_paid' }, 'u1');
+
+      const charge = firstArg<{ data: { amount: Prisma.Decimal } }>(
+        mockPrisma.charge.create,
+      );
+      expect(charge.data.amount.toFixed(2)).toBe('1000.00');
+    });
+
+    it.each(['0', '1000', undefined])(
+      'rejects paid amount %p',
+      async (paidAmount) => {
+        mockPrisma.package.findUnique.mockResolvedValue(legacy());
+
+        await expect(
+          service.reconcile(
+            'p1',
+            { outcome: 'paid_partial', paidAmount },
+            'u1',
+          ),
+        ).rejects.toThrow('Invalid paid amount');
+      },
+    );
+
+    it('rejects a package that does not need reconciliation', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(
+        legacy({ needsReconciliation: false }),
+      );
+
+      await expect(
+        service.reconcile('p1', { outcome: 'paid_full' }, 'u1'),
+      ).rejects.toThrow('Package does not need reconciliation');
+    });
+
+    it('rejects a concurrent second reconciliation', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(legacy());
+      mockPrisma.package.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.reconcile('p1', { outcome: 'not_paid' }, 'u1'),
+      ).rejects.toThrow('Package does not need reconciliation');
+    });
+  });
 });
