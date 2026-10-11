@@ -1,0 +1,153 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, TariffUnit } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { formatMoney, money } from '../finance/finance-calc';
+import { priceOn } from './billing-engine';
+import { kyivToday, toDay } from './dates';
+import { AddTariffPriceDto } from './dto/add-tariff-price.dto';
+import { CreateTariffDto } from './dto/create-tariff.dto';
+import { UpdateTariffDto } from './dto/update-tariff.dto';
+
+const tariffInclude = {
+  prices: { orderBy: { effectiveFrom: 'desc' } },
+} satisfies Prisma.TariffInclude;
+
+type LoadedTariff = Prisma.TariffGetPayload<{ include: typeof tariffInclude }>;
+
+export const toTariffView = (tariff: LoadedTariff, today: Date) => {
+  const current = priceOn(tariff.prices, today);
+  return {
+    id: tariff.id,
+    name: tariff.name,
+    category: tariff.category,
+    unit: tariff.unit,
+    packageSize: tariff.packageSize,
+    billingMode: tariff.billingMode,
+    isActive: tariff.isActive,
+    currentPrice: current ? formatMoney(current) : null,
+    prices: tariff.prices.map((p) => ({
+      id: p.id,
+      price: formatMoney(p.price),
+      effectiveFrom: p.effectiveFrom,
+    })),
+  };
+};
+
+@Injectable()
+export class TariffsService {
+  constructor(private prisma: PrismaService) {}
+
+  private async get(id: string) {
+    const tariff = await this.prisma.tariff.findUnique({
+      where: { id },
+      include: tariffInclude,
+    });
+    if (!tariff) throw new NotFoundException('Tariff not found');
+    return tariff;
+  }
+
+  private async assertNameFree(name: string) {
+    const existing = await this.prisma.tariff.findUnique({ where: { name } });
+    if (existing)
+      throw new BadRequestException('Tariff with this name already exists');
+  }
+
+  async list(today: Date = kyivToday()) {
+    const tariffs = await this.prisma.tariff.findMany({
+      include: tariffInclude,
+      orderBy: { name: 'asc' },
+    });
+    return tariffs.map((t) => toTariffView(t, today));
+  }
+
+  async create(dto: CreateTariffDto, userId: string) {
+    if (dto.unit === TariffUnit.package && !dto.packageSize) {
+      throw new BadRequestException(
+        'Package size is required for package tariffs',
+      );
+    }
+    if (money(dto.price).lte(0))
+      throw new BadRequestException('Amount must be greater than 0');
+    await this.assertNameFree(dto.name);
+
+    const tariff = await this.prisma.tariff.create({
+      data: {
+        name: dto.name,
+        category: dto.category,
+        unit: dto.unit,
+        packageSize:
+          dto.unit === TariffUnit.package ? (dto.packageSize ?? null) : null,
+        billingMode: dto.billingMode,
+        prices: {
+          create: {
+            price: dto.price,
+            effectiveFrom: toDay(dto.effectiveFrom),
+            createdById: userId,
+          },
+        },
+      },
+      include: tariffInclude,
+    });
+    return toTariffView(tariff, kyivToday());
+  }
+
+  async update(id: string, dto: UpdateTariffDto) {
+    const tariff = await this.get(id);
+    if (dto.name !== undefined && dto.name !== tariff.name)
+      await this.assertNameFree(dto.name);
+
+    const updated = await this.prisma.tariff.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        billingMode: dto.billingMode,
+        isActive: dto.isActive,
+      },
+      include: tariffInclude,
+    });
+    return toTariffView(updated, kyivToday());
+  }
+
+  async addPrice(id: string, dto: AddTariffPriceDto, userId: string) {
+    await this.get(id);
+    if (money(dto.price).lte(0))
+      throw new BadRequestException('Amount must be greater than 0');
+    const effectiveFrom = toDay(dto.effectiveFrom);
+
+    const existing = await this.prisma.tariffPrice.findUnique({
+      where: { tariffId_effectiveFrom: { tariffId: id, effectiveFrom } },
+    });
+    if (existing)
+      throw new BadRequestException('Price for this date already exists');
+
+    await this.prisma.tariffPrice.create({
+      data: {
+        tariffId: id,
+        price: dto.price,
+        effectiveFrom,
+        createdById: userId,
+      },
+    });
+    return toTariffView(await this.get(id), kyivToday());
+  }
+
+  async delete(id: string) {
+    await this.get(id);
+    const [enrollments, visits] = await Promise.all([
+      this.prisma.enrollment.count({ where: { tariffId: id } }),
+      this.prisma.adaptationVisit.count({ where: { tariffId: id } }),
+    ]);
+    if (enrollments + visits > 0)
+      throw new BadRequestException('Cannot delete: tariff is in use');
+
+    await this.prisma.$transaction([
+      this.prisma.tariffPrice.deleteMany({ where: { tariffId: id } }),
+      this.prisma.tariff.delete({ where: { id } }),
+    ]);
+    return { message: 'Tariff deleted' };
+  }
+}
