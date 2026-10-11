@@ -162,7 +162,7 @@ model Charge {
 
   voidedAt    DateTime?
   voidedById  String?
-  voidedBy    User?           @relation("ChargeVoidedBy", fields: [voidedById], references: [id])
+  voidedBy    User?           @relation("ChargeVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   voidReason  String?
 
   allocations Allocation[]
@@ -185,12 +185,12 @@ model Payment {
   externalId  String?          @unique
 
   createdById String?
-  createdBy   User?            @relation("PaymentCreatedBy", fields: [createdById], references: [id])
+  createdBy   User?            @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt   DateTime         @default(now())
 
   voidedAt    DateTime?
   voidedById  String?
-  voidedBy    User?            @relation("PaymentVoidedBy", fields: [voidedById], references: [id])
+  voidedBy    User?            @relation("PaymentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   voidReason  String?
 
   allocations Allocation[]
@@ -212,7 +212,7 @@ model Allocation {
 
   voidedAt    DateTime?
   voidedById  String?
-  voidedBy    User?     @relation("AllocationVoidedBy", fields: [voidedById], references: [id])
+  voidedBy    User?     @relation("AllocationVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   voidReason  String?
 
   @@index([paymentId])
