@@ -27,6 +27,8 @@ const mockPrisma = {
   },
   enrollment: { count: jest.fn() },
   adaptationVisit: { count: jest.fn() },
+  package: { count: jest.fn() },
+  classGroup: { count: jest.fn() },
   $transaction: jest.fn(),
 };
 
@@ -36,6 +38,7 @@ const tariff = (over: Record<string, unknown> = {}) => ({
   category: FinanceCategory.tuition,
   unit: TariffUnit.month,
   packageSize: null,
+  validityDays: null,
   billingMode: BillingMode.calendar_full,
   isActive: true,
   prices: [
@@ -96,6 +99,7 @@ describe('TariffsService', () => {
           category: FinanceCategory.tuition,
           unit: TariffUnit.month,
           packageSize: null,
+          validityDays: null,
           billingMode: BillingMode.calendar_full,
           prices: {
             create: {
@@ -194,6 +198,8 @@ describe('TariffsService', () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
       mockPrisma.enrollment.count.mockResolvedValue(1);
       mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.package.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
 
       await expect(service.delete('t1')).rejects.toThrow(
         'Cannot delete: tariff is in use',
@@ -205,6 +211,8 @@ describe('TariffsService', () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
       mockPrisma.enrollment.count.mockResolvedValue(0);
       mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.package.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
 
       await expect(service.delete('t1')).resolves.toEqual({
         message: 'Tariff deleted',

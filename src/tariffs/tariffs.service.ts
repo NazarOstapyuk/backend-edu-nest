@@ -26,6 +26,7 @@ export const toTariffView = (tariff: LoadedTariff, today: Date) => {
     category: tariff.category,
     unit: tariff.unit,
     packageSize: tariff.packageSize,
+    validityDays: tariff.validityDays,
     billingMode: tariff.billingMode,
     isActive: tariff.isActive,
     currentPrice: current ? formatMoney(current) : null,
@@ -81,6 +82,8 @@ export class TariffsService {
         unit: dto.unit,
         packageSize:
           dto.unit === TariffUnit.package ? (dto.packageSize ?? null) : null,
+        validityDays:
+          dto.unit === TariffUnit.package ? (dto.validityDays ?? null) : null,
         billingMode: dto.billingMode,
         prices: {
           create: {
@@ -119,6 +122,7 @@ export class TariffsService {
         name: dto.name,
         billingMode: dto.billingMode,
         isActive: dto.isActive,
+        validityDays: dto.validityDays,
       },
       include: tariffInclude,
     });
@@ -150,11 +154,15 @@ export class TariffsService {
 
   async delete(id: string) {
     await this.get(id);
-    const [enrollments, visits] = await Promise.all([
+    const [enrollments, visits, packages, groups] = await Promise.all([
       this.prisma.enrollment.count({ where: { tariffId: id } }),
       this.prisma.adaptationVisit.count({ where: { tariffId: id } }),
+      this.prisma.package.count({ where: { tariffId: id } }),
+      this.prisma.classGroup.count({
+        where: { OR: [{ singleTariffId: id }, { packageTariffId: id }] },
+      }),
     ]);
-    if (enrollments + visits > 0)
+    if (enrollments + visits + packages + groups > 0)
       throw new BadRequestException('Cannot delete: tariff is in use');
 
     await this.prisma.$transaction([

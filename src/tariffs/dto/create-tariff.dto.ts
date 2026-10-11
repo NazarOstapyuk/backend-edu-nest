@@ -32,6 +32,12 @@ export class CreateTariffDto {
   @IsOptional()
   packageSize?: number;
 
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  @IsOptional()
+  validityDays?: number;
+
   @IsEnum(BillingMode)
   billingMode: BillingMode;
 
