@@ -12,6 +12,7 @@ import { SubscriptionTypesModule } from './subscription-types/subscription-types
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { FinanceModule } from './finance/finance.module';
 import { TariffsModule } from './tariffs/tariffs.module';
+import { ClassesModule } from './classes/classes.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { UsersModule } from './users/users.module';
     SubscriptionsModule,
     FinanceModule,
     TariffsModule,
+    ClassesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

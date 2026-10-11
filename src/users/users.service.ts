@@ -72,6 +72,19 @@ export class UsersService {
       this.prisma.enrollment.count({ where: { createdById: id } }),
       this.prisma.enrollmentAdjustment.count({ where: author }),
       this.prisma.adaptationVisit.count({ where: author }),
+      this.prisma.classGroupMember.count({ where: { createdById: id } }),
+      this.prisma.package.count({
+        where: {
+          OR: [{ createdById: id }, { voidedById: id }, { reconciledById: id }],
+        },
+      }),
+      this.prisma.packageExtension.count({ where: { createdById: id } }),
+      this.prisma.lesson.count({ where: { conductedById: id } }),
+      this.prisma.lessonAttendance.count({
+        where: { OR: [{ markedById: id }, { voidedById: id }] },
+      }),
+      this.prisma.sessionUsage.count({ where: { voidedById: id } }),
+      this.prisma.classGroup.count({ where: { teachers: { some: { id } } } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

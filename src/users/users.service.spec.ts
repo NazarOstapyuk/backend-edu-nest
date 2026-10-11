@@ -24,6 +24,13 @@ const mockPrisma = {
   enrollment: { count: jest.fn() },
   enrollmentAdjustment: { count: jest.fn() },
   adaptationVisit: { count: jest.fn() },
+  classGroupMember: { count: jest.fn() },
+  package: { count: jest.fn() },
+  packageExtension: { count: jest.fn() },
+  lesson: { count: jest.fn() },
+  lessonAttendance: { count: jest.fn() },
+  sessionUsage: { count: jest.fn() },
+  classGroup: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -115,6 +122,13 @@ describe('UsersService', () => {
       mockPrisma.enrollment.count.mockResolvedValue(0);
       mockPrisma.enrollmentAdjustment.count.mockResolvedValue(0);
       mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.classGroupMember.count.mockResolvedValue(0);
+      mockPrisma.package.count.mockResolvedValue(0);
+      mockPrisma.packageExtension.count.mockResolvedValue(0);
+      mockPrisma.lesson.count.mockResolvedValue(0);
+      mockPrisma.lessonAttendance.count.mockResolvedValue(0);
+      mockPrisma.sessionUsage.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
     });
 
     it('deletes a user without financial records', async () => {
@@ -132,6 +146,27 @@ describe('UsersService', () => {
       mockPrisma.allocation.count.mockResolvedValue(1);
 
       await expect(service.delete('u1')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user marked lessons', async () => {
+      mockPrisma.lessonAttendance.count.mockResolvedValue(2);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user teaches class groups', async () => {
+      mockPrisma.classGroup.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.classGroup.count).toHaveBeenCalledWith({
+        where: { teachers: { some: { id: 'u1' } } },
+      });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
 
