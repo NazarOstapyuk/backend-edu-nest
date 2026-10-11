@@ -49,6 +49,16 @@ model User {
   adjustmentsVoided    EnrollmentAdjustment[] @relation("AdjustmentVoidedBy")
   adaptationsCreated   AdaptationVisit[]      @relation("AdaptationCreatedBy")
   adaptationsVoided    AdaptationVisit[]      @relation("AdaptationVoidedBy")
+  classGroupsTeaching ClassGroup[]       @relation("ClassGroupTeachers")
+  membersCreated      ClassGroupMember[] @relation("MemberCreatedBy")
+  packagesCreated     Package[]          @relation("PackageCreatedBy")
+  packagesVoided      Package[]          @relation("PackageVoidedBy")
+  packagesReconciled  Package[]          @relation("PackageReconciledBy")
+  extensionsCreated   PackageExtension[] @relation("ExtensionCreatedBy")
+  lessonsConducted    Lesson[]           @relation("LessonConductedBy")
+  attendancesMarked   LessonAttendance[] @relation("AttendanceMarkedBy")
+  attendancesVoided   LessonAttendance[] @relation("AttendanceVoidedBy")
+  usagesVoided        SessionUsage[]     @relation("UsageVoidedBy")
 }
 
 model Group {
@@ -76,6 +86,9 @@ model Child {
   payments      Payment[]
   enrollments      Enrollment[]
   adaptationVisits AdaptationVisit[]
+  classMemberships  ClassGroupMember[]
+  lessonAttendances LessonAttendance[]
+  packages          Package[]
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -111,6 +124,7 @@ model Subscription {
   updatedAt          DateTime           @updatedAt
 
   attendances        Attendance[]
+  package            Package?
 }
 
 model Attendance {
@@ -137,6 +151,7 @@ enum ChargeSource {
   monthly
   adaptation
   extra_package
+  extra_session
   meals
 }
 
@@ -176,6 +191,8 @@ model Charge {
   allocations Allocation[]
   billedPeriod    BilledPeriod?
   adaptationVisit AdaptationVisit?
+  package         Package?        @relation("PackageCharge")
+  sessionUsage    SessionUsage?   @relation("SessionCharge")
 
   @@index([childId, category])
   @@index([sourceType, sourceId])
@@ -256,6 +273,7 @@ model Tariff {
   unit             TariffUnit
   packageSize      Int?
   billingMode      BillingMode       @default(calendar_full)
+  validityDays     Int?
   isActive         Boolean           @default(true)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -263,6 +281,9 @@ model Tariff {
   prices           TariffPrice[]
   enrollments      Enrollment[]
   adaptationVisits AdaptationVisit[]
+  singleGroups     ClassGroup[]      @relation("GroupSingleTariff")
+  packageGroups    ClassGroup[]      @relation("GroupPackageTariff")
+  packages         Package[]
 }
 
 model TariffPrice {
@@ -365,4 +386,173 @@ model AppSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+enum MissedLessonRule {
+  no_charge
+  always
+  unexcused_only
+}
+
+enum ClassFormat {
+  individual
+  group
+}
+
+enum AttendanceStatus {
+  present
+  absent_excused
+  absent_unexcused
+}
+
+model Direction {
+  id         String           @id @default(uuid())
+  name       String           @unique
+  missedRule MissedLessonRule @default(no_charge)
+  isActive   Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  groups     ClassGroup[]
+  packages   Package[]
+}
+
+model ClassGroup {
+  id              String             @id @default(uuid())
+  name            String
+  directionId     String
+  direction       Direction          @relation(fields: [directionId], references: [id])
+  format          ClassFormat
+  singleTariffId  String?
+  singleTariff    Tariff?            @relation("GroupSingleTariff", fields: [singleTariffId], references: [id], onDelete: Restrict)
+  packageTariffId String?
+  packageTariff   Tariff?            @relation("GroupPackageTariff", fields: [packageTariffId], references: [id], onDelete: Restrict)
+  isActive        Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  teachers        User[]             @relation("ClassGroupTeachers")
+  members         ClassGroupMember[]
+  lessons         Lesson[]
+
+  @@unique([directionId, name])
+}
+
+model ClassGroupMember {
+  id           String     @id @default(uuid())
+  classGroupId String
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id])
+  childId      String
+  child        Child      @relation(fields: [childId], references: [id])
+  startDate    DateTime   @db.Date
+  endDate      DateTime?  @db.Date
+  createdById  String
+  createdBy    User       @relation("MemberCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime   @default(now())
+
+  @@index([classGroupId])
+  @@index([childId])
+}
+
+model Package {
+  id                   String             @id @default(uuid())
+  childId              String
+  child                Child              @relation(fields: [childId], references: [id])
+  directionId          String
+  direction            Direction          @relation(fields: [directionId], references: [id])
+  tariffId             String?
+  tariff               Tariff?            @relation(fields: [tariffId], references: [id], onDelete: Restrict)
+  sessionsTotal        Int
+  usedBefore           Int                @default(0)
+  purchaseDate         DateTime           @db.Date
+  expiresAt            DateTime?          @db.Date
+  chargeId             String?            @unique
+  charge               Charge?            @relation("PackageCharge", fields: [chargeId], references: [id], onDelete: Restrict)
+  legacySubscriptionId String?            @unique
+  legacySubscription   Subscription?      @relation(fields: [legacySubscriptionId], references: [id], onDelete: Restrict)
+  needsReconciliation  Boolean            @default(false)
+  reconciledAt         DateTime?
+  reconciledById       String?
+  reconciledBy         User?              @relation("PackageReconciledBy", fields: [reconciledById], references: [id], onDelete: Restrict)
+  reconciliationNote   String?
+  createdById          String?
+  createdBy            User?              @relation("PackageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt            DateTime           @default(now())
+
+  voidedAt             DateTime?
+  voidedById           String?
+  voidedBy             User?              @relation("PackageVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason           String?
+
+  extensions           PackageExtension[]
+  usages               SessionUsage[]
+
+  @@index([childId, directionId])
+}
+
+model PackageExtension {
+  id                String    @id @default(uuid())
+  packageId         String
+  package           Package   @relation(fields: [packageId], references: [id])
+  previousExpiresAt DateTime? @db.Date
+  newExpiresAt      DateTime  @db.Date
+  reason            String
+  createdById       String
+  createdBy         User      @relation("ExtensionCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime  @default(now())
+}
+
+model Lesson {
+  id            String             @id @default(uuid())
+  classGroupId  String
+  classGroup    ClassGroup         @relation(fields: [classGroupId], references: [id])
+  date          DateTime           @db.Date
+  conductedById String
+  conductedBy   User               @relation("LessonConductedBy", fields: [conductedById], references: [id])
+  createdAt     DateTime           @default(now())
+
+  attendances   LessonAttendance[]
+
+  @@unique([classGroupId, date])
+}
+
+model LessonAttendance {
+  id         String           @id @default(uuid())
+  lessonId   String
+  lesson     Lesson           @relation(fields: [lessonId], references: [id])
+  childId    String
+  child      Child            @relation(fields: [childId], references: [id])
+  status     AttendanceStatus
+  isGuest    Boolean          @default(false)
+  markedById String
+  markedBy   User             @relation("AttendanceMarkedBy", fields: [markedById], references: [id])
+  markedAt   DateTime         @default(now())
+
+  voidedAt   DateTime?
+  voidedById String?
+  voidedBy   User?            @relation("AttendanceVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason String?
+
+  usage      SessionUsage?
+
+  @@index([lessonId])
+  @@index([childId])
+}
+
+model SessionUsage {
+  id           String           @id @default(uuid())
+  attendanceId String           @unique
+  attendance   LessonAttendance @relation(fields: [attendanceId], references: [id])
+  packageId    String?
+  package      Package?         @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  chargeId     String?          @unique
+  charge       Charge?          @relation("SessionCharge", fields: [chargeId], references: [id], onDelete: Restrict)
+  createdAt    DateTime         @default(now())
+
+  voidedAt     DateTime?
+  voidedById   String?
+  voidedBy     User?            @relation("UsageVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason   String?
+
+  @@index([packageId])
 }
