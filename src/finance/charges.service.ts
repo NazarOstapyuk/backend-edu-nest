@@ -7,6 +7,7 @@ import { ChargeSource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChargeDto } from './dto/create-charge.dto';
 import { money } from './finance-calc';
+import { voidChargeInTx } from './void-charge';
 
 @Injectable()
 export class ChargesService {
@@ -45,22 +46,8 @@ export class ChargesService {
   }
 
   async void(id: string, reason: string, userId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Charge" WHERE id = ${id} FOR UPDATE`;
-      const charge = await tx.charge.findUnique({ where: { id } });
-      if (!charge) throw new NotFoundException('Charge not found');
-      if (charge.voidedAt) throw new BadRequestException('Charge is voided');
-
-      const data = {
-        voidedAt: new Date(),
-        voidedById: userId,
-        voidReason: reason,
-      };
-      await tx.allocation.updateMany({
-        where: { chargeId: id, voidedAt: null },
-        data,
-      });
-      return tx.charge.update({ where: { id }, data });
-    });
+    return this.prisma.$transaction((tx) =>
+      voidChargeInTx(tx, id, reason, userId),
+    );
   }
 }
