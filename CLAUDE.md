@@ -58,9 +58,21 @@ Roles (`Role` enum): `root`, `admin`, `teacher`, `parent`. Rules enforced in ser
 
 ### Domain: subscriptions
 
-- `Subscription` snapshots `pricePerSession` from its `SubscriptionType` at creation; `totalPrice = pricePerSession * totalSessions`. Changing a type's price does not affect existing subscriptions.
+- `POST /subscriptions` takes `childIds[]` and creates one subscription per child. `Subscription` snapshots `pricePerSession` from its `SubscriptionType`; `totalPrice = pricePerSession * totalSessions`. `PATCH /subscriptions/:id` changes `totalSessions` of an active subscription (not below sessions used) and recalculates `remainingSessions`/`totalPrice`. `DELETE /subscriptions/:id` exists but fails while attendances exist (FK `RESTRICT`).
 - `SubscriptionsModule` hosts three controllers: `/subscriptions`, nested `/subscriptions/:subscriptionId/attendances`, and `/children/:childId/subscriptions` (route shared with `ChildrenController` prefix).
 - Creating an attendance decrements `remainingSessions` in a `$transaction`; hitting 0 sets status `finished`. Deleting an attendance increments it back and reverts `finished` to `active`. Only `active` subscriptions accept attendance; only `active` ones can be cancelled.
+
+### Domain: finance
+
+Spec: `docs/superpowers/specs/2026-10-11-finance-design.md`. Per-child ledger in `src/finance/`:
+
+- `Charge` (owed), `Payment` (received), `Allocation` (payment part → charge). Balances are never stored; `finance-calc.ts` computes them, `finance-view.ts` shapes responses.
+- Records are never edited or deleted: void with a reason (`voidedAt/voidedById/voidReason`). Voiding a charge or payment voids its active allocations. Only non-voided records and `confirmed` payments count.
+- A categorised payment covers only charges of its category; a payment without category covers any. Leftover = prepayment of the category / unallocated.
+- Money is `Prisma.Decimal` in code and 2-decimal strings in the API. Never use JS `number` for money.
+- Allocation and voiding lock rows with `SELECT ... FOR UPDATE` inside `$transaction` before reading sums.
+- Every mutation endpoint returns the child's full `ChildFinance` view.
+- Children/users with finance records cannot be deleted (400).
 
 ## Module conventions
 
