@@ -31,6 +31,7 @@ const mockPrisma = {
   charge: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   allocation: { updateMany: jest.fn() },
   $queryRaw: jest.fn(),
+  $executeRaw: jest.fn(),
   $transaction: jest.fn(),
 };
 
@@ -82,7 +83,8 @@ describe('LessonsService.mark', () => {
       fn(mockPrisma),
     );
     mockPrisma.classGroup.findUnique.mockResolvedValue(group());
-    mockPrisma.lesson.upsert.mockResolvedValue({ id: 'l1' });
+    mockPrisma.$executeRaw.mockResolvedValue(1);
+    mockPrisma.$queryRaw.mockResolvedValue([{ id: 'l1' }]);
     mockPrisma.lessonAttendance.findMany.mockResolvedValue([]);
     mockPrisma.lessonAttendance.create.mockResolvedValue({ id: 'a-new' });
     mockPrisma.classGroupMember.findMany.mockResolvedValue([{ childId: 'c1' }]);

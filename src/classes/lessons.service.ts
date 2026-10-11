@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -165,12 +166,11 @@ export class LessonsService {
     const reason = dto.reason?.trim() ?? '';
 
     return this.prisma.$transaction(async (tx) => {
-      const lesson = await tx.lesson.upsert({
-        where: { classGroupId_date: { classGroupId: groupId, date } },
-        create: { classGroupId: groupId, date, conductedById: user.id },
-        update: {},
-      });
-      await tx.$queryRaw`SELECT id FROM "Lesson" WHERE id = ${lesson.id} FOR UPDATE`;
+      await tx.$executeRaw`INSERT INTO "Lesson" ("id", "classGroupId", "date", "conductedById") VALUES (${randomUUID()}, ${groupId}, ${date}::date, ${user.id}) ON CONFLICT ("classGroupId", "date") DO NOTHING`;
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "Lesson" WHERE "classGroupId" = ${groupId} AND "date" = ${date}::date FOR UPDATE`;
+      const lesson = { id: locked[0].id };
       const active = await tx.lessonAttendance.findMany({
         where: { lessonId: lesson.id, voidedAt: null },
         include: { usage: true },
