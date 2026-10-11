@@ -118,6 +118,7 @@ describe('BillingService', () => {
         problems: [],
         failed: [],
       });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
       const firstCharge = firstArg(mockPrisma.charge.create).data;
       expect(firstCharge).toMatchObject({
         childId: 'child-1',
@@ -300,6 +301,9 @@ describe('BillingService', () => {
         childId: 'child-1',
       });
 
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.charge.update.mock.invocationCallOrder[0],
+      );
       expect(mockPrisma.charge.update).toHaveBeenCalledWith({
         where: { id: 'old-charge' },
         data: {
@@ -350,6 +354,18 @@ describe('BillingService', () => {
         chargeId: null,
         note: 'after end date',
       });
+    });
+
+    it('rejects a billed period that is off the current schedule', async () => {
+      mockPrisma.billedPeriod.findUnique.mockResolvedValue(
+        billed({ periodStart: day('2026-10-20') }),
+      );
+
+      await expect(service.recalculate('bp1', 'x', 'u1')).rejects.toThrow(
+        'Billed period no longer matches the enrollment schedule',
+      );
+      expect(mockPrisma.charge.update).not.toHaveBeenCalled();
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException for an unknown billed period', async () => {

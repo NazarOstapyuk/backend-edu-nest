@@ -100,6 +100,19 @@ export class TariffsService {
     if (dto.name !== undefined && dto.name !== tariff.name)
       await this.assertNameFree(dto.name);
 
+    if (
+      dto.billingMode !== undefined &&
+      dto.billingMode !== tariff.billingMode
+    ) {
+      const enrollments = await this.prisma.enrollment.count({
+        where: { tariffId: id },
+      });
+      if (enrollments > 0)
+        throw new BadRequestException(
+          'Cannot change billing mode: tariff has enrollments',
+        );
+    }
+
     const updated = await this.prisma.tariff.update({
       where: { id },
       data: {

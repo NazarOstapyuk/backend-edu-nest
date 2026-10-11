@@ -165,6 +165,30 @@ describe('TariffsService', () => {
     });
   });
 
+  describe('update', () => {
+    it('refuses to change billing mode when enrollments exist', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.enrollment.count.mockResolvedValue(2);
+
+      await expect(
+        service.update('t1', { billingMode: BillingMode.anniversary }),
+      ).rejects.toThrow('Cannot change billing mode: tariff has enrollments');
+      expect(mockPrisma.tariff.update).not.toHaveBeenCalled();
+    });
+
+    it('changes billing mode when there are no enrollments', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.tariff.update.mockResolvedValue(
+        tariff({ billingMode: BillingMode.anniversary }),
+      );
+
+      await service.update('t1', { billingMode: BillingMode.anniversary });
+
+      expect(mockPrisma.tariff.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('delete', () => {
     it('refuses to delete a tariff in use', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());

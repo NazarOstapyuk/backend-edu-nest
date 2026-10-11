@@ -87,7 +87,9 @@ export const toEnrollmentView = (e: LoadedEnrollment, today: Date) => ({
         ? chargeState(p.charge.amount, activeAllocated(p.charge.allocations))
         : null,
     needsRecalculation:
-      e.endDate !== null && p.periodEnd.getTime() > e.endDate.getTime(),
+      p.chargeId !== null &&
+      e.endDate !== null &&
+      p.periodEnd.getTime() > e.endDate.getTime(),
   })),
   nextPeriod: toNextPeriod(
     nextPeriod(

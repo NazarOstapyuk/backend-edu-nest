@@ -168,15 +168,27 @@ export class BillingService {
       const result = computePeriod(input, range);
       if (!result.ok) throw new BadRequestException('No price for this date');
       bill = result.bill;
+    } else if (
+      !enrollment.endDate ||
+      period.periodStart.getTime() <= enrollment.endDate.getTime()
+    ) {
+      throw new BadRequestException(
+        'Billed period no longer matches the enrollment schedule',
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
-      if (period.chargeId) {
+      await tx.$queryRaw`SELECT id FROM "BilledPeriod" WHERE id = ${billedPeriodId} FOR UPDATE`;
+      const current = await tx.billedPeriod.findUnique({
+        where: { id: billedPeriodId },
+      });
+      if (!current) throw new NotFoundException('Billed period not found');
+      if (current.chargeId) {
         const old = await tx.charge.findUnique({
-          where: { id: period.chargeId },
+          where: { id: current.chargeId },
         });
         if (old && !old.voidedAt)
-          await voidChargeInTx(tx, period.chargeId, reason, userId);
+          await voidChargeInTx(tx, current.chargeId, reason, userId);
       }
       const charge =
         bill && !bill.zero
