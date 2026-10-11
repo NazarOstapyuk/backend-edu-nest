@@ -37,6 +37,12 @@ model User {
   updatedAt    DateTime @updatedAt
   groups       Group[]  @relation("GroupTeachers")
   children     Child[]  @relation("ChildParents")
+  chargesCreated     Charge[]     @relation("ChargeCreatedBy")
+  chargesVoided      Charge[]     @relation("ChargeVoidedBy")
+  paymentsCreated    Payment[]    @relation("PaymentCreatedBy")
+  paymentsVoided     Payment[]    @relation("PaymentVoidedBy")
+  allocationsCreated Allocation[] @relation("AllocationCreatedBy")
+  allocationsVoided  Allocation[] @relation("AllocationVoidedBy")
 }
 
 model Group {
@@ -60,6 +66,8 @@ model Child {
 
   parents       User[]         @relation("ChildParents")
   subscriptions Subscription[]
+  charges       Charge[]
+  payments      Payment[]
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -106,4 +114,107 @@ model Attendance {
   note           String?
 
   createdAt      DateTime     @default(now())
+}
+
+enum FinanceCategory {
+  tuition
+  adaptation
+  extra_classes
+  meals
+}
+
+enum ChargeSource {
+  manual
+  opening_balance
+  monthly
+  adaptation
+  extra_package
+  meals
+}
+
+enum PaymentMethod {
+  cash
+  bank_transfer
+  online
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  failed
+}
+
+model Charge {
+  id          String          @id @default(uuid())
+  childId     String
+  child       Child           @relation(fields: [childId], references: [id])
+  category    FinanceCategory
+  amount      Decimal         @db.Decimal(10, 2)
+  description String
+  periodStart DateTime?       @db.Date
+  periodEnd   DateTime?       @db.Date
+  sourceType  ChargeSource    @default(manual)
+  sourceId    String?
+
+  createdById String
+  createdBy   User            @relation("ChargeCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?           @relation("ChargeVoidedBy", fields: [voidedById], references: [id])
+  voidReason  String?
+
+  allocations Allocation[]
+
+  @@index([childId, category])
+  @@index([sourceType, sourceId])
+}
+
+model Payment {
+  id          String           @id @default(uuid())
+  childId     String
+  child       Child            @relation(fields: [childId], references: [id])
+  amount      Decimal          @db.Decimal(10, 2)
+  category    FinanceCategory?
+  method      PaymentMethod
+  status      PaymentStatus    @default(confirmed)
+  reference   String
+  receivedAt  DateTime
+  note        String?
+  externalId  String?          @unique
+
+  createdById String?
+  createdBy   User?            @relation("PaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?            @relation("PaymentVoidedBy", fields: [voidedById], references: [id])
+  voidReason  String?
+
+  allocations Allocation[]
+
+  @@index([childId])
+}
+
+model Allocation {
+  id          String    @id @default(uuid())
+  paymentId   String
+  payment     Payment   @relation(fields: [paymentId], references: [id])
+  chargeId    String
+  charge      Charge    @relation(fields: [chargeId], references: [id])
+  amount      Decimal   @db.Decimal(10, 2)
+
+  createdById String
+  createdBy   User      @relation("AllocationCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?     @relation("AllocationVoidedBy", fields: [voidedById], references: [id])
+  voidReason  String?
+
+  @@index([paymentId])
+  @@index([chargeId])
 }
