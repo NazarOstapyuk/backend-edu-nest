@@ -53,6 +53,7 @@ export class ChildrenService {
       include: {
         group: true,
         parents: { omit: { password: true, refreshToken: true } },
+        subscriptions: { include: { subscriptionType: true }, orderBy: { createdAt: 'desc' } },
       },
     });
   }
@@ -62,6 +63,7 @@ export class ChildrenService {
       include: {
         group: true,
         parents: { omit: { password: true, refreshToken: true } },
+        subscriptions: { include: { subscriptionType: true }, orderBy: { createdAt: 'desc' } },
       },
     });
   }
@@ -92,6 +94,7 @@ export class ChildrenService {
       include: {
         group: true,
         parents: { omit: { password: true, refreshToken: true } },
+        subscriptions: { include: { subscriptionType: true }, orderBy: { createdAt: 'desc' } },
       },
     });
   }
