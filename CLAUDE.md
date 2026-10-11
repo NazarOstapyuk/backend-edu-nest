@@ -83,6 +83,12 @@ Frontend repo: `frontend-edu-nest` (https://github.com/NazarOstapyuk/frontend-ed
 
 - Changing an endpoint path, method, request DTO, response shape, status code or error message breaks the frontend. List all API changes in the final summary so the frontend can be updated.
 - Don't edit the frontend repo from this session unless asked. If asked, read its CLAUDE.md first.
+- `POST /auth/login` (body `{ login, password }`):
+  - Success: `201`, body `{ message: 'Login successful' }`, `accessToken` + `refreshToken` cookies set.
+  - Unknown login or wrong password: `401` `{ statusCode: 401, message: 'Invalid credentials', error: 'Unauthorized' }` (same message for both, don't reveal which).
+  - Inactive user (correct login): `401` `{ statusCode: 401, message: 'Account is disabled', error: 'Unauthorized' }`.
+  - Empty/missing `login` or `password`: `400` ValidationPipe error, `message` is an array.
+- `POST /auth/logout` is behind `JwtAuthGuard`: with an expired access cookie it returns `401 Unauthorized` and does not clear cookies or the stored refresh token.
 - `POST /auth/refresh` (used by the frontend's planned refresh-in-interceptor):
   - Success: `201` (Nest default for POST), body `{ message: 'Token refreshed' }`, new `accessToken` + `refreshToken` cookies set (refresh token rotated).
   - Missing, invalid, expired or already-rotated refresh cookie, or inactive user: `401` `{ statusCode: 401, message: 'Invalid refresh token', error: 'Unauthorized' }`. Cookies are not cleared. The client must not retry refresh on this 401.
