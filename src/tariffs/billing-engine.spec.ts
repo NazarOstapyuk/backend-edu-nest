@@ -238,6 +238,26 @@ describe('computePeriod', () => {
     expect(amountFor(spanning, '2026-12-01')).toBe('10500.00');
   });
 
+  it('counts pause days only within the billed period in calendar_full mode', () => {
+    const i = input({
+      mode: BillingMode.calendar_full,
+      startDate: day('2026-10-15'),
+      adjustments: [
+        adj(AdjustmentType.pause, null, '2026-10-01', '2026-10-20'),
+      ],
+    });
+    expect(amountFor(i, '2026-10-15')).toBe('12500.00');
+  });
+
+  it('counts pause days only within the billed period in anniversary mode', () => {
+    const i = input({
+      adjustments: [
+        adj(AdjustmentType.pause, null, '2026-10-01', '2026-10-20'),
+      ],
+    });
+    expect(amountFor(i, '2026-10-15')).toBe('12500.00');
+  });
+
   it('prorates the last period up to the end date', () => {
     const anniversary = input({ endDate: day('2026-11-30') });
     expect(amountFor(anniversary, '2026-11-15')).toBe('8266.67');

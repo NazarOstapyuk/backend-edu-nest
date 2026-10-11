@@ -152,7 +152,7 @@ export function computePeriod(
   const pausedDays = input.adjustments
     .filter((a) => a.type === AdjustmentType.pause && !a.voidedAt)
     .reduce((sum, a) => {
-      const from = maxDay(a.startDate, windowStart);
+      const from = maxDay(a.startDate, periodStart);
       const to = minDay(a.endDate ?? periodEnd, periodEnd);
       return time(from) <= time(to) ? sum + dayCount(from, to) : sum;
     }, 0);
