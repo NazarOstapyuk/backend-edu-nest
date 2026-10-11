@@ -74,6 +74,20 @@ Spec: `docs/superpowers/specs/2026-10-11-finance-design.md`. Per-child ledger in
 - Every mutation endpoint returns the child's full `ChildFinance` view.
 - Children/users with finance records cannot be deleted (400).
 
+### Domain: tariffs and billing
+
+Spec: `docs/superpowers/specs/2026-10-11-tariffs-design.md`. Code in `src/tariffs/`:
+
+- `Tariff` (unit month/hour/session/package, default billing mode) with dated `TariffPrice` history; a period uses the price effective on its start date.
+- `Enrollment` (child on a monthly tariff, start/end date, optional own billing mode) with `EnrollmentAdjustment` conditions (`custom_price`, `discount_percent`, `discount_amount`, `pause`); conditions are voided, never edited.
+- `billing-engine.ts` is pure (periods, proration, discounts, pauses); `dates.ts` handles UTC-midnight days and `kyivToday()`. Keep business logic there and test it without mocks.
+- `BilledPeriod` is unique per `(enrollmentId, periodStart)`; billing creates the Part 1 `Charge` (`sourceType = monthly`) and the billed period in one transaction; a unique violation means "already billed".
+- Billing runs daily at 03:00 Europe/Kyiv (`BillingScheduler`, as the root user) and via `POST /billing/run` / `POST /enrollments/:id/bill`. Lead days = `AppSetting` `chargeLeadDays` (default 5).
+- Past periods are never changed automatically; `POST /billed-periods/:id/recalculate` voids the old charge (via `voidChargeInTx`) and recreates it.
+- `AdaptationVisit` charges `hours × rate` immediately (`sourceType = adaptation`); voiding the visit voids its charge.
+- A tariff's billingMode cannot change while it has enrollments (400) — changing it would shift the period grid and double-bill; create a new tariff instead.
+- Recalculation zeroes a period only when it starts after the enrollment endDate; an off-grid billed period returns 400 "Billed period no longer matches the enrollment schedule".
+
 ## Module conventions
 
 **Reference module: `src/children/`** (module + controller + service + `dto/` + `service.spec.ts`). For transactions and nested routes see `src/subscriptions/`. Copy these patterns, don't invent new ones.
