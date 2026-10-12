@@ -15,6 +15,7 @@ import { TariffsModule } from './tariffs/tariffs.module';
 import { ClassesModule } from './classes/classes.module';
 import { ParentCabinetModule } from './parent-cabinet/parent-cabinet.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { TimetableModule } from './timetable/timetable.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { UsersModule } from './users/users.module';
     ClassesModule,
     ParentCabinetModule,
     AttendanceModule,
+    TimetableModule,
   ],
   controllers: [AppController],
   providers: [AppService],

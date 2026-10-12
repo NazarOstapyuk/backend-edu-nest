@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { GroupKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,8 @@ const mockPrisma = {
   user: { findMany: jest.fn() },
   dailyAttendance: { count: jest.fn() },
   calendarDay: { count: jest.fn() },
+  bellSchedule: { findUnique: jest.fn() },
+  timetableEntry: { findMany: jest.fn() },
 };
 
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
@@ -62,5 +64,33 @@ describe('GroupsService', () => {
     await expect(service.delete('g1')).resolves.toEqual({
       message: 'Group deleted',
     });
+  });
+
+  it('sets a bell schedule only on school classes and checks used periods', async () => {
+    mockPrisma.group.findUnique.mockResolvedValue({
+      id: 'g1',
+      name: '1-А',
+      kind: GroupKind.kindergarten,
+    });
+    mockPrisma.bellSchedule.findUnique.mockResolvedValue({
+      id: 'b1',
+      periods: [{ number: 1 }],
+    });
+    await expect(
+      service.update('g1', { bellScheduleId: 'b1' }),
+    ).rejects.toThrow(new BadRequestException('Not a school class'));
+    mockPrisma.group.findUnique.mockResolvedValue({
+      id: 'g1',
+      name: '1-А',
+      kind: GroupKind.school_class,
+    });
+    mockPrisma.timetableEntry.findMany.mockResolvedValue([{ period: 5 }]);
+    await expect(
+      service.update('g1', { bellScheduleId: 'b1' }),
+    ).rejects.toThrow(new BadRequestException('Bell period is in use'));
+    mockPrisma.bellSchedule.findUnique.mockResolvedValue(null);
+    await expect(
+      service.update('g1', { bellScheduleId: 'b9' }),
+    ).rejects.toThrow(new NotFoundException('Bell schedule not found'));
   });
 });

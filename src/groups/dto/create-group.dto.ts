@@ -21,4 +21,8 @@ export class CreateGroupDto {
   @IsEnum(GroupKind)
   @IsOptional()
   kind?: GroupKind;
+
+  @IsUUID('4')
+  @IsOptional()
+  bellScheduleId?: string | null;
 }

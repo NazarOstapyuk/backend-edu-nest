@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 import { GroupKind } from '@prisma/client';
 
@@ -22,4 +23,9 @@ export class UpdateGroupDto {
   @IsEnum(GroupKind)
   @IsOptional()
   kind?: GroupKind;
+
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('4')
+  @IsOptional()
+  bellScheduleId?: string | null;
 }

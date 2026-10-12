@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { GroupKind, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -32,6 +32,30 @@ export class GroupsService {
     }
   }
 
+  private async assertBellSchedule(
+    groupId: string | null,
+    kind: GroupKind,
+    bellScheduleId: string | null | undefined,
+  ) {
+    if (!bellScheduleId) return;
+    const schedule = await this.prisma.bellSchedule.findUnique({
+      where: { id: bellScheduleId },
+      select: { id: true, periods: { select: { number: true } } },
+    });
+    if (!schedule) throw new NotFoundException('Bell schedule not found');
+    if (kind !== GroupKind.school_class)
+      throw new BadRequestException('Not a school class');
+    if (!groupId) return;
+    const used = await this.prisma.timetableEntry.findMany({
+      where: { timetable: { groupId } },
+      select: { period: true },
+      distinct: ['period'],
+    });
+    const numbers = new Set(schedule.periods.map((p) => p.number));
+    if (used.some((u) => !numbers.has(u.period)))
+      throw new BadRequestException('Bell period is in use');
+  }
+
   async create(dto: CreateGroupDto) {
     const existing = await this.prisma.group.findUnique({
       where: { name: dto.name },
@@ -39,11 +63,17 @@ export class GroupsService {
     if (existing) throw new ConflictException('Group name already taken');
 
     if (dto.teacherIds?.length) await this.validateTeachers(dto.teacherIds);
+    await this.assertBellSchedule(
+      null,
+      dto.kind ?? GroupKind.kindergarten,
+      dto.bellScheduleId,
+    );
 
     return this.prisma.group.create({
       data: {
         name: dto.name,
         kind: dto.kind,
+        bellScheduleId: dto.bellScheduleId,
         teachers: dto.teacherIds
           ? { connect: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
@@ -76,12 +106,18 @@ export class GroupsService {
     }
 
     if (dto.teacherIds?.length) await this.validateTeachers(dto.teacherIds);
+    await this.assertBellSchedule(
+      id,
+      dto.kind ?? group.kind,
+      dto.bellScheduleId,
+    );
 
     return this.prisma.group.update({
       where: { id },
       data: {
         name: dto.name,
         kind: dto.kind,
+        bellScheduleId: dto.bellScheduleId,
         teachers: dto.teacherIds
           ? { set: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
