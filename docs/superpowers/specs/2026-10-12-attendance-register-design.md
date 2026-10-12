@@ -110,13 +110,13 @@ model AbsenceNotice {
   createdById  String
   decidedById  String?
   decidedAt    DateTime?
-  rejectReason String?
+  decisionReason String?
   createdAt    DateTime     @default(now())
 }
 ```
 
 - Relations: `DailyAttendance` → `Child`, `Group`, `AbsenceReason`, `User` (markedBy, voidedBy); `CalendarDay` → `Group?`, `User`; `AbsenceNotice` → `Child`, `AbsenceReason`, `User` (createdBy, decidedBy). FKs `RESTRICT`.
-- Partial unique index (raw SQL in the migration): one active mark per child and day — `CREATE UNIQUE INDEX "DailyAttendance_child_date_active" ON "DailyAttendance"("childId", "date") WHERE "voidedAt" IS NULL;`. Indexes on `(groupId, date)` and `AbsenceNotice(childId, startDate)`.
+- One active mark per child and day is enforced by the save transaction, which locks the children rows (`SELECT id FROM "Child" WHERE id IN (...) ORDER BY id FOR UPDATE`) before reading active marks (Prisma cannot express a partial unique index, and an unknown index would be dropped by the next `migrate dev`). `decisionReason` holds the reject reason or the admin cancel reason. Indexes on `(groupId, date)` and `AbsenceNotice(childId, startDate)`.
 - `CalendarDay`: single day = `startDate = endDate`; `groupId` required iff `scope = group`.
 - Seed (migration SQL): reasons Хвороба (excused, requires document), Сімейні обставини (excused), Відпустка (excused), Без причини (not excused).
 - `AppSetting` key `attendanceEditDays`, default 3 when missing.
@@ -142,11 +142,14 @@ Calendar:
 
 Register:
 - `GET /groups/:id/register?date=YYYY-MM-DD` (root/admin, teacher of the group): `{ date, working, calendarTitle, canEdit, needsReason, children: [{ child: { id, firstName, lastName, middleName }, state, mark: { id, status, reasonId, note, documentProvided, markedBy: { id, firstName, lastName }, createdAt } | null, notice: { id, startDate, endDate, reasonId, comment } | null, documentRequired }] }`. Children = current members of the group plus children with an active mark for that group on that date.
-- `PUT /groups/:id/register` `{ date, reason?, marks: [{ childId, status, reasonId?, note?, documentProvided? }] }` → the day view. One transaction: lock active marks of the group's children for the date (`SELECT ... FOR UPDATE`), skip unchanged rows, void changed ones (`voidReason` = reason or `Corrected`), create new. A unique violation → 409 `Register changed, reload`.
+- `PUT /groups/:id/register` `{ date, reason?, marks: [{ childId, status, reasonId?, note?, documentProvided? }] }` → the day view. One transaction: lock the marked children rows (`ORDER BY id FOR UPDATE`), read their active marks for the date, skip unchanged rows, void changed ones (`voidReason` = reason or `Corrected`), create new. Duplicate `childId` in `marks` → 400 `Duplicate child in marks`.
+- `GET /register/groups` (root/admin/teacher): groups the user may open (`{ id, name, kind }`; teachers: own groups).
+- `GET /register/settings` (root/admin/teacher) → `{ editDays }`; `PATCH /register/settings` `{ editDays }` (root/admin, integer 0–30, else 400 `Edit days must be between 0 and 30`).
+- Unknown group → 404 `Group not found`; `date`/`month` format errors → 400 `Invalid date` / `Invalid month`.
 - `GET /groups/:id/register/month?month=YYYY-MM` (same roles): `{ month, days: [{ date, working, title }], children: [{ child, days: [{ date, state, status, reasonId }], summary }] }`.
 
 Rules (register):
-- Teacher not teaching the group → 403 `Forbidden` (same pattern as classes `assertGroupAccess`).
+- Teacher not teaching the group → 403 `Not your group` (same pattern as classes `assertGroupAccess`).
 - Date after Kyiv today → 400 `Cannot mark future days`.
 - Non-working day → 400 `Not a working day`.
 - Teacher outside the window (`today − attendanceEditDays`) → 403 `Edit window has passed`. Admin outside the window without `reason` → 400 `Reason is required`.
@@ -161,11 +164,13 @@ Parent cabinet (role parent, ownership as Part 6, foreign → 404 `Child not fou
 - `GET /me/children/:id/absence-notices` (newest first), `POST /me/children/:id/absence-notices/:noticeId/cancel` (pending only, else 400 `Notice already decided`).
 - `GET /me/children/:id/register?month=YYYY-MM` → `{ month, days: [{ date, state, status, reasonName }], summary }`. No notes, no staff names.
 
-Meals contract (no endpoint yet): `AttendanceService.expectedPresence(childIds: string[], from: Date, to: Date): Promise<{ childId, date }[]>` — working days where the resolved state is not `absent`/`expected_absent`, for the child's group on that day (mark's group, else current group).
+Meals contract (no endpoint yet): `RegisterService.expectedPresence(childIds: string[], from: Date, to: Date): Promise<{ childId, date }[]>` — working days where the resolved state is not `absent`/`expected_absent`, for the child's group on that day (mark's group, else current group).
 
 ### Errors (new, English)
 
-`Not a working day`, `Cannot mark future days`, `Edit window has passed`, `Reason is required`, `Reason is only allowed for absences`, `Absence reason not found`, `Absence reason already exists`, `Child is not in this group`, `Invalid period`, `Group is required for group scope`, `Notice overlaps an existing notice`, `Notice period is too long`, `Notice already decided`, `Register changed, reload`.
+`Not a working day`, `Cannot mark future days`, `Edit window has passed`, `Reason is required`, `Reason is only allowed for absences`, `Absence reason not found`, `Absence reason already exists`, `Child is not in this group`, `Invalid period`, `Group is required for group scope`, `Notice overlaps an existing notice`, `Notice period is too long`, `Notice already decided`, `Notice not found`, `Not your group`, `Group not found`, `Invalid month`, `Duplicate child in marks`, `Calendar entry not found`, `Calendar entry is voided`, `Edit days must be between 0 and 30`, `Cannot delete: group has attendance records`.
+
+Delete guards: a group with marks or calendar entries cannot be deleted (400 `Cannot delete: group has attendance records`); children and users delete guards also count marks, notices and calendar entries they created/decided/voided (existing messages).
 
 ## Frontend
 
@@ -179,7 +184,7 @@ Meals contract (no endpoint yet): `AttendanceService.expectedPresence(childIds: 
 
 ## Integrity Rules
 
-1. At most one active mark per child and day (DB-enforced); corrections void, never edit.
+1. At most one active mark per child and day (enforced by the locked save transaction); corrections void, never edit.
 2. A mark always wins over a notice; day states and summaries are computed, never stored.
 3. Teachers: own groups, inside the edit window; nobody marks future days.
 4. Parents see and create notices only for their children; parent views have no staff notes or staff names.
