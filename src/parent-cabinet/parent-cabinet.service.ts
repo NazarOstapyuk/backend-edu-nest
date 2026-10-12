@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AdjustmentType, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertOwnChild } from '../common/ownership';
 import {
   activeAllocated,
   chargeRemaining,
@@ -47,12 +48,8 @@ const visitOrder = { adaptation: 0, lesson: 1, legacy: 2 } as const;
 export class ParentCabinetService {
   constructor(private prisma: PrismaService) {}
 
-  private async assertOwnChild(parentId: string, childId: string) {
-    const child = await this.prisma.child.findFirst({
-      where: { id: childId, parents: { some: { id: parentId } } },
-      select: { id: true },
-    });
-    if (!child) throw new NotFoundException('Child not found');
+  private assertOwnChild(parentId: string, childId: string) {
+    return assertOwnChild(this.prisma, parentId, childId);
   }
 
   async family(parentId: string, today: Date = kyivToday()) {
