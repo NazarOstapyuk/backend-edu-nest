@@ -63,6 +63,12 @@ model User {
   attendancesMarked   LessonAttendance[] @relation("AttendanceMarkedBy")
   attendancesVoided   LessonAttendance[] @relation("AttendanceVoidedBy")
   usagesVoided        SessionUsage[]     @relation("UsageVoidedBy")
+  dailyMarked         DailyAttendance[]  @relation("DailyMarkedBy")
+  dailyVoided         DailyAttendance[]  @relation("DailyVoidedBy")
+  calendarCreated     CalendarDay[]      @relation("CalendarCreatedBy")
+  calendarVoided      CalendarDay[]      @relation("CalendarVoidedBy")
+  noticesCreated      AbsenceNotice[]    @relation("NoticeCreatedBy")
+  noticesDecided      AbsenceNotice[]    @relation("NoticeDecidedBy")
 }
 
 model Group {
@@ -70,6 +76,9 @@ model Group {
   name      String   @unique
   teachers  User[]   @relation("GroupTeachers")
   children  Child[]
+  kind             GroupKind         @default(kindergarten)
+  dailyAttendances DailyAttendance[]
+  calendarDays     CalendarDay[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -94,6 +103,8 @@ model Child {
   classMemberships  ClassGroupMember[]
   lessonAttendances LessonAttendance[]
   packages          Package[]
+  dailyAttendances  DailyAttendance[]
+  absenceNotices    AbsenceNotice[]
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -560,4 +571,111 @@ model SessionUsage {
   voidReason   String?
 
   @@index([packageId])
+}
+
+enum GroupKind {
+  kindergarten
+  school_class
+}
+
+enum DailyStatus {
+  present
+  late
+  left_early
+  absent
+}
+
+enum CalendarDayType {
+  non_working
+  working
+}
+
+enum CalendarScope {
+  all
+  kindergarten
+  school_class
+  group
+}
+
+enum NoticeStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+model AbsenceReason {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  excused          Boolean
+  requiresDocument Boolean           @default(false)
+  active           Boolean           @default(true)
+  sortOrder        Int               @default(0)
+  attendances      DailyAttendance[]
+  notices          AbsenceNotice[]
+}
+
+model CalendarDay {
+  id          String          @id @default(uuid())
+  startDate   DateTime        @db.Date
+  endDate     DateTime        @db.Date
+  type        CalendarDayType
+  scope       CalendarScope
+  groupId     String?
+  group       Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  title       String
+  createdById String
+  createdBy   User            @relation("CalendarCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?           @relation("CalendarVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([startDate, endDate])
+}
+
+model DailyAttendance {
+  id               String         @id @default(uuid())
+  childId          String
+  child            Child          @relation(fields: [childId], references: [id])
+  groupId          String
+  group            Group          @relation(fields: [groupId], references: [id])
+  date             DateTime       @db.Date
+  status           DailyStatus
+  reasonId         String?
+  reason           AbsenceReason? @relation(fields: [reasonId], references: [id], onDelete: Restrict)
+  note             String?
+  documentProvided Boolean        @default(false)
+  markedById       String
+  markedBy         User           @relation("DailyMarkedBy", fields: [markedById], references: [id])
+  createdAt        DateTime       @default(now())
+  voidedAt         DateTime?
+  voidedById       String?
+  voidedBy         User?          @relation("DailyVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason       String?
+
+  @@index([groupId, date])
+  @@index([childId, date])
+}
+
+model AbsenceNotice {
+  id             String        @id @default(uuid())
+  childId        String
+  child          Child         @relation(fields: [childId], references: [id])
+  startDate      DateTime      @db.Date
+  endDate        DateTime      @db.Date
+  reasonId       String
+  reason         AbsenceReason @relation(fields: [reasonId], references: [id])
+  comment        String?
+  status         NoticeStatus  @default(pending)
+  createdById    String
+  createdBy      User          @relation("NoticeCreatedBy", fields: [createdById], references: [id])
+  decidedById    String?
+  decidedBy      User?         @relation("NoticeDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+  decidedAt      DateTime?
+  decisionReason String?
+  createdAt      DateTime      @default(now())
+
+  @@index([childId, startDate])
 }
