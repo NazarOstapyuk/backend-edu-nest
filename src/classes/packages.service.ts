@@ -226,6 +226,7 @@ export class PackagesService {
       },
     });
     if (!pkg) throw new NotFoundException('Package not found');
+    if (pkg.voidedAt) throw new BadRequestException('Package is voided');
     if (!pkg.needsReconciliation || !pkg.legacySubscription) {
       throw new BadRequestException('Package does not need reconciliation');
     }

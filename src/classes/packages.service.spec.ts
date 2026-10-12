@@ -311,6 +311,17 @@ describe('PackagesService', () => {
       ).rejects.toThrow('Package does not need reconciliation');
     });
 
+    it('rejects a voided package', async () => {
+      mockPrisma.package.findUnique.mockResolvedValue(
+        legacy({ voidedAt: new Date() }),
+      );
+
+      await expect(
+        service.reconcile('p1', { outcome: 'paid_full' }, 'u1'),
+      ).rejects.toThrow('Package is voided');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it('rejects a concurrent second reconciliation', async () => {
       mockPrisma.package.findUnique.mockResolvedValue(legacy());
       mockPrisma.package.updateMany.mockResolvedValue({ count: 0 });

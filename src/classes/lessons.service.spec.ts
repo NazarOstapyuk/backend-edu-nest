@@ -26,6 +26,7 @@ const mockPrisma = {
     update: jest.fn(),
   },
   classGroupMember: { findMany: jest.fn() },
+  child: { findMany: jest.fn() },
   package: { findMany: jest.fn() },
   sessionUsage: { create: jest.fn(), update: jest.fn() },
   charge: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
@@ -83,6 +84,10 @@ describe('LessonsService.mark', () => {
       fn(mockPrisma),
     );
     mockPrisma.classGroup.findUnique.mockResolvedValue(group());
+    mockPrisma.child.findMany.mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(where.id.in.map((id) => ({ id }))),
+    );
     mockPrisma.$executeRaw.mockResolvedValue(1);
     mockPrisma.$queryRaw.mockResolvedValue([{ id: 'l1' }]);
     mockPrisma.lessonAttendance.findMany.mockResolvedValue([]);
@@ -146,6 +151,21 @@ describe('LessonsService.mark', () => {
     await expect(
       service.mark('g1', '2026-10-11', dto, admin, TODAY),
     ).rejects.toThrow('Duplicate child in marks');
+  });
+
+  it('rejects an unknown child', async () => {
+    mockPrisma.child.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.mark(
+        'g1',
+        '2026-10-11',
+        { marks: [{ childId: 'ghost', status: AttendanceStatus.present }] },
+        admin,
+        TODAY,
+      ),
+    ).rejects.toThrow('Child not found');
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects a non-member who is not marked as guest', async () => {

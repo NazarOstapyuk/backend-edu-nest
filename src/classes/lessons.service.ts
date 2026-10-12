@@ -160,6 +160,12 @@ export class LessonsService {
     const ids = dto.marks.map((m) => m.childId);
     if (new Set(ids).size !== ids.length)
       throw new BadRequestException('Duplicate child in marks');
+    const found = await this.prisma.child.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    if (found.length !== ids.length)
+      throw new NotFoundException('Child not found');
 
     const isTeacher = user.role === Role.teacher;
     const isLate = date.getTime() < today.getTime();
