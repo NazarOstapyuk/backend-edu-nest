@@ -45,7 +45,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 - JWT stored in **httpOnly cookies** (`accessToken`, `refreshToken`), not Authorization headers. `JwtStrategy` reads from `req.cookies.accessToken`; `cookie-parser` is required.
 - Both tokens are signed with the same `JWT_SECRET`. The refresh token is bcrypt-hashed and stored in `User.refreshToken`; `/auth/refresh` rotates it, `/auth/logout` nulls it.
 - Cookie `maxAge` values in `AuthService.setCookies` are hardcoded (15m / 30d) and must be kept in sync with `JWT_ACCESS_EXPIRES` / `JWT_REFRESH_EXPIRES`.
-- `JwtStrategy.validate` re-fetches the user on every request and rejects inactive users; `req.user` is `AuthenticatedUser` (`{ id, role, login }`), accessed via `@CurrentUser()`.
+- `JwtStrategy.validate` re-fetches the user on every request and rejects inactive users; `req.user` is `AuthenticatedUser` (`{ id, role, login, mustChangePassword }`), accessed via `@CurrentUser()`.
 
 ### Authorization pattern
 
@@ -139,6 +139,8 @@ Frontend repo: `frontend-edu-nest` (https://github.com/NazarOstapyuk/frontend-ed
 - `POST /auth/refresh` (used by the frontend's planned refresh-in-interceptor):
   - Success: `201` (Nest default for POST), body `{ message: 'Token refreshed' }`, new `accessToken` + `refreshToken` cookies set (refresh token rotated).
   - Missing, invalid, expired or already-rotated refresh cookie, or inactive user: `401` `{ statusCode: 401, message: 'Invalid refresh token', error: 'Unauthorized' }`. Cookies are not cleared. The client must not retry refresh on this 401.
+- `GET /auth/me`: `200` profile `{ id, login, role, firstName, lastName, middleName, phone, email, mustChangePassword }`; allowed while a password change is pending.
+- While `mustChangePassword` is true every guarded route except `GET /auth/me`, `POST /auth/logout`, `POST /me/password` returns `403` `{ statusCode: 403, message: 'Password change required', error: 'Forbidden' }`.
 - Any guarded route with an expired or missing access cookie returns `401` `{ statusCode: 401, message: 'Unauthorized' }`.
 
 ## Workflow (superpowers)
