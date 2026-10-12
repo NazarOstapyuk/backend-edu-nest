@@ -109,6 +109,17 @@ Spec: `docs/superpowers/specs/2026-10-12-parent-cabinet-design.md`.
 - `GET /auth/me` returns the profile (names, phone, email, `mustChangePassword`); `POST /me/password` and `PATCH /me/contacts` work for every role.
 - `src/parent-cabinet/` serves `/me/family`, `/me/children/:id`, `/me/children/:id/finance` for role `parent` only. Every child id is checked against the parent's children (404 `Child not found` otherwise). Views exclude voided records, unconfirmed payments and internal fields; money comes from `finance-calc.ts`, overdue rules from `cabinet-calc.ts`.
 
+### Domain: attendance register
+
+Spec: `docs/superpowers/specs/2026-10-12-attendance-register-design.md`. Code in `src/attendance/`:
+
+- `Group.kind` is `kindergarten` or `school_class`. `AbsenceReason` is an admin directory (`excused`, `requiresDocument`, deactivated, never deleted).
+- `CalendarDay` entries (void, never edit) make periods non-working or a weekend working; precedence group > group kind > all, `non_working` wins a tie. Default: Mon–Fri working.
+- `DailyAttendance` = one active mark per child and day (`present`, `late`, `left_early`, `absent` + reason). Saving locks the children rows (`ORDER BY id FOR UPDATE`) before reading marks; corrections void the old mark. Teachers: own groups, `today − attendanceEditDays` (AppSetting, default 3) to today; admins any past day, with a reason outside the window. No future days, no non-working days.
+- `AbsenceNotice`: parents submit (today or later, ≤ 60 days, no overlap with pending/approved), admins approve/reject/cancel. Notices are never copied into marks: `register-calc.ts` resolves a day as mark → approved notice → unmarked. Keep day logic there and test it without mocks.
+- The register never touches money. Meals (Part 5) will use `RegisterService.expectedPresence`.
+- Parent routes (`/me/children/:id/register`, `/me/children/:id/absence-notices`) check ownership with `assertOwnChild` (`src/common/ownership.ts`) and never return staff notes or staff names.
+
 ## Module conventions
 
 **Reference module: `src/children/`** (module + controller + service + `dto/` + `service.spec.ts`). For transactions and nested routes see `src/subscriptions/`. Copy these patterns, don't invent new ones.
