@@ -5,9 +5,14 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsEmail,
+  Matches,
+  MaxLength,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { Role } from '@prisma/client';
+import { PHONE_PATTERN } from '../../common/validation/contacts';
 
 export class UpdateUserDto {
   @IsString()
@@ -37,4 +42,21 @@ export class UpdateUserDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  middleName?: string | null;
+
+  @ValidateIf((_, value) => value !== null)
+  @Matches(PHONE_PATTERN)
+  @IsOptional()
+  phone?: string | null;
+
+  @ValidateIf((_, value) => value !== null)
+  @IsEmail()
+  @MaxLength(200)
+  @IsOptional()
+  email?: string | null;
 }

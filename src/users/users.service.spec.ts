@@ -88,6 +88,59 @@ describe('UsersService', () => {
       expect(result).toHaveProperty('id', 'new-id');
     });
 
+    it('requires a phone for parents', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          {
+            login: 'mom',
+            password: 'pass123',
+            role: Role.parent,
+            firstName: 'Olena',
+            lastName: 'Koval',
+          },
+          Role.admin,
+        ),
+      ).rejects.toThrow('Phone is required for parents');
+    });
+
+    it('creates a parent who must change the password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'p1',
+        password: 'h',
+        refreshToken: null,
+      });
+
+      await service.create(
+        {
+          login: 'mom',
+          password: 'pass123',
+          role: Role.parent,
+          firstName: 'Olena',
+          lastName: 'Koval',
+          middleName: 'Ivanivna',
+          phone: '+380671234567',
+          email: 'mom@example.com',
+        },
+        Role.admin,
+      );
+
+      const data = (
+        mockPrisma.user.create.mock.calls[0] as [
+          { data: Record<string, unknown> },
+        ]
+      )[0].data;
+      expect(data).toMatchObject({
+        role: Role.parent,
+        middleName: 'Ivanivna',
+        phone: '+380671234567',
+        email: 'mom@example.com',
+        mustChangePassword: true,
+      });
+    });
+
     it('allows root to create any role including root', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({
@@ -106,6 +159,68 @@ describe('UsersService', () => {
           Role.root,
         ),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe('update', () => {
+    const parent = {
+      id: 'p1',
+      login: 'mom',
+      role: Role.parent,
+      phone: '+380671234567',
+    };
+
+    beforeEach(() => {
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'p1',
+        password: 'h',
+        refreshToken: null,
+      });
+    });
+
+    it('forces a password change and drops sessions on admin reset', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+
+      await service.update('p1', { password: 'newpass1' }, Role.admin);
+
+      const data = (
+        mockPrisma.user.update.mock.calls[0] as [
+          { data: Record<string, unknown> },
+        ]
+      )[0].data;
+      expect(data).toMatchObject({
+        mustChangePassword: true,
+        refreshToken: null,
+      });
+      expect(typeof data.password).toBe('string');
+    });
+
+    it('refuses to clear the phone of a parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+
+      await expect(
+        service.update('p1', { phone: null }, Role.admin),
+      ).rejects.toThrow('Phone is required for parents');
+    });
+
+    it('keeps a legacy parent without phone editable', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ ...parent, phone: null });
+
+      await service.update('p1', { firstName: 'Olena' }, Role.admin);
+
+      expect(mockPrisma.user.update).toHaveBeenCalled();
+    });
+
+    it('requires a phone when turning a user into a parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...parent,
+        role: Role.teacher,
+        phone: null,
+      });
+
+      await expect(
+        service.update('p1', { role: Role.parent }, Role.admin),
+      ).rejects.toThrow('Phone is required for parents');
     });
   });
 

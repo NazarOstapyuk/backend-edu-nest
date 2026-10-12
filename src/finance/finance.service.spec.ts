@@ -11,6 +11,7 @@ const mockPrisma = {
   child: { findUnique: jest.fn(), findMany: jest.fn() },
   charge: { findMany: jest.fn() },
   payment: { findMany: jest.fn() },
+  user: { findMany: jest.fn() },
 };
 
 const balanceChild = (
@@ -51,6 +52,7 @@ describe('FinanceService', () => {
     jest.clearAllMocks();
     mockPrisma.charge.findMany.mockResolvedValue([]);
     mockPrisma.payment.findMany.mockResolvedValue([]);
+    mockPrisma.user.findMany.mockResolvedValue([]);
     const module = await Test.createTestingModule({
       providers: [
         FinanceService,
@@ -71,6 +73,37 @@ describe('FinanceService', () => {
       expect(mockPrisma.charge.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { childId: 'child-1' } }),
       );
+    });
+
+    it('includes parents with contacts', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue(child);
+      const parents = [
+        {
+          id: 'p1',
+          firstName: 'Olena',
+          lastName: 'Koval',
+          middleName: null,
+          phone: '+380671234567',
+          email: null,
+        },
+      ];
+      mockPrisma.user.findMany.mockResolvedValue(parents);
+
+      const result = await service.getChildFinance('child-1');
+
+      expect(result.parents).toEqual(parents);
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+        where: { children: { some: { id: 'child-1' } } },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          middleName: true,
+          phone: true,
+          email: true,
+        },
+        orderBy: { lastName: 'asc' },
+      });
     });
 
     it('throws NotFoundException when child does not exist', async () => {

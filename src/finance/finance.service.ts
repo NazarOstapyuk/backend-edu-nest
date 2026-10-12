@@ -48,7 +48,19 @@ export class FinanceService {
   async getChildFinance(childId: string) {
     const child = await this.findChild(childId);
     const [charges, payments] = await this.loadRecords(childId);
-    return buildChildFinance(child, charges, payments);
+    const parents = await this.prisma.user.findMany({
+      where: { children: { some: { id: childId } } },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        middleName: true,
+        phone: true,
+        email: true,
+      },
+      orderBy: { lastName: 'asc' },
+    });
+    return { ...buildChildFinance(child, charges, payments), parents };
   }
 
   async getHistory(childId: string) {

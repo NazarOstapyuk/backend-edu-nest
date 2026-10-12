@@ -7,6 +7,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateChildDto {
@@ -19,6 +21,12 @@ export class UpdateChildDto {
   @IsNotEmpty()
   @IsOptional()
   lastName?: string;
+
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  middleName?: string | null;
 
   @IsDateString()
   @IsOptional()

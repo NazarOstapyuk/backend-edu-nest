@@ -26,6 +26,10 @@ export class UsersService {
     });
     if (existing) throw new ConflictException('Login already taken');
 
+    if (dto.role === Role.parent && !dto.phone) {
+      throw new BadRequestException('Phone is required for parents');
+    }
+
     const password = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
       data: {
@@ -34,6 +38,10 @@ export class UsersService {
         role: dto.role,
         firstName: dto.firstName,
         lastName: dto.lastName,
+        middleName: dto.middleName ?? null,
+        phone: dto.phone ?? null,
+        email: dto.email ?? null,
+        mustChangePassword: dto.role === Role.parent,
       },
     });
 
@@ -50,6 +58,10 @@ export class UsersService {
         role: true,
         firstName: true,
         lastName: true,
+        middleName: true,
+        phone: true,
+        email: true,
+        mustChangePassword: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -111,6 +123,18 @@ export class UsersService {
       if (existing) throw new ConflictException('Login already taken');
     }
 
+    const nextRole = dto.role ?? user.role;
+    const clearsPhone = dto.phone === null;
+    const becomesParent = dto.role === Role.parent && user.role !== Role.parent;
+    const nextPhone = dto.phone !== undefined ? dto.phone : user.phone;
+    if (
+      nextRole === Role.parent &&
+      !nextPhone &&
+      (clearsPhone || becomesParent)
+    ) {
+      throw new BadRequestException('Phone is required for parents');
+    }
+
     const data: {
       login?: string;
       password?: string;
@@ -118,9 +142,21 @@ export class UsersService {
       firstName?: string;
       lastName?: string;
       isActive?: boolean;
+      middleName?: string | null;
+      phone?: string | null;
+      email?: string | null;
+      mustChangePassword?: boolean;
+      refreshToken?: null;
     } = {};
     if (dto.login !== undefined) data.login = dto.login;
-    if (dto.password) data.password = await bcrypt.hash(dto.password, 10);
+    if (dto.password) {
+      data.password = await bcrypt.hash(dto.password, 10);
+      data.mustChangePassword = true;
+      data.refreshToken = null;
+    }
+    if (dto.middleName !== undefined) data.middleName = dto.middleName;
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.email !== undefined) data.email = dto.email;
     if (dto.role !== undefined) data.role = dto.role;
     if (dto.firstName !== undefined) data.firstName = dto.firstName;
     if (dto.lastName !== undefined) data.lastName = dto.lastName;

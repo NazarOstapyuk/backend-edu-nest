@@ -69,6 +69,7 @@ describe('ChildrenService', () => {
           firstName: 'Ivan',
           lastName: 'Petrenko',
           birthDate: new Date('2020-01-15'),
+          middleName: null,
           gender: Gender.male,
           groupId: undefined,
           parents: undefined,
@@ -82,6 +83,19 @@ describe('ChildrenService', () => {
           },
         },
       });
+    });
+
+    it('passes middleName into the created child', async () => {
+      mockPrisma.child.create.mockResolvedValue({ id: 'child-1' });
+
+      await service.create({ ...baseDto, middleName: 'Petrivna' });
+
+      const data = (
+        mockPrisma.child.create.mock.calls[0] as [
+          { data: Record<string, unknown> },
+        ]
+      )[0].data;
+      expect(data).toMatchObject({ middleName: 'Petrivna' });
     });
 
     it('throws NotFoundException when groupId does not exist', async () => {

@@ -45,6 +45,7 @@ export class ChildrenService {
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
+        middleName: dto.middleName ?? null,
         birthDate: new Date(dto.birthDate),
         gender: dto.gender,
         groupId: dto.groupId,
@@ -94,6 +95,7 @@ export class ChildrenService {
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
+        middleName: dto.middleName,
         birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
         gender: dto.gender,
         groupId: dto.groupId,

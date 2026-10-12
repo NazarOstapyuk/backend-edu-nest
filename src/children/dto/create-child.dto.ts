@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateChildDto {
@@ -17,6 +18,11 @@ export class CreateChildDto {
   @IsString()
   @IsNotEmpty()
   lastName: string;
+
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  middleName?: string;
 
   @IsDateString()
   birthDate: string;

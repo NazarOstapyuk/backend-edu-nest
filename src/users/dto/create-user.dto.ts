@@ -1,6 +1,16 @@
 // src/users/dto/create-user.dto.ts
-import { IsEnum, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { Role } from '@prisma/client';
+import { PHONE_PATTERN } from '../../common/validation/contacts';
 
 export class CreateUserDto {
   @IsString()
@@ -23,4 +33,18 @@ export class CreateUserDto {
   @MinLength(3)
   @IsNotEmpty()
   lastName: string;
+
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  middleName?: string;
+
+  @Matches(PHONE_PATTERN)
+  @IsOptional()
+  phone?: string;
+
+  @IsEmail()
+  @MaxLength(200)
+  @IsOptional()
+  email?: string;
 }
