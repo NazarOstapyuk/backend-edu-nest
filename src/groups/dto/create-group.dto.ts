@@ -1,4 +1,12 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { GroupKind } from '@prisma/client';
 
 export class CreateGroupDto {
   @IsString()
@@ -9,4 +17,8 @@ export class CreateGroupDto {
   @IsUUID('4', { each: true })
   @IsOptional()
   teacherIds?: string[];
+
+  @IsEnum(GroupKind)
+  @IsOptional()
+  kind?: GroupKind;
 }

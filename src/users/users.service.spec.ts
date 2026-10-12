@@ -31,6 +31,9 @@ const mockPrisma = {
   lessonAttendance: { count: jest.fn() },
   sessionUsage: { count: jest.fn() },
   classGroup: { count: jest.fn() },
+  dailyAttendance: { count: jest.fn() },
+  calendarDay: { count: jest.fn() },
+  absenceNotice: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -244,6 +247,9 @@ describe('UsersService', () => {
       mockPrisma.lessonAttendance.count.mockResolvedValue(0);
       mockPrisma.sessionUsage.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
+      mockPrisma.dailyAttendance.count.mockResolvedValue(0);
+      mockPrisma.calendarDay.count.mockResolvedValue(0);
+      mockPrisma.absenceNotice.count.mockResolvedValue(0);
     });
 
     it('deletes a user without financial records', async () => {
@@ -270,6 +276,18 @@ describe('UsersService', () => {
       await expect(service.delete('u1')).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user decided absence notices', async () => {
+      mockPrisma.absenceNotice.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.absenceNotice.count).toHaveBeenCalledWith({
+        where: { OR: [{ createdById: 'u1' }, { decidedById: 'u1' }] },
+      });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
 

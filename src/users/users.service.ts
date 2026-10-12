@@ -97,6 +97,13 @@ export class UsersService {
       }),
       this.prisma.sessionUsage.count({ where: { voidedById: id } }),
       this.prisma.classGroup.count({ where: { teachers: { some: { id } } } }),
+      this.prisma.dailyAttendance.count({
+        where: { OR: [{ markedById: id }, { voidedById: id }] },
+      }),
+      this.prisma.calendarDay.count({ where: author }),
+      this.prisma.absenceNotice.count({
+        where: { OR: [{ createdById: id }, { decidedById: id }] },
+      }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

@@ -125,6 +125,8 @@ export class ChildrenService {
       this.prisma.classGroupMember.count({ where: { childId: id } }),
       this.prisma.lessonAttendance.count({ where: { childId: id } }),
       this.prisma.package.count({ where: { childId: id } }),
+      this.prisma.dailyAttendance.count({ where: { childId: id } }),
+      this.prisma.absenceNotice.count({ where: { childId: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

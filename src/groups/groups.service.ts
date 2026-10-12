@@ -43,17 +43,24 @@ export class GroupsService {
     return this.prisma.group.create({
       data: {
         name: dto.name,
+        kind: dto.kind,
         teachers: dto.teacherIds
           ? { connect: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
       },
-      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
+      include: {
+        teachers: { omit: { password: true, refreshToken: true } },
+        children: true,
+      },
     });
   }
 
   async findAll() {
     return this.prisma.group.findMany({
-      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
+      include: {
+        teachers: { omit: { password: true, refreshToken: true } },
+        children: true,
+      },
     });
   }
 
@@ -74,17 +81,31 @@ export class GroupsService {
       where: { id },
       data: {
         name: dto.name,
+        kind: dto.kind,
         teachers: dto.teacherIds
           ? { set: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
       },
-      include: { teachers: { omit: { password: true, refreshToken: true } }, children: true },
+      include: {
+        teachers: { omit: { password: true, refreshToken: true } },
+        children: true,
+      },
     });
   }
 
   async delete(id: string) {
     const group = await this.prisma.group.findUnique({ where: { id } });
     if (!group) throw new NotFoundException('Group not found');
+
+    const [marks, calendarDays] = await Promise.all([
+      this.prisma.dailyAttendance.count({ where: { groupId: id } }),
+      this.prisma.calendarDay.count({ where: { groupId: id } }),
+    ]);
+    if (marks > 0 || calendarDays > 0) {
+      throw new BadRequestException(
+        'Cannot delete: group has attendance records',
+      );
+    }
 
     await this.prisma.group.delete({ where: { id } });
     return { message: 'Group deleted' };
