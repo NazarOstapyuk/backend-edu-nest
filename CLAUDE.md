@@ -53,7 +53,7 @@ Controllers use `@UseGuards(JwtAuthGuard, RolesGuard)` plus `@Roles(...)` at cla
 
 Roles (`Role` enum): `root`, `admin`, `teacher`, `parent`. Rules enforced in services, not guards:
 - `admin` cannot create/update a user into `root`; `root` user cannot be deleted and is hidden from `GET /users`.
-- `parent` can only read subscriptions of their own children (`SubscriptionsService.findByChild`).
+- `parent` can only read subscriptions of their own children (`SubscriptionsService.findByChild`) and the parent cabinet views (`src/parent-cabinet/`).
 - User responses must strip `password` and `refreshToken` (destructuring in UsersService, `omit` in Prisma includes elsewhere).
 
 ### Domain: subscriptions
@@ -99,6 +99,15 @@ Spec: `docs/superpowers/specs/2026-10-11-classes-packages-design.md`. Code in `s
 - Corrections void the old attendance + usage (+ single charge via `voidChargeInTx`). Teachers: own groups only (`assertGroupAccess`), corrections only on the lesson day; admins need a reason after the lesson day.
 - Legacy `Subscription`s are migrated once (`POST /legacy/subscriptions/migrate`, idempotent) into packages with `needsReconciliation`; reconciliation creates an `opening_balance` charge for the unpaid part. The old subscriptions module is read-only legacy.
 - Teachers cannot be deleted while they teach a class group (the m2m join table cascades, so the user delete guard counts class groups).
+
+### Domain: parent cabinet
+
+Spec: `docs/superpowers/specs/2026-10-12-parent-cabinet-design.md`.
+
+- Parents are created by admins (phone required, `mustChangePassword = true`); an admin password reset (`PATCH /users/:id` with `password`) sets the flag again and drops the refresh token.
+- `JwtAuthGuard` rejects every request with 403 `Password change required` while `mustChangePassword` is true, except handlers marked `@AllowWithoutPasswordChange()` (`GET /auth/me`, `POST /auth/logout`, `POST /me/password`). Mark new handlers only if a user must reach them before changing the password.
+- `GET /auth/me` returns the profile (names, phone, email, `mustChangePassword`); `POST /me/password` and `PATCH /me/contacts` work for every role.
+- `src/parent-cabinet/` serves `/me/family`, `/me/children/:id`, `/me/children/:id/finance` for role `parent` only. Every child id is checked against the parent's children (404 `Child not found` otherwise). Views exclude voided records, unconfirmed payments and internal fields; money comes from `finance-calc.ts`, overdue rules from `cabinet-calc.ts`.
 
 ## Module conventions
 
