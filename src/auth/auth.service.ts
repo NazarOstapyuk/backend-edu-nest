@@ -132,7 +132,7 @@ export class AuthService {
     if (user.role === Role.parent && dto.phone === null) {
       throw new BadRequestException('Phone is required for parents');
     }
-    const data: { phone?: string; email?: string | null } = {};
+    const data: { phone?: string | null; email?: string | null } = {};
     if (dto.phone !== undefined) data.phone = dto.phone;
     if (dto.email !== undefined) data.email = dto.email;
     await this.prisma.user.update({ where: { id: userId }, data });

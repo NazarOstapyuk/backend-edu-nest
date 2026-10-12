@@ -196,7 +196,7 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.updateContacts('u1', { phone: null as unknown as string }),
+        service.updateContacts('u1', { phone: null }),
       ).rejects.toThrow('Phone is required for parents');
     });
 

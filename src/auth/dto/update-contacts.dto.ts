@@ -11,7 +11,7 @@ export class UpdateContactsDto {
   @ValidateIf((_, value) => value !== null)
   @Matches(PHONE_PATTERN)
   @IsOptional()
-  phone?: string;
+  phone?: string | null;
 
   @ValidateIf((_, value) => value !== null)
   @IsEmail()

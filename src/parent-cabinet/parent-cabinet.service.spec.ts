@@ -269,4 +269,42 @@ describe('ParentCabinetService', () => {
       },
     ]);
   });
+
+  it('hides the reconciliation state from parents', async () => {
+    mockPrisma.child.findFirst
+      .mockResolvedValueOnce({ id: 'A' })
+      .mockResolvedValueOnce({
+        id: 'A',
+        firstName: 'Ann',
+        lastName: 'Ant',
+        middleName: null,
+        birthDate: day('2021-03-01'),
+        group: null,
+        parents: [],
+        enrollments: [],
+        packages: [
+          {
+            id: 'pk1',
+            direction: { name: 'LEGO' },
+            sessionsTotal: 8,
+            usedBefore: 2,
+            purchaseDate: day('2026-09-01'),
+            createdAt: new Date('2026-09-01T10:00:00Z'),
+            expiresAt: day('2026-12-31'),
+            voidedAt: null,
+            needsReconciliation: true,
+            extensions: [],
+            usages: [],
+          },
+        ],
+        lessonAttendances: [],
+        adaptationVisits: [],
+        subscriptions: [],
+      });
+
+    const card = await service.card('parent-1', 'A', TODAY);
+
+    expect(card.packages[0].state).toBe('active');
+    expect(card.packages[0].remaining).toBe(6);
+  });
 });

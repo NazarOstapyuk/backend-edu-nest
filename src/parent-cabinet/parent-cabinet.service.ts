@@ -223,7 +223,7 @@ export class ParentCabinetService {
           used: p.sessionsTotal - remaining,
           remaining,
           expiresAt: effectiveExpiry(p),
-          state: packageState(p, today),
+          state: packageState({ ...p, needsReconciliation: false }, today),
         };
       }),
       visits,
