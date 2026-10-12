@@ -31,6 +31,10 @@ model User {
   role         Role
   firstName    String
   lastName     String
+  middleName         String?
+  phone              String?
+  email              String?
+  mustChangePassword Boolean  @default(false)
   refreshToken String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -74,6 +78,7 @@ model Child {
   id            String         @id @default(uuid())
   firstName     String
   lastName      String
+  middleName    String?
   birthDate     DateTime
   gender        Gender
 
