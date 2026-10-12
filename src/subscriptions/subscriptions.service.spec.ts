@@ -101,7 +101,12 @@ describe('SubscriptionsService', () => {
     const subs = [{ id: 'sub-1', childId: 'child-1', subscriptionType: {} }];
 
     it('returns subscriptions for admin without ownership check', async () => {
-      const admin = { id: 'user-1', role: Role.admin, login: 'admin' };
+      const admin = {
+        id: 'user-1',
+        role: Role.admin,
+        login: 'admin',
+        mustChangePassword: false,
+      };
       mockPrisma.subscription.findMany.mockResolvedValue(subs);
 
       const result = await service.findByChild('child-1', admin);
@@ -111,7 +116,12 @@ describe('SubscriptionsService', () => {
     });
 
     it('returns subscriptions for parent when child belongs to them', async () => {
-      const parent = { id: 'parent-1', role: Role.parent, login: 'parent' };
+      const parent = {
+        id: 'parent-1',
+        role: Role.parent,
+        login: 'parent',
+        mustChangePassword: false,
+      };
       mockPrisma.child.findFirst.mockResolvedValue({ id: 'child-1' });
       mockPrisma.subscription.findMany.mockResolvedValue(subs);
 
@@ -124,7 +134,12 @@ describe('SubscriptionsService', () => {
     });
 
     it('throws ForbiddenException when parent does not own child', async () => {
-      const parent = { id: 'parent-1', role: Role.parent, login: 'parent' };
+      const parent = {
+        id: 'parent-1',
+        role: Role.parent,
+        login: 'parent',
+        mustChangePassword: false,
+      };
       mockPrisma.child.findFirst.mockResolvedValue(null);
 
       await expect(service.findByChild('child-1', parent)).rejects.toThrow(

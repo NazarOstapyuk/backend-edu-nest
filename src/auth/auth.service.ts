@@ -1,5 +1,13 @@
 // src/auth/auth.service.ts
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateContactsDto } from './dto/update-contacts.dto';
 import { ConfigService } from '@nestjs/config';
 import type { StringValue } from 'ms';
 import { JwtService } from '@nestjs/jwt';
@@ -71,6 +79,64 @@ export class AuthService {
     res.clearCookie('accessToken', cookieBase);
     res.clearCookie('refreshToken', cookieBase);
     return { message: 'Logged out' };
+  }
+
+  private readonly profileSelect = {
+    id: true,
+    login: true,
+    role: true,
+    firstName: true,
+    lastName: true,
+    middleName: true,
+    phone: true,
+    email: true,
+    mustChangePassword: true,
+  } as const;
+
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: this.profileSelect,
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto, res: Response) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    const match = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!match) throw new BadRequestException('Invalid current password');
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        'New password must differ from the current one',
+      );
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: await bcrypt.hash(dto.newPassword, 10),
+        mustChangePassword: false,
+        refreshToken: null,
+      },
+    });
+    const tokens = await this.generateTokens(user.id, user.role);
+    await this.storeRefreshToken(user.id, tokens.refreshToken);
+    this.setCookies(res, tokens);
+    return { message: 'Password changed' };
+  }
+
+  async updateContacts(userId: string, dto: UpdateContactsDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === Role.parent && dto.phone === null) {
+      throw new BadRequestException('Phone is required for parents');
+    }
+    const data: { phone?: string; email?: string | null } = {};
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.email !== undefined) data.email = dto.email;
+    await this.prisma.user.update({ where: { id: userId }, data });
+    return this.getProfile(userId);
   }
 
   private async generateTokens(userId: string, role: string) {

@@ -4,4 +4,5 @@ export type AuthenticatedUser = {
   id: string;
   role: Role;
   login: string;
+  mustChangePassword: boolean;
 };

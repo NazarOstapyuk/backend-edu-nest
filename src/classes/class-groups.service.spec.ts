@@ -182,7 +182,12 @@ describe('ClassGroupsService', () => {
 
   it('forbids a teacher from another group', async () => {
     await expect(
-      service.get('g1', { id: 't2', role: Role.teacher, login: 't2' }),
+      service.get('g1', {
+        id: 't2',
+        role: Role.teacher,
+        login: 't2',
+        mustChangePassword: false,
+      }),
     ).rejects.toThrow('Not your class group');
   });
 

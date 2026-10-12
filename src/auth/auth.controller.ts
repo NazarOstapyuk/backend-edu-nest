@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { AllowWithoutPasswordChange } from '../common/decorators/allow-without-password-change.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuthService } from './auth.service';
@@ -29,12 +30,14 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AllowWithoutPasswordChange()
   @Get('me')
   me(@CurrentUser() user: AuthenticatedUser) {
-    return user;
+    return this.authService.getProfile(user.id);
   }
 
   @UseGuards(JwtAuthGuard)
+  @AllowWithoutPasswordChange()
   @Post('logout')
   logout(
     @CurrentUser() user: AuthenticatedUser,

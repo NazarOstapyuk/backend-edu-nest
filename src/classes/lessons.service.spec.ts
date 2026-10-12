@@ -14,8 +14,18 @@ const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);
 const TODAY = day('2026-10-11');
 
-const admin = { id: 'u1', role: Role.admin, login: 'admin' };
-const teacher = { id: 't1', role: Role.teacher, login: 'teacher' };
+const admin = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+};
+const teacher = {
+  id: 't1',
+  role: Role.teacher,
+  login: 'teacher',
+  mustChangePassword: false,
+};
 
 const mockPrisma = {
   classGroup: { findUnique: jest.fn() },

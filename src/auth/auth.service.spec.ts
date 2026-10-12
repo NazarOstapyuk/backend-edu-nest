@@ -4,6 +4,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -95,8 +96,16 @@ describe('AuthService', () => {
       mockPrisma.user.update.mockResolvedValue({});
       await service.login('x', 'pass', mockRes as any);
       expect(mockRes.cookie).toHaveBeenCalledTimes(2);
-      expect(mockRes.cookie).toHaveBeenCalledWith('accessToken', expect.any(String), expect.any(Object));
-      expect(mockRes.cookie).toHaveBeenCalledWith('refreshToken', expect.any(String), expect.any(Object));
+      expect(mockRes.cookie).toHaveBeenCalledWith(
+        'accessToken',
+        expect.any(String),
+        expect.any(Object),
+      );
+      expect(mockRes.cookie).toHaveBeenCalledWith(
+        'refreshToken',
+        expect.any(String),
+        expect.any(Object),
+      );
     });
   });
 
@@ -108,8 +117,106 @@ describe('AuthService', () => {
         where: { id: 'uid' },
         data: { refreshToken: null },
       });
-      expect(mockRes.clearCookie).toHaveBeenCalledWith('accessToken', expect.any(Object));
-      expect(mockRes.clearCookie).toHaveBeenCalledWith('refreshToken', expect.any(Object));
+      expect(mockRes.clearCookie).toHaveBeenCalledWith(
+        'accessToken',
+        expect.any(Object),
+      );
+      expect(mockRes.clearCookie).toHaveBeenCalledWith(
+        'refreshToken',
+        expect.any(Object),
+      );
+    });
+  });
+
+  describe('changePassword', () => {
+    let stored: Record<string, unknown>;
+
+    beforeAll(async () => {
+      stored = {
+        id: 'u1',
+        role: 'parent',
+        password: await bcrypt.hash('oldpass1', 4),
+        mustChangePassword: true,
+      };
+    });
+
+    it('rejects a wrong current password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(stored);
+
+      await expect(
+        service.changePassword(
+          'u1',
+          { currentPassword: 'x', newPassword: 'newpass12' },
+          mockRes as unknown as Response,
+        ),
+      ).rejects.toThrow('Invalid current password');
+    });
+
+    it('rejects the same password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(stored);
+
+      await expect(
+        service.changePassword(
+          'u1',
+          { currentPassword: 'oldpass1', newPassword: 'oldpass1' },
+          mockRes as unknown as Response,
+        ),
+      ).rejects.toThrow('New password must differ from the current one');
+    });
+
+    it('stores the new password, clears the flag and issues fresh cookies', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(stored);
+
+      const result = await service.changePassword(
+        'u1',
+        { currentPassword: 'oldpass1', newPassword: 'newpass12' },
+        mockRes as unknown as Response,
+      );
+
+      expect(result).toEqual({ message: 'Password changed' });
+      const firstUpdate = (
+        mockPrisma.user.update.mock.calls[0] as [
+          { data: Record<string, unknown> },
+        ]
+      )[0].data;
+      expect(firstUpdate).toMatchObject({
+        mustChangePassword: false,
+        refreshToken: null,
+      });
+      expect(mockRes.cookie).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('updateContacts', () => {
+    it('refuses to clear a parent phone', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'parent',
+        phone: '+380671234567',
+      });
+
+      await expect(
+        service.updateContacts('u1', { phone: null as unknown as string }),
+      ).rejects.toThrow('Phone is required for parents');
+    });
+
+    it('updates phone and email', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'parent',
+        phone: '+380671234567',
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+
+      await service.updateContacts('u1', {
+        phone: '+380501112233',
+        email: null,
+      });
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { phone: '+380501112233', email: null },
+      });
     });
   });
 });
