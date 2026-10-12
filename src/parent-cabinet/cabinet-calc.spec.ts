@@ -6,6 +6,8 @@ const d = (v: string) => new Prisma.Decimal(v);
 const TODAY = day('2026-10-12');
 
 const charge = (over: Record<string, unknown> = {}) => ({
+  id: 'c',
+  description: 'd',
   category: FinanceCategory.tuition,
   amount: d('1000'),
   periodStart: day('2026-09-01'),

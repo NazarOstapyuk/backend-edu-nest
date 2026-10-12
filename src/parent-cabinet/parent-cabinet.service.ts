@@ -3,6 +3,7 @@ import { AdjustmentType, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   activeAllocated,
+  chargeRemaining,
   chargeState,
   formatMoney,
   paymentFree,
@@ -18,6 +19,8 @@ import { childMoney, isOverdue } from './cabinet-calc';
 
 const moneyCharge = {
   select: {
+    id: true,
+    description: true,
     category: true,
     amount: true,
     periodStart: true,
@@ -281,7 +284,7 @@ export class ParentCabinetService {
           periodEnd: c.periodEnd,
           amount: formatMoney(c.amount),
           paid: formatMoney(paid),
-          remaining: formatMoney(c.amount.minus(paid)),
+          remaining: formatMoney(chargeRemaining(c)),
           state: chargeState(c.amount, paid),
           overdue: isOverdue(c, today),
           createdAt: c.createdAt,

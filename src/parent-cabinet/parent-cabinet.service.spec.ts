@@ -29,6 +29,8 @@ const moneyChild = (id: string, chargeAmount: string) => ({
   group: null,
   charges: [
     {
+      id: `c-${id}`,
+      description: 'x',
       category: FinanceCategory.tuition,
       amount: d(chargeAmount),
       periodStart: day('2026-09-01'),
@@ -77,6 +79,51 @@ describe('ParentCabinetService', () => {
       prepayment: '0.00',
     });
     expect(family.children.map((c) => c.due)).toEqual(['1000.00', '500.00']);
+  });
+
+  it('includes categorized prepayment and unallocated in child and family prepayment', async () => {
+    const child = moneyChild('A', '100');
+    mockPrisma.child.findMany.mockResolvedValue([
+      {
+        ...child,
+        payments: [
+          {
+            amount: d('50'),
+            category: FinanceCategory.extra_classes,
+            status: PaymentStatus.confirmed,
+            voidedAt: null,
+            allocations: [],
+          },
+          {
+            amount: d('25.50'),
+            category: null,
+            status: PaymentStatus.confirmed,
+            voidedAt: null,
+            allocations: [],
+          },
+        ],
+      },
+    ]);
+
+    const family = await service.family('parent-1', TODAY);
+
+    expect(family.children[0].prepayment).toBe('75.50');
+    expect(family.totals.prepayment).toBe('75.50');
+  });
+
+  it('hides a child of another family on the card', async () => {
+    mockPrisma.child.findFirst.mockResolvedValue(null);
+
+    await expect(service.card('parent-1', 'foreign', TODAY)).rejects.toThrow(
+      'Child not found',
+    );
+    expect(mockPrisma.child.findFirst).toHaveBeenCalledTimes(1);
+    expect(
+      firstArg<{ where: unknown }>(mockPrisma.child.findFirst).where,
+    ).toEqual({
+      id: 'foreign',
+      parents: { some: { id: 'parent-1' } },
+    });
   });
 
   it('hides a child of another family', async () => {

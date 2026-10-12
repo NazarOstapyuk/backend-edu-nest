@@ -1,24 +1,17 @@
 import { FinanceCategory } from '@prisma/client';
 import {
-  AllocationLike,
+  ChargeLike,
   Money,
   PaymentLike,
-  activeAllocated,
+  chargeRemaining,
   formatMoney,
-  isCountedPayment,
-  paymentFree,
+  summarize,
   sumMoney,
 } from '../finance/finance-calc';
 import { kyivToday } from '../tariffs/dates';
 
-export interface ChargeMoneyLike {
-  category: FinanceCategory;
-  amount: Money;
-  periodStart: Date | null;
+export interface ChargeMoneyLike extends ChargeLike {
   periodEnd: Date | null;
-  createdAt: Date;
-  voidedAt: Date | null;
-  allocations: AllocationLike[];
 }
 
 export interface ChildMoney {
@@ -40,45 +33,37 @@ export const chargeLastDay = (c: {
   createdAt: Date;
 }): Date => c.periodEnd ?? c.periodStart ?? kyivToday(c.createdAt);
 
-const remaining = (c: ChargeMoneyLike): Money =>
-  c.amount.minus(activeAllocated(c.allocations));
-
 export const isOverdue = (c: ChargeMoneyLike, today: Date): boolean =>
-  remaining(c).gt(0) && chargeLastDay(c).getTime() < today.getTime();
+  chargeRemaining(c).gt(0) && chargeLastDay(c).getTime() < today.getTime();
 
 export function childMoney(
   charges: ChargeMoneyLike[],
   payments: PaymentLike[],
   today: Date,
 ): ChildMoney {
+  const summary = summarize(charges, payments);
   const active = charges.filter((c) => !c.voidedAt);
-  const counted = payments.filter(isCountedPayment);
-  const categories = Object.values(FinanceCategory).map((category) => {
-    const own = active.filter((c) => c.category === category);
-    return {
-      category,
-      due: sumMoney(own.map(remaining)),
-      overdue: sumMoney(own.filter((c) => isOverdue(c, today)).map(remaining)),
-      prepayment: sumMoney(
-        counted.filter((p) => p.category === category).map(paymentFree),
+  const categories = summary.categories.map((c) => ({
+    category: c.category,
+    due: c.debt,
+    overdue: formatMoney(
+      sumMoney(
+        active
+          .filter((x) => x.category === c.category && isOverdue(x, today))
+          .map((x): Money => chargeRemaining(x)),
       ),
-    };
-  });
-  const unallocated = sumMoney(
-    counted.filter((p) => p.category === null).map(paymentFree),
-  );
+    ),
+    prepayment: c.prepayment,
+  }));
   return {
     due: formatMoney(sumMoney(categories.map((c) => c.due))),
     overdue: formatMoney(sumMoney(categories.map((c) => c.overdue))),
     prepayment: formatMoney(
-      sumMoney(categories.map((c) => c.prepayment)).plus(unallocated),
+      sumMoney(categories.map((c) => c.prepayment)).plus(
+        summary.totals.unallocated,
+      ),
     ),
-    unallocated: formatMoney(unallocated),
-    categories: categories.map((c) => ({
-      category: c.category,
-      due: formatMoney(c.due),
-      overdue: formatMoney(c.overdue),
-      prepayment: formatMoney(c.prepayment),
-    })),
+    unallocated: summary.totals.unallocated,
+    categories,
   };
 }
