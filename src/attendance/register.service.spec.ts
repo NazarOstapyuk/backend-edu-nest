@@ -339,7 +339,7 @@ describe('RegisterService', () => {
         TODAY,
       );
       expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-        mockPrisma.dailyAttendance.findMany.mock.invocationCallOrder[0],
+        mockPrisma.dailyAttendance.findMany.mock.invocationCallOrder[1],
       );
       expect(mockPrisma.dailyAttendance.update).toHaveBeenCalledTimes(1);
       expect(
@@ -363,6 +363,57 @@ describe('RegisterService', () => {
         documentProvided: false,
         markedById: 't1',
       });
+    });
+
+    it('accepts an unchanged inactive reason', async () => {
+      mockPrisma.dailyAttendance.findMany.mockResolvedValue([
+        mark({ childId: 'c1', status: DailyStatus.absent, reasonId: 'old' }),
+      ]);
+      await service.save(
+        'g1',
+        {
+          date: '2026-10-14',
+          marks: [
+            { childId: 'c1', status: DailyStatus.absent, reasonId: 'old' },
+          ],
+        },
+        teacher,
+        TODAY,
+      );
+      expect(
+        firstArg<{
+          where: { id: { in: string[] }; OR: unknown[] };
+        }>(mockPrisma.absenceReason.count).where,
+      ).toEqual({
+        id: { in: ['old'] },
+        OR: [{ active: true }, { id: { in: ['old'] } }],
+      });
+      expect(mockPrisma.dailyAttendance.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects switching to an inactive reason', async () => {
+      mockPrisma.dailyAttendance.findMany.mockResolvedValue([
+        mark({ childId: 'c1', status: DailyStatus.absent, reasonId: 'old' }),
+      ]);
+      mockPrisma.absenceReason.count.mockResolvedValue(0);
+      await expect(
+        service.save(
+          'g1',
+          {
+            date: '2026-10-14',
+            marks: [
+              { childId: 'c1', status: DailyStatus.absent, reasonId: 'other' },
+            ],
+          },
+          teacher,
+          TODAY,
+        ),
+      ).rejects.toThrow(new BadRequestException('Absence reason not found'));
+      expect(
+        firstArg<{ where: { id: { in: string[] } } }>(
+          mockPrisma.absenceReason.count,
+        ).where.id.in,
+      ).toEqual(['other']);
     });
 
     it('stores the admin reason as the void reason outside the window', async () => {
@@ -405,16 +456,19 @@ describe('RegisterService', () => {
         }),
         mark({ childId: 'c1', date: day('2026-10-02') }),
       ]);
-      const view = await service.month('g1', '2026-10', admin);
+      const view = await service.month('g1', '2026-10', admin, TODAY);
       expect(view.days).toHaveLength(31);
       expect(view.children[0].summary).toEqual({
-        workingDays: 22,
+        workingDays: 10,
         present: 1,
         absentExcused: 1,
         absentUnexcused: 0,
         expectedAbsent: 0,
-        unmarked: 20,
+        unmarked: 8,
       });
+      expect(
+        view.children[0].days.filter((d) => d.state === 'unmarked').length,
+      ).toBeGreaterThan(8);
     });
   });
 

@@ -102,4 +102,32 @@ describe('ParentAttendanceService', () => {
       },
     });
   });
+
+  it('counts the summary only up to today', async () => {
+    mockPrisma.child.findFirst.mockResolvedValue({ id: 'c1' });
+    mockPrisma.absenceReason.findMany.mockResolvedValue([]);
+    const unmarked = (value: string) => ({
+      date: day(value),
+      title: null,
+      hasGroup: true,
+      working: true,
+      state: 'unmarked',
+      status: null,
+      reasonId: null,
+      source: 'none',
+    });
+    mockRegister.childDays.mockResolvedValue([
+      {
+        childId: 'c1',
+        days: [
+          unmarked('2026-10-01'),
+          unmarked('2026-10-02'),
+          unmarked('2026-10-05'),
+        ],
+      },
+    ]);
+    const view = await service.month('p1', 'c1', '2026-10', day('2026-10-02'));
+    expect(view.days).toHaveLength(3);
+    expect(view.summary).toMatchObject({ workingDays: 2, unmarked: 2 });
+  });
 });

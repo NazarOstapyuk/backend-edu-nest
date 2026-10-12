@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertOwnChild } from '../common/ownership';
-import { isoDay } from '../tariffs/dates';
+import { isoDay, kyivToday } from '../tariffs/dates';
 import { parseMonth, summarizeDays } from './register-calc';
 import { RegisterService } from './register.service';
 
@@ -12,7 +12,12 @@ export class ParentAttendanceService {
     private register: RegisterService,
   ) {}
 
-  async month(parentId: string, childId: string, monthValue: string) {
+  async month(
+    parentId: string,
+    childId: string,
+    monthValue: string,
+    today: Date = kyivToday(),
+  ) {
     await assertOwnChild(this.prisma, parentId, childId);
     const { from, to } = parseMonth(monthValue);
     const [rows, reasons] = await Promise.all([
@@ -33,7 +38,10 @@ export class ParentAttendanceService {
         reasonName: d.reasonId ? (names.get(d.reasonId) ?? null) : null,
         title: d.title,
       })),
-      summary: summarizeDays(days, excused),
+      summary: summarizeDays(
+        days.filter((d) => d.date.getTime() <= today.getTime()),
+        excused,
+      ),
     };
   }
 }

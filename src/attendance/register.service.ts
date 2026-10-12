@@ -213,14 +213,31 @@ export class RegisterService {
       if (m.status !== DailyStatus.absent && (m.reasonId || m.documentProvided))
         throw new BadRequestException('Reason is only allowed for absences');
     }
-    const reasonIds = [
-      ...new Set(dto.marks.flatMap((m) => (m.reasonId ? [m.reasonId] : []))),
-    ];
-    if (reasonIds.length) {
+    const current = ids.length
+      ? await this.prisma.dailyAttendance.findMany({
+          where: { childId: { in: ids }, date, voidedAt: null },
+          select: { childId: true, reasonId: true },
+        })
+      : [];
+    const keeps = (m: { childId: string; reasonId?: string }) =>
+      current.some((c) => c.childId === m.childId && c.reasonId === m.reasonId);
+    const newIds = new Set<string>();
+    const keptIds = new Set<string>();
+    for (const m of dto.marks) {
+      if (!m.reasonId) continue;
+      if (keeps(m)) keptIds.add(m.reasonId);
+      else newIds.add(m.reasonId);
+    }
+    for (const id of newIds) keptIds.delete(id);
+    if (newIds.size || keptIds.size) {
+      const keptList = [...keptIds];
       const found = await this.prisma.absenceReason.count({
-        where: { id: { in: reasonIds }, active: true },
+        where: {
+          id: { in: [...newIds, ...keptList] },
+          OR: [{ active: true }, { id: { in: keptList } }],
+        },
       });
-      if (found !== reasonIds.length)
+      if (found !== newIds.size + keptIds.size)
         throw new BadRequestException('Absence reason not found');
     }
     const allowed = new Set(
@@ -278,7 +295,12 @@ export class RegisterService {
     return this.day(groupId, dto.date, user, today);
   }
 
-  async month(groupId: string, monthValue: string, user: AuthenticatedUser) {
+  async month(
+    groupId: string,
+    monthValue: string,
+    user: AuthenticatedUser,
+    today: Date = kyivToday(),
+  ) {
     const group = await this.loadGroup(groupId, user);
     const { from, to, days } = parseMonth(monthValue);
     const [entries, children, reasons] = await Promise.all([
@@ -329,7 +351,10 @@ export class RegisterService {
             status: r.status,
             reasonId: r.reasonId,
           })),
-          summary: summarizeDays(resolved, excused),
+          summary: summarizeDays(
+            resolved.filter((_, i) => time(days[i]) <= time(today)),
+            excused,
+          ),
         };
       }),
     };
