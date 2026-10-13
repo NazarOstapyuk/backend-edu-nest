@@ -44,7 +44,7 @@ const mockPrisma = {
   room: { count: jest.fn() },
   user: { count: jest.fn() },
   group: { findUnique: jest.fn() },
-  schoolLesson: { findMany: jest.fn() },
+  schoolLesson: { findMany: jest.fn(), count: jest.fn() },
   $transaction: jest.fn(),
 };
 const mockSchedule = {
@@ -78,6 +78,7 @@ describe('TimetablesService', () => {
     mockPrisma.subgroup.count.mockResolvedValue(0);
     mockPrisma.subgroupMember.findMany.mockResolvedValue([]);
     mockPrisma.timetable.findMany.mockResolvedValue([]);
+    mockPrisma.schoolLesson.count.mockResolvedValue(0);
     mockPrisma.timetable.create.mockResolvedValue({ id: 'v2', entries: [] });
     mockPrisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
       fn(mockPrisma),
@@ -130,6 +131,21 @@ describe('TimetablesService', () => {
     await expect(
       service.create('g1', { validFrom: '2026-11-02', entries: [] }, admin),
     ).rejects.toThrow(new BadRequestException('Timetable periods overlap'));
+  });
+
+  it('rejects a new version when lessons are recorded on or after its start', async () => {
+    mockPrisma.schoolLesson.count.mockResolvedValueOnce(1);
+    await expect(
+      service.create(
+        'g1',
+        { validFrom: '2026-11-02', entries: [entryDto] },
+        admin,
+      ),
+    ).rejects.toThrow(new BadRequestException('Lesson already recorded'));
+    expect(mockPrisma.schoolLesson.count).toHaveBeenCalledWith({
+      where: { groupId: 'g1', date: { gte: day('2026-11-02') } },
+    });
+    expect(mockPrisma.timetable.create).not.toHaveBeenCalled();
   });
 
   it('validates periods, subgroups, subjects, rooms and teachers', async () => {

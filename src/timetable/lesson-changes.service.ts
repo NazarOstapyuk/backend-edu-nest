@@ -12,9 +12,11 @@ import {
   type ChangeLike,
   type ConflictItem,
   findConflicts,
+  type Slot,
   toMinutes,
 } from './schedule-calc';
 import {
+  type ClassSchedule,
   type ConflictRef,
   ScheduleService,
   subgroupKey,
@@ -111,14 +113,20 @@ export class LessonChangesService {
             subgroupKey: subgroupKey(subgroupId),
           },
         },
-        select: {
-          _count: { select: { marks: { where: { voidedAt: null } } } },
-        },
+        select: { id: true },
       });
-      if (recorded && recorded._count.marks > 0)
-        throw new BadRequestException('Lesson already recorded');
+      if (recorded) throw new BadRequestException('Lesson already recorded');
     } else {
-      await this.assertNoConflicts(group.id, date, change);
+      const schedules = await this.schedule.build(date, date, undefined, {
+        groupId: group.id,
+        change: { ...change, date },
+      });
+      await this.assertNoConflicts(
+        group.id,
+        date,
+        schedules,
+        (slot) => slot.changeId === 'pending',
+      );
     }
     const created = await this.prisma.lessonChange.create({
       data: {
@@ -140,26 +148,20 @@ export class LessonChangesService {
   private async assertNoConflicts(
     groupId: string,
     date: Date,
-    change: ChangeLike,
+    schedules: ClassSchedule[],
+    isNewSlot: (slot: Slot) => boolean,
   ) {
-    const [schedules, members] = await Promise.all([
-      this.schedule.build(date, date, undefined, {
-        groupId,
-        change: { ...change, date },
-      }),
-      this.prisma.subgroupMember.findMany({
-        where: { subgroup: { groupId } },
-        select: { subgroupId: true, childId: true },
-      }),
-    ]);
+    const members = await this.prisma.subgroupMember.findMany({
+      where: { subgroup: { groupId } },
+      select: { subgroupId: true, childId: true },
+    });
     const items: ConflictItem[] = [];
     const refs = new Map<string, ConflictRef>();
     for (const schedule of schedules) {
       schedule.days[0].slots.forEach((slot, i) => {
         if (slot.cancelled || !slot.startTime) return;
         const ref = `${schedule.group.id}:${i}`;
-        const isNew =
-          schedule.group.id === groupId && slot.changeId === 'pending';
+        const isNew = schedule.group.id === groupId && isNewSlot(slot);
         refs.set(ref, {
           groupName: schedule.group.name,
           weekday: null,
@@ -197,6 +199,37 @@ export class LessonChangesService {
     if (!change) throw new NotFoundException('Lesson change not found');
     if (change.voidedAt)
       throw new BadRequestException('Lesson change is voided');
+    if (change.type !== LessonChangeType.cancel) {
+      const recorded = await this.prisma.schoolLesson.findUnique({
+        where: {
+          groupId_date_period_subgroupKey: {
+            groupId: change.groupId,
+            date: change.date,
+            period: change.period,
+            subgroupKey: subgroupKey(change.subgroupId),
+          },
+        },
+        select: { id: true },
+      });
+      if (recorded) throw new BadRequestException('Lesson already recorded');
+    }
+    if (change.type !== LessonChangeType.extra) {
+      const schedules = await this.schedule.build(
+        change.date,
+        change.date,
+        undefined,
+        undefined,
+        id,
+      );
+      await this.assertNoConflicts(
+        change.groupId,
+        change.date,
+        schedules,
+        (slot) =>
+          slot.period === change.period &&
+          slot.subgroupId === change.subgroupId,
+      );
+    }
     const updated = await this.prisma.lessonChange.update({
       where: { id },
       data: {

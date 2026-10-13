@@ -88,7 +88,7 @@ describe('LessonChangesService', () => {
     });
   });
 
-  it('cancels an existing lesson that has no marks', async () => {
+  it('cancels an existing lesson that is not recorded', async () => {
     await service.create(
       'g1',
       { ...base, type: LessonChangeType.cancel },
@@ -107,9 +107,7 @@ describe('LessonChangesService', () => {
   });
 
   it('rejects cancelling a recorded lesson and missing lessons', async () => {
-    mockPrisma.schoolLesson.findUnique.mockResolvedValueOnce({
-      _count: { marks: 2 },
-    });
+    mockPrisma.schoolLesson.findUnique.mockResolvedValueOnce({ id: 'l1' });
     await expect(
       service.create('g1', { ...base, type: LessonChangeType.cancel }, admin),
     ).rejects.toThrow(new BadRequestException('Lesson already recorded'));
@@ -194,5 +192,78 @@ describe('LessonChangesService', () => {
     await expect(service.void('c1', 'x', admin)).rejects.toThrow(
       new BadRequestException('Lesson change is voided'),
     );
+  });
+
+  const stored = (type: LessonChangeType) => ({
+    id: 'c1',
+    groupId: 'g1',
+    date: day('2026-10-12'),
+    period: 1,
+    subgroupId: null,
+    type,
+    voidedAt: null,
+  });
+
+  it('rejects voiding a replace or extra change with a recorded lesson', async () => {
+    mockPrisma.lessonChange.findUnique.mockResolvedValue(
+      stored(LessonChangeType.replace),
+    );
+    mockPrisma.schoolLesson.findUnique.mockResolvedValueOnce({ id: 'l1' });
+    await expect(service.void('c1', 'x', admin)).rejects.toThrow(
+      new BadRequestException('Lesson already recorded'),
+    );
+    mockPrisma.lessonChange.findUnique.mockResolvedValue(
+      stored(LessonChangeType.extra),
+    );
+    mockPrisma.schoolLesson.findUnique.mockResolvedValueOnce({ id: 'l1' });
+    await expect(service.void('c1', 'x', admin)).rejects.toThrow(
+      new BadRequestException('Lesson already recorded'),
+    );
+    expect(mockPrisma.lessonChange.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects voiding a cancel that would double-book a teacher', async () => {
+    mockPrisma.lessonChange.findUnique.mockResolvedValue(
+      stored(LessonChangeType.cancel),
+    );
+    mockSchedule.build.mockResolvedValue([
+      schedule('g1', [slot({ teacherId: 't2' })]),
+      schedule('g2', [slot({ teacherId: 't2' })]),
+    ]);
+    await expect(service.void('c1', 'x', admin)).rejects.toThrow(
+      ConflictException,
+    );
+    expect(mockSchedule.build).toHaveBeenCalledWith(
+      day('2026-10-12'),
+      day('2026-10-12'),
+      undefined,
+      undefined,
+      'c1',
+    );
+    expect(mockPrisma.lessonChange.update).not.toHaveBeenCalled();
+  });
+
+  it('voids a harmless cancel and an extra without checks', async () => {
+    mockPrisma.lessonChange.update.mockResolvedValue({
+      id: 'c1',
+      date: day('2026-10-12'),
+    });
+    mockPrisma.lessonChange.findUnique.mockResolvedValue(
+      stored(LessonChangeType.cancel),
+    );
+    mockSchedule.build.mockResolvedValue([
+      schedule('g1', [slot()]),
+      schedule('g2', [slot({ teacherId: 't2' })]),
+    ]);
+    await expect(service.void('c1', 'x', admin)).resolves.toMatchObject({
+      id: 'c1',
+    });
+    mockSchedule.build.mockClear();
+    mockPrisma.lessonChange.findUnique.mockResolvedValue(
+      stored(LessonChangeType.extra),
+    );
+    await service.void('c1', 'x', admin);
+    expect(mockSchedule.build).not.toHaveBeenCalled();
+    expect(mockPrisma.lessonChange.update).toHaveBeenCalledTimes(2);
   });
 });

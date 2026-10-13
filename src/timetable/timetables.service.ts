@@ -207,6 +207,10 @@ export class TimetablesService {
     });
     if (versions.some((v) => v.validFrom.getTime() >= validFrom.getTime()))
       throw new BadRequestException('Timetable periods overlap');
+    const recorded = await this.prisma.schoolLesson.count({
+      where: { groupId, date: { gte: validFrom } },
+    });
+    if (recorded > 0) throw new BadRequestException('Lesson already recorded');
     const entries = dto.entries.map(toEntry);
     await this.assertNoConflicts(group, entries, validFrom, null);
     const previous = versions[versions.length - 1];

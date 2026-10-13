@@ -84,6 +84,7 @@ export class ScheduleService {
     to: Date,
     groupIds?: string[],
     pending?: PendingChange,
+    excludeChangeId?: string,
   ): Promise<ClassSchedule[]> {
     const [groups, calendarEntries] = await Promise.all([
       this.prisma.group.findMany({
@@ -116,7 +117,7 @@ export class ScheduleService {
     return groups.map((group) => {
       const periods = group.bellSchedule?.periods ?? [];
       const changes: (ChangeLike & { date: Date })[] = [
-        ...group.lessonChanges,
+        ...group.lessonChanges.filter((c) => c.id !== excludeChangeId),
         ...(pending && pending.groupId === group.id ? [pending.change] : []),
       ];
       return {
