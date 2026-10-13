@@ -2,8 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { parseTime } from './meals-calc';
 
-const DEADLINE_KEY = 'mealOrderDeadline';
-const DEFAULT_DEADLINE = '10:00';
+export const DEADLINE_KEY = 'mealOrderDeadline';
+export const DEFAULT_DEADLINE = '10:00';
 
 @Injectable()
 export class MealSettingsService {

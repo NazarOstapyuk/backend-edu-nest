@@ -1,3 +1,4 @@
+import { cancelOrdersForNoticeInTx } from '../meals/notice-orders';
 import {
   BadRequestException,
   Injectable,
@@ -73,6 +74,7 @@ export class NoticesService {
       NoticeStatus.approved,
       user,
       null,
+      true,
     );
   }
 
@@ -102,22 +104,36 @@ export class NoticesService {
     to: NoticeStatus,
     user: AuthenticatedUser,
     reason: string | null,
+    cancelMeals = false,
   ) {
     const exists = await this.prisma.absenceNotice.findUnique({
       where: { id },
       select: { id: true },
     });
     if (!exists) throw new NotFoundException('Notice not found');
-    const { count } = await this.prisma.absenceNotice.updateMany({
-      where: { id, status: from },
-      data: {
-        status: to,
-        decidedById: user.id,
-        decidedAt: new Date(),
-        decisionReason: reason,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.absenceNotice.updateMany({
+        where: { id, status: from },
+        data: {
+          status: to,
+          decidedById: user.id,
+          decidedAt: new Date(),
+          decisionReason: reason,
+        },
+      });
+      if (count === 0) throw new BadRequestException('Notice already decided');
+      if (!cancelMeals) return;
+      const decided = await tx.absenceNotice.findUnique({
+        where: { id },
+        select: {
+          childId: true,
+          startDate: true,
+          endDate: true,
+          createdAt: true,
+        },
+      });
+      if (decided) await cancelOrdersForNoticeInTx(tx, decided, user.id);
     });
-    if (count === 0) throw new BadRequestException('Notice already decided');
     const notice = await this.prisma.absenceNotice.findUnique({
       where: { id },
       select: adminSelect,

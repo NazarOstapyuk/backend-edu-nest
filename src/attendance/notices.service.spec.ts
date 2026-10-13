@@ -35,6 +35,8 @@ const mockPrisma = {
     create: jest.fn(),
     updateMany: jest.fn(),
   },
+  mealOrder: { findMany: jest.fn() },
+  appSetting: { findUnique: jest.fn() },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
@@ -61,6 +63,36 @@ describe('NoticesService', () => {
       fn(mockPrisma),
     );
     mockPrisma.$queryRaw.mockResolvedValue([]);
+    mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+  });
+
+  describe('meal orders on approval', () => {
+    it('looks up meal orders of the notice period when approving', async () => {
+      mockPrisma.absenceNotice.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.absenceNotice.findUnique.mockResolvedValue({
+        ...notice({ status: NoticeStatus.approved }),
+        childId: 'c1',
+      });
+      await service.approve('n1', admin);
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.mealOrder.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            childId: 'c1',
+            cancelledAt: null,
+          }) as object,
+        }),
+      );
+    });
+
+    it('does not touch meal orders when rejecting', async () => {
+      mockPrisma.absenceNotice.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.absenceNotice.findUnique.mockResolvedValue(
+        notice({ status: NoticeStatus.rejected }),
+      );
+      await service.reject('n1', 'Немає підстав', admin);
+      expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('admin decisions', () => {

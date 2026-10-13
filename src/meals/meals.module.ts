@@ -4,6 +4,8 @@ import { MealComplexesController } from './meal-complexes.controller';
 import { MealComplexesService } from './meal-complexes.service';
 import { MealDirectoriesController } from './meal-directories.controller';
 import { MealDirectoriesService } from './meal-directories.service';
+import { MealOrdersController } from './meal-orders.controller';
+import { MealOrdersService } from './meal-orders.service';
 import { MealSettingsService } from './meal-settings.service';
 import { MenuTemplatesController } from './menu-templates.controller';
 import { MenuTemplatesService } from './menu-templates.service';
@@ -17,6 +19,7 @@ import { MenusService } from './menus.service';
     MealComplexesController,
     MenusController,
     MenuTemplatesController,
+    MealOrdersController,
   ],
   providers: [
     MealDirectoriesService,
@@ -24,6 +27,7 @@ import { MenusService } from './menus.service';
     MealSettingsService,
     MenusService,
     MenuTemplatesService,
+    MealOrdersService,
   ],
 })
 export class MealsModule {}
