@@ -298,6 +298,22 @@ describe('MealOrdersService', () => {
       );
     });
 
+    it('re-reads the menu status after taking the lock', async () => {
+      mockPrisma.menuDay.findUnique
+        .mockResolvedValueOnce({ id: 'm1', status: MenuStatus.published })
+        .mockResolvedValueOnce({ status: MenuStatus.draft });
+      await expect(
+        service.create('c1', [order()], parent, BEFORE),
+      ).rejects.toThrow(
+        new BadRequestException('2026-10-14: Menu is not published'),
+      );
+      const lockCalls = mockPrisma.$queryRaw.mock.invocationCallOrder;
+      expect(lockCalls[lockCalls.length - 1]).toBeLessThan(
+        mockPrisma.menuDay.findUnique.mock.invocationCallOrder[1],
+      );
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
     it('rejects duplicate dates', async () => {
       await expect(
         service.create('c1', [order(), order()], parent, BEFORE),
@@ -307,6 +323,7 @@ describe('MealOrdersService', () => {
     it('fails the whole multi-day order on one bad day', async () => {
       mockPrisma.menuDay.findUnique
         .mockResolvedValueOnce({ id: 'm1', status: MenuStatus.published })
+        .mockResolvedValueOnce({ status: MenuStatus.published })
         .mockResolvedValueOnce({ id: 'm2', status: MenuStatus.draft });
       await expect(
         service.create(

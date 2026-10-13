@@ -57,7 +57,7 @@ export class MealOrdersService {
     const parsed = days
       .map((d) => ({ ...d, day: parseDay(d.date) }))
       .sort((a, b) => a.day.getTime() - b.day.getTime());
-    if (new Set(parsed.map((d) => d.date)).size !== parsed.length)
+    if (new Set(parsed.map((d) => d.day.getTime())).size !== parsed.length)
       throw new BadRequestException('Duplicate date in order');
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
@@ -125,6 +125,12 @@ export class MealOrdersService {
         if (!complex) throw new NotFoundException('Meal complex not found');
         if (!complex.active) throw dayError(date, 'Complex is inactive');
         await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id = ${menu.id} FOR SHARE`;
+        const locked = await tx.menuDay.findUnique({
+          where: { id: menu.id },
+          select: { status: true },
+        });
+        if (locked?.status !== MenuStatus.published)
+          throw dayError(date, 'Menu is not published');
         const menuItems = await tx.menuDayItem.findMany({
           where: { menuDayId: menu.id },
           select: { dishId: true, dish: { select: { courseId: true } } },
