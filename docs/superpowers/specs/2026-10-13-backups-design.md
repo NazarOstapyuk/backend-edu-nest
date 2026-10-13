@@ -26,7 +26,7 @@ The database is copied automatically every night to a folder that the user's clo
 - `BACKUP_DIR`: absolute folder path. Not set or empty → backups are disabled; the API reports `configured: false`, the cron does nothing.
 - `BACKUP_PG_CONTAINER`: Docker container with Postgres, default `edu_postgres`. Set to an empty string to call a local `pg_dump` / `pg_restore` from `PATH` instead.
 
-Connection data (user, password, host, port, database) are parsed from `DATABASE_URL`. With Docker the command is `docker exec -e PGPASSWORD=<password> <container> pg_dump -U <user> -d <db> -Fc` and stdout is streamed to the file; without Docker `pg_dump --dbname=<DATABASE_URL> -Fc --file=<path>`. The password is passed only through the environment, never as an argument, and never logged.
+Connection data (user, password, host, port, database) are parsed from `DATABASE_URL`. With Docker the command is `docker exec -e PGPASSWORD=<password> <container> pg_dump -U <user> -d <db> -Fc` and stdout is streamed to the file; without Docker `pg_dump -h <host> -p <port> -U <user> -d <db> -Fc -f <path>` with `PGPASSWORD` in the environment. The password is passed only through the environment, never as an argument, and never logged.
 
 ## Data model
 
@@ -43,9 +43,9 @@ Users who created backup runs cannot be deleted (added to the existing user dele
 
 ## Creating a copy
 
-- File name: `edu_db_YYYY-MM-DD_HHmm.dump` (scheduled), `edu_db_YYYY-MM-DD_HHmm_manual.dump`, `edu_db_YYYY-MM-DD_HHmm_pre-restore.dump`; time in Europe/Kyiv.
+- File name: `edu_db_YYYY-MM-DD_HHmmss.dump` (scheduled), `edu_db_YYYY-MM-DD_HHmmss_manual.dump`, `edu_db_YYYY-MM-DD_HHmmss_pre-restore.dump`; time in Europe/Kyiv (seconds avoid name clashes between two quick manual copies).
 - The dump is written to `<name>.part`; on exit code 0 and size > 0 it is renamed to `<name>`; otherwise the `.part` file is removed and the run is `failed`.
-- Only one copy runs at a time per process: a second request gets 409 `Backup is already running`. A `running` row older than 30 minutes at startup is marked `failed` with error `Interrupted`.
+- Only one copy runs at a time per process: a second request gets 409 `Backup is already running`. At startup every `running` row (left by a stopped process; the backend runs as a single process) is marked `failed` with error `Interrupted`.
 - Timeout 10 minutes: the process is killed and the run is `failed` with error `Timed out`.
 - The `BACKUP_DIR` folder is created if missing (`mkdir -p`); an unwritable folder fails the run with the OS error.
 - Scheduled run: `@Cron('0 2 * * *', { timeZone: 'Europe/Kyiv' })`, errors are caught and stored, never thrown out of the scheduler.
@@ -64,7 +64,7 @@ Pure function in `src/backups/backup-retention.ts`, applied after every successf
 Controller `backups`, `@Roles(root, admin)`:
 
 - `GET /backups` →
-  `{ configured: boolean, dir: string | null, running: boolean, lastSuccess: RunView | null, lastFailure: RunView | null, stale: boolean, files: [{ name, kind, sizeBytes, createdAt }] }`.
+  `{ configured: boolean, dir: string | null, running: boolean, lastSuccess: RunView | null, lastFailure: RunView | null, stale: boolean, files: [{ name, kind, sizeBytes, takenAt }] }`, `takenAt` = Kyiv local time parsed from the file name (`YYYY-MM-DDTHH:mm:ss`, no zone).
   `stale` = configured and (no success yet, or the last success is older than 26 hours, or the last run failed). `files` newest first; `sizeBytes` as a number (copies are far below 2^53). `dir` is shown so the head can check the path.
 - `POST /backups` → creates a manual copy and waits for it (≤ 10 min) → `RunView`. 400 `Backups are not configured` when `BACKUP_DIR` is empty; 409 `Backup is already running`.
 - `GET /backups/runs` → last 50 runs, newest first.
@@ -79,7 +79,7 @@ There is no download, delete or restore endpoint.
 1. Reads `.env`, resolves the file inside `BACKUP_DIR` if a bare name is given; missing file → exit 1.
 2. Refuses to run while the backend answers on `PORT` (default 3000): prints «Stop the backend first» and exits 1.
 3. Asks for confirmation by typing the database name (skipped with `--yes`).
-4. Makes a `pre_restore` copy with the same dump command (recorded in `BackupRun` if the database is reachable).
+4. Makes a `pre_restore` copy into `BACKUP_DIR` with the same dump command (not recorded in `BackupRun`: the restore replaces that table anyway); if it fails, the restore is aborted.
 5. Runs `pg_restore --clean --if-exists --no-owner -d <db>` (through `docker exec -i` with the file on stdin, or locally).
 6. Prints the result; non-zero exit on failure, leaving the pre-restore copy for rollback.
 
