@@ -1,6 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { GroupKind, MenuStatus, Prisma, Role } from '@prisma/client';
+import {
+  CalendarDayType,
+  CalendarScope,
+  GroupKind,
+  MenuStatus,
+  Prisma,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../attendance/calendar.service';
 import { MealSettingsService } from './meal-settings.service';
@@ -234,7 +241,7 @@ describe('ParentMealsService', () => {
     mockPrisma.child.findUnique.mockResolvedValue({ id: 'c1', group: null });
     await expect(
       service.menu('p1', 'c1', '2026-10-12', '2026-10-18', BEFORE),
-    ).resolves.toEqual({ deadline: '10:00', days: [] });
+    ).resolves.toEqual({ deadline: '10:00', issue: 'no_group', days: [] });
   });
 
   it('shows menus without complexes when the group has no price category', async () => {
@@ -253,9 +260,93 @@ describe('ParentMealsService', () => {
       '2026-10-18',
       BEFORE,
     );
+    expect(result.issue).toBe('no_price_category');
     expect(
       result.days.every((d) => d.complexes.length === 0 && !d.canOrder),
     ).toBe(true);
+  });
+
+  it('reports no issue for a normal child and working on every day', async () => {
+    const result = await service.menu(
+      'p1',
+      'c1',
+      '2026-10-12',
+      '2026-10-18',
+      BEFORE,
+    );
+    expect(result.issue).toBeNull();
+    expect(result.days.every((d) => d.working)).toBe(true);
+  });
+
+  describe('day closed after ordering', () => {
+    const closed = [
+      {
+        startDate: day('2026-10-14'),
+        endDate: day('2026-10-14'),
+        type: CalendarDayType.non_working,
+        scope: CalendarScope.all,
+        groupId: null,
+        title: 'Закрито',
+        voidedAt: null,
+      },
+    ];
+    const activeOrder = {
+      id: 'o1',
+      childId: 'c1',
+      date: day('2026-10-14'),
+      price: new Prisma.Decimal(120),
+      createdAt: new Date(),
+      cancelledAt: null,
+      cancelReason: null,
+      complex: { id: 'x1', name: 'Повний' },
+      items: [],
+    };
+
+    it('keeps the day with its order and disables ordering', async () => {
+      mockCalendar.entriesBetween.mockResolvedValue(closed);
+      mockPrisma.mealOrder.findMany.mockResolvedValue([activeOrder]);
+      const result = await service.menu(
+        'p1',
+        'c1',
+        '2026-10-12',
+        '2026-10-18',
+        BEFORE,
+      );
+      const today = result.days.find((d) => d.date === '2026-10-14');
+      expect(today).toMatchObject({
+        working: false,
+        complexes: [],
+        canOrder: false,
+        canCancel: true,
+      });
+      expect(today?.order?.id).toBe('o1');
+    });
+
+    it('turns cancelling off after the deadline', async () => {
+      mockCalendar.entriesBetween.mockResolvedValue(closed);
+      mockPrisma.mealOrder.findMany.mockResolvedValue([activeOrder]);
+      const result = await service.menu(
+        'p1',
+        'c1',
+        '2026-10-12',
+        '2026-10-18',
+        new Date('2026-10-14T07:00:00Z'),
+      );
+      const today = result.days.find((d) => d.date === '2026-10-14');
+      expect(today).toMatchObject({ working: false, canCancel: false });
+    });
+
+    it('drops the closed day when there is no order', async () => {
+      mockCalendar.entriesBetween.mockResolvedValue(closed);
+      const result = await service.menu(
+        'p1',
+        'c1',
+        '2026-10-12',
+        '2026-10-18',
+        BEFORE,
+      );
+      expect(result.days.map((d) => d.date)).toEqual(['2026-10-13']);
+    });
   });
 
   it('delegates ordering and cancelling after the ownership check', async () => {

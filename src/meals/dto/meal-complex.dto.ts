@@ -20,6 +20,7 @@ export class CreateMealComplexDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   name: string;
 
   @IsString()
@@ -43,6 +44,7 @@ export class UpdateMealComplexDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   @IsOptional()
   name?: string;
 

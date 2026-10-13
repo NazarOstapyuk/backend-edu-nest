@@ -225,8 +225,11 @@ export class MenusService {
     const working = this.workingFor(kind, entries);
     await this.prisma.$transaction(async (tx) => {
       const blocked = new Set<string>();
-      if (overwrite && existing.length) {
-        const ids = existing.map((e) => e.id);
+      const draftIds = existing
+        .filter((e) => e.status === MenuStatus.draft)
+        .map((e) => e.id);
+      if (overwrite && draftIds.length) {
+        const ids = draftIds;
         await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
         const fresh = await tx.menuDay.findMany({
           where: { id: { in: ids } },
@@ -302,15 +305,24 @@ export class MenusService {
 
   async deleteDay(dateValue: string, kind: GroupKind) {
     const date = parseDay(dateValue);
-    const day = await this.prisma.menuDay.findUnique({
-      where: { date_kind: { date, kind } },
+    await this.prisma.$transaction(async (tx) => {
+      const day = await tx.menuDay.findUnique({
+        where: { date_kind: { date, kind } },
+        select: { id: true },
+      });
+      if (!day) throw new NotFoundException('Menu day not found');
+      await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id = ${day.id} FOR UPDATE`;
+      const fresh = await tx.menuDay.findUnique({
+        where: { id: day.id },
+        select: { status: true },
+      });
+      if (!fresh) throw new NotFoundException('Menu day not found');
+      if (fresh.status === MenuStatus.published)
+        throw new BadRequestException('Menu is published');
+      if (await tx.mealOrder.count({ where: { menuDayId: day.id } }))
+        throw new BadRequestException('Menu has orders');
+      await tx.menuDay.delete({ where: { id: day.id } });
     });
-    if (!day) throw new NotFoundException('Menu day not found');
-    if (day.status === MenuStatus.published)
-      throw new BadRequestException('Menu is published');
-    if (await this.prisma.mealOrder.count({ where: { menuDayId: day.id } }))
-      throw new BadRequestException('Menu has orders');
-    await this.prisma.menuDay.delete({ where: { id: day.id } });
     return { message: 'Menu day deleted' };
   }
 }

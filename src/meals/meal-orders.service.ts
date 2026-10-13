@@ -7,6 +7,7 @@ import {
   ChargeSource,
   FinanceCategory,
   MenuStatus,
+  Prisma,
   Role,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -103,6 +104,21 @@ export class MealOrdersService {
 
     const ids = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${childId} FOR UPDATE`;
+      const found = await tx.menuDay.findMany({
+        where: { kind: group.kind, date: { in: parsed.map((d) => d.day) } },
+        select: { id: true },
+      });
+      const menus = new Map<number, { id: string; status: MenuStatus }>();
+      if (found.length) {
+        const menuIds = found.map((m) => m.id);
+        await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(menuIds)}) ORDER BY id FOR SHARE`;
+        const locked = await tx.menuDay.findMany({
+          where: { id: { in: menuIds } },
+          select: { id: true, date: true, status: true },
+        });
+        for (const m of locked)
+          menus.set(m.date.getTime(), { id: m.id, status: m.status });
+      }
       const created: string[] = [];
       for (const item of parsed) {
         const date = item.day;
@@ -113,10 +129,7 @@ export class MealOrdersService {
         if (existing) throw dayError(date, 'Order already exists');
         if (!dayInfo(date, group, entries).working)
           throw dayError(date, 'Day is not a working day');
-        const menu = await tx.menuDay.findUnique({
-          where: { date_kind: { date, kind: group.kind } },
-          select: { id: true, status: true },
-        });
+        const menu = menus.get(date.getTime());
         if (!menu || menu.status !== MenuStatus.published)
           throw dayError(date, 'Menu is not published');
         if (isParent(user) && !isBeforeDeadline(date, deadline, now))
@@ -124,13 +137,6 @@ export class MealOrdersService {
         const complex = complexes.find((c) => c.id === item.complexId);
         if (!complex) throw new NotFoundException('Meal complex not found');
         if (!complex.active) throw dayError(date, 'Complex is inactive');
-        await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id = ${menu.id} FOR SHARE`;
-        const locked = await tx.menuDay.findUnique({
-          where: { id: menu.id },
-          select: { status: true },
-        });
-        if (locked?.status !== MenuStatus.published)
-          throw dayError(date, 'Menu is not published');
         const menuItems = await tx.menuDayItem.findMany({
           where: { menuDayId: menu.id },
           select: { dishId: true, dish: { select: { courseId: true } } },

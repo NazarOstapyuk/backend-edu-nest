@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { MenuStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -44,6 +44,8 @@ const byCourse = <
   a.course.name.localeCompare(b.course.name) ||
   a.name.localeCompare(b.name);
 
+type MenuIssue = 'no_group' | 'no_price_category' | null;
+
 @Injectable()
 export class ParentMealsService {
   constructor(
@@ -77,7 +79,7 @@ export class ParentMealsService {
       },
     });
     const group = child?.group;
-    if (!group) return { deadline, days: [] };
+    if (!group) return { deadline, issue: 'no_group' as MenuIssue, days: [] };
     const category = group.mealPriceCategory?.active
       ? group.mealPriceCategory
       : null;
@@ -127,53 +129,62 @@ export class ParentMealsService {
         select: orderSelect,
       }),
     ]);
+    const hasOrder = (date: Date) =>
+      orders.some((o) => o.date.getTime() === date.getTime());
     const days = menus
-      .filter((m) => dayInfo(m.date, group, entries).working)
+      .map((m) => ({
+        menu: m,
+        working: dayInfo(m.date, group, entries).working,
+      }))
+      .filter((m) => m.working || hasOrder(m.menu.date))
+      .map((m) => ({ ...m.menu, working: m.working }))
       .sort((a, b) => a.date.getTime() - b.date.getTime())
       .map((m) => {
         const dishes = m.items.map((i) => i.dish).sort(byCourse);
         const open = isBeforeDeadline(m.date, deadline, now);
-        const available = category
-          ? complexes.flatMap((c) => {
-              const price = priceOn(prices, c.id, category.id, m.date);
-              const courses = c.courses
-                .map((cc) => cc.course)
-                .sort(
-                  (a, b) =>
-                    a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+        const available =
+          category && m.working
+            ? complexes.flatMap((c) => {
+                const price = priceOn(prices, c.id, category.id, m.date);
+                const courses = c.courses
+                  .map((cc) => cc.course)
+                  .sort(
+                    (a, b) =>
+                      a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+                  );
+                const check = resolveChoices(
+                  courses.map((cc) => cc.id),
+                  dishes.map((d) => ({ id: d.id, courseId: d.course.id })),
+                  [],
                 );
-              const check = resolveChoices(
-                courses.map((cc) => cc.id),
-                dishes.map((d) => ({ id: d.id, courseId: d.course.id })),
-                [],
-              );
-              if (
-                !price ||
-                ('error' in check && check.error === 'course_missing')
-              )
-                return [];
-              return [
-                {
-                  id: c.id,
-                  name: c.name,
-                  description: c.description,
-                  price: formatMoney(price.price),
-                  courses: courses.map((cc) => ({
-                    id: cc.id,
-                    name: cc.name,
-                    options: dishes
-                      .filter((d) => d.course.id === cc.id)
-                      .map((d) => ({ id: d.id, name: d.name })),
-                  })),
-                },
-              ];
-            })
-          : [];
+                if (
+                  !price ||
+                  ('error' in check && check.error === 'course_missing')
+                )
+                  return [];
+                return [
+                  {
+                    id: c.id,
+                    name: c.name,
+                    description: c.description,
+                    price: formatMoney(price.price),
+                    courses: courses.map((cc) => ({
+                      id: cc.id,
+                      name: cc.name,
+                      options: dishes
+                        .filter((d) => d.course.id === cc.id)
+                        .map((d) => ({ id: d.id, name: d.name })),
+                    })),
+                  },
+                ];
+              })
+            : [];
         const order = orders.find((o) => o.date.getTime() === m.date.getTime());
         return {
           date: isoDay(m.date),
           deadlineAt: deadlineFor(m.date, deadline).toISOString(),
           open,
+          working: m.working,
           dishes,
           complexes: open ? available : [],
           order: order ? toOrderView(order) : null,
@@ -181,7 +192,11 @@ export class ParentMealsService {
           canCancel: open && !!order,
         };
       });
-    return { deadline, days };
+    return {
+      deadline,
+      issue: (category ? null : 'no_price_category') as MenuIssue,
+      days,
+    };
   }
 
   async order(
@@ -195,14 +210,6 @@ export class ParentMealsService {
 
   async cancel(user: AuthenticatedUser, childId: string, orderId: string) {
     await assertOwnChild(this.prisma, user.id, childId);
-    const view = await this.orders.cancel(
-      orderId,
-      user,
-      undefined,
-      new Date(),
-      childId,
-    );
-    if (!view) throw new NotFoundException('Order not found');
-    return view;
+    return this.orders.cancel(orderId, user, undefined, new Date(), childId);
   }
 }

@@ -10,12 +10,14 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  Matches,
 } from 'class-validator';
 
 export class CreateSortedNamedDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   name: string;
 
   @IsInt()
@@ -28,6 +30,7 @@ export class UpdateSortedNamedDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   @IsOptional()
   name?: string;
 
@@ -45,6 +48,7 @@ export class CreateDishDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(150)
+  @Matches(/\S/)
   name: string;
 
   @IsUUID('4')
@@ -60,6 +64,7 @@ export class UpdateDishDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(150)
+  @Matches(/\S/)
   @IsOptional()
   name?: string;
 

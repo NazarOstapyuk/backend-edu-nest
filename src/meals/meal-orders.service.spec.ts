@@ -44,7 +44,7 @@ const mockPrisma = {
   child: { findUnique: jest.fn() },
   mealComplex: { findMany: jest.fn() },
   mealComplexPrice: { findMany: jest.fn() },
-  menuDay: { findUnique: jest.fn() },
+  menuDay: { findMany: jest.fn() },
   menuDayItem: { findMany: jest.fn() },
   mealOrder: {
     findFirst: jest.fn(),
@@ -60,6 +60,33 @@ const mockPrisma = {
 };
 const mockCalendar = { entriesBetween: jest.fn() };
 const mockSettings = { getDeadline: jest.fn() };
+
+interface MenuRow {
+  id: string;
+  date: Date;
+  status: MenuStatus;
+}
+interface MenuWhere {
+  date?: { in: Date[] };
+  id?: { in: string[] };
+}
+
+const useMenus = (rows: MenuRow[], relocked?: MenuRow[]) => {
+  let reads = 0;
+  mockPrisma.menuDay.findMany.mockImplementation(
+    (args: { where: MenuWhere }) => {
+      const { where } = args;
+      if (where.date) {
+        const dates = where.date.in.map((d) => d.getTime());
+        return Promise.resolve(
+          rows.filter((r) => dates.includes(r.date.getTime())),
+        );
+      }
+      reads++;
+      return Promise.resolve(reads === 1 && relocked ? relocked : rows);
+    },
+  );
+};
 
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
 const order = (date = '2026-10-14', dishIds: string[] = ['bulgur']) => ({
@@ -105,10 +132,10 @@ describe('MealOrdersService', () => {
         price: new Prisma.Decimal(120),
       },
     ]);
-    mockPrisma.menuDay.findUnique.mockResolvedValue({
-      id: 'm1',
-      status: MenuStatus.published,
-    });
+    useMenus([
+      { id: 'm1', date: day('2026-10-14'), status: MenuStatus.published },
+      { id: 'm2', date: day('2026-10-15'), status: MenuStatus.published },
+    ]);
     mockPrisma.menuDayItem.findMany.mockResolvedValue([
       { dishId: 'soup', dish: { courseId: 'first' } },
       { dishId: 'rice', dish: { courseId: 'side' } },
@@ -195,16 +222,15 @@ describe('MealOrdersService', () => {
     });
 
     it('rejects a draft or missing menu', async () => {
-      mockPrisma.menuDay.findUnique.mockResolvedValueOnce({
-        id: 'm1',
-        status: MenuStatus.draft,
-      });
+      useMenus([
+        { id: 'm1', date: day('2026-10-14'), status: MenuStatus.draft },
+      ]);
       await expect(
         service.create('c1', [order()], parent, BEFORE),
       ).rejects.toThrow(
         new BadRequestException('2026-10-14: Menu is not published'),
       );
-      mockPrisma.menuDay.findUnique.mockResolvedValueOnce(null);
+      useMenus([]);
       await expect(
         service.create('c1', [order()], parent, BEFORE),
       ).rejects.toThrow(
@@ -299,9 +325,10 @@ describe('MealOrdersService', () => {
     });
 
     it('re-reads the menu status after taking the lock', async () => {
-      mockPrisma.menuDay.findUnique
-        .mockResolvedValueOnce({ id: 'm1', status: MenuStatus.published })
-        .mockResolvedValueOnce({ status: MenuStatus.draft });
+      useMenus(
+        [{ id: 'm1', date: day('2026-10-14'), status: MenuStatus.published }],
+        [{ id: 'm1', date: day('2026-10-14'), status: MenuStatus.draft }],
+      );
       await expect(
         service.create('c1', [order()], parent, BEFORE),
       ).rejects.toThrow(
@@ -309,9 +336,35 @@ describe('MealOrdersService', () => {
       );
       const lockCalls = mockPrisma.$queryRaw.mock.invocationCallOrder;
       expect(lockCalls[lockCalls.length - 1]).toBeLessThan(
-        mockPrisma.menuDay.findUnique.mock.invocationCallOrder[1],
+        mockPrisma.menuDay.findMany.mock.invocationCallOrder[1],
       );
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
+    it('locks all menu days once, ordered, before reading orders', async () => {
+      await service.create(
+        'c1',
+        [order('2026-10-14'), order('2026-10-15')],
+        admin,
+        BEFORE,
+      );
+      const locks = mockPrisma.$queryRaw.mock.calls.length;
+      expect(locks).toBe(2);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        mockPrisma.mealOrder.findFirst.mock.invocationCallOrder[0],
+      );
+      const sql = (
+        mockPrisma.$queryRaw.mock.calls[1] as [TemplateStringsArray]
+      )[0].join('?');
+      expect(sql).toContain('ORDER BY id FOR SHARE');
+    });
+
+    it('skips the menu lock when no menu day exists', async () => {
+      useMenus([]);
+      await expect(
+        service.create('c1', [order()], admin, BEFORE),
+      ).rejects.toThrow();
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
     it('rejects duplicate dates', async () => {
@@ -321,10 +374,10 @@ describe('MealOrdersService', () => {
     });
 
     it('fails the whole multi-day order on one bad day', async () => {
-      mockPrisma.menuDay.findUnique
-        .mockResolvedValueOnce({ id: 'm1', status: MenuStatus.published })
-        .mockResolvedValueOnce({ status: MenuStatus.published })
-        .mockResolvedValueOnce({ id: 'm2', status: MenuStatus.draft });
+      useMenus([
+        { id: 'm1', date: day('2026-10-14'), status: MenuStatus.published },
+        { id: 'm2', date: day('2026-10-15'), status: MenuStatus.draft },
+      ]);
       await expect(
         service.create(
           'c1',

@@ -22,6 +22,7 @@ export class OrderDayDto {
 
   @IsArray()
   @ArrayUnique()
+  @ArrayMaxSize(10)
   @IsUUID('4', { each: true })
   dishIds: string[];
 }

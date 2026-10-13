@@ -179,7 +179,7 @@ Admin (`root`, `admin`):
 Templates:
 
 - `GET/POST /menu-templates`, `PATCH /menu-templates/:id` (name, weeks, active), `PUT /menu-templates/:id/items` `{ items: [{ week, weekday, dishId }] }` (week ≤ weeks, weekday 1–7).
-- `POST /menu-templates/:id/apply` `{ kind, from, to, startWeek, overwrite }` creates drafts for every working day of the kind in the period that has template dishes for its `(templateWeek, weekday)`, with the same skip/overwrite rules as copy. Period ≤ 92 days.
+- `POST /menu-templates/:id/apply` `{ kind, from, to, startWeek, overwrite }` creates drafts for every working day of the kind in the period that has template dishes for its `(templateWeek, weekday)`, with the same skip/overwrite rules as copy. Period ≤ 92 days. Inactive template → 400 `Menu template is inactive`.
 
 ## Orders
 
@@ -206,7 +206,7 @@ Absence notices: `NoticesService.decide` currently updates without a transaction
 
 - `GET /meal-orders?date&kind&groupId` (admin) → `{ orders: [{ id, child, group, complex, items, price, createdBy, cancelled… }], summary: { complexes: [{ complexId, name, count }], dishes: [{ dishId, name, count }] } }`; summary counts active orders only.
 - `GET /meal-orders/today?groupId` (teacher of the group or admin; others 403 via `assertGroupAccess`-style check) → active orders for Kyiv today: child name, complex, dishes.
-- `GET /me/children/:id/menu?from&to` (parent, `assertOwnChild`, ≤ 31 days) → per published day of the child's kind: dishes by course, complexes with the child's price (only those with a price and available on that day), the child's active order, `deadline` instant and `canOrder` / `canCancel`. Drafts are never shown.
+- `GET /me/children/:id/menu?from&to` (parent, `assertOwnChild`, ≤ 31 days) → per published day of the child's kind: dishes by course, complexes with the child's price (only those with a price and available on that day), the child's active order. Top level: `deadline` ('HH:MM') and `issue` (`no_group` / `no_price_category` / null). Per day: `deadlineAt` (instant), `open`, `working`, `canOrder`, `canCancel`. A day that became non-working after ordering stays visible with its order (`working: false`, no complexes, `canOrder: false`, `canCancel` by the deadline); non-working days without an order are dropped. Drafts are never shown.
 - `GET /meals/settings` / `PATCH /meals/settings` `{ mealOrderDeadline: 'HH:MM' }` (admin).
 
 Charges appear in the existing finance views and parent cabinet under `meals` with no extra work.

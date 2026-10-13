@@ -53,6 +53,18 @@ describe('cancelOrdersForNoticeInTx', () => {
     expect(tx.charge.update).toHaveBeenCalledTimes(2);
   });
 
+  it('locks the charge row before reading its void state', async () => {
+    await run('2026-10-14T06:00:00Z');
+    const sql = (tx.$queryRaw.mock.calls[1] as [TemplateStringsArray])[0].join(
+      '?',
+    );
+    expect(sql).toContain('"Charge"');
+    expect(sql).toContain('FOR UPDATE');
+    expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      tx.charge.findUnique.mock.invocationCallOrder[0],
+    );
+  });
+
   it('keeps the same-day order when the notice came after the deadline', async () => {
     await expect(run('2026-10-14T07:30:00Z')).resolves.toBe(1);
     expect(cancelledIds()).toEqual(['o15']);

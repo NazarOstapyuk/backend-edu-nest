@@ -330,6 +330,38 @@ describe('MenusService', () => {
       expect(mockPrisma.menuDayItem.deleteMany).not.toHaveBeenCalled();
     });
 
+    it('locks only the draft target ids', async () => {
+      mockPrisma.menuDay.findMany
+        .mockResolvedValueOnce([
+          { id: 'd1', date: day('2026-10-20'), status: MenuStatus.draft },
+          { id: 'p1', date: day('2026-10-21'), status: MenuStatus.published },
+        ])
+        .mockResolvedValueOnce([{ id: 'd1', status: MenuStatus.draft }]);
+      await service.fill(
+        K,
+        [
+          { date: day('2026-10-20'), dishIds: ['a'] },
+          { date: day('2026-10-21'), dishIds: ['b'] },
+        ],
+        true,
+      );
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.menuDay.findMany).toHaveBeenLastCalledWith({
+        where: { id: { in: ['d1'] } },
+        select: { id: true, status: true },
+      });
+    });
+
+    it('takes no lock when every target is published', async () => {
+      mockPrisma.menuDay.findMany.mockResolvedValueOnce([
+        { id: 'p1', date: day('2026-10-21'), status: MenuStatus.published },
+      ]);
+      await expect(
+        service.fill(K, [{ date: day('2026-10-21'), dishIds: ['b'] }], true),
+      ).resolves.toEqual({ created: 0, overwritten: 0, skipped: 1 });
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('skips existing drafts without overwrite', async () => {
       mockPrisma.menuDay.findMany.mockResolvedValue([
         { id: 'd1', date: day('2026-10-20'), status: MenuStatus.draft },
@@ -371,33 +403,50 @@ describe('MenusService', () => {
   });
 
   describe('deleteDay', () => {
-    it('deletes a draft without orders', async () => {
-      mockPrisma.menuDay.findUnique.mockResolvedValue({
-        id: 'm1',
-        status: MenuStatus.draft,
-      });
+    const found = (status: MenuStatus) => {
+      mockPrisma.menuDay.findUnique
+        .mockResolvedValueOnce({ id: 'm1' })
+        .mockResolvedValueOnce({ status });
+    };
+
+    it('deletes a draft without orders after locking the day', async () => {
+      found(MenuStatus.draft);
       mockPrisma.mealOrder.count.mockResolvedValue(0);
       await expect(service.deleteDay('2026-10-14', K)).resolves.toEqual({
         message: 'Menu day deleted',
       });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.menuDay.findUnique.mock.invocationCallOrder[1],
+      );
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.mealOrder.count.mock.invocationCallOrder[0],
+      );
+      expect(mockPrisma.menuDay.delete).toHaveBeenCalledWith({
+        where: { id: 'm1' },
+      });
     });
 
-    it('rejects published days, days with orders and missing days', async () => {
-      mockPrisma.menuDay.findUnique.mockResolvedValueOnce({
-        id: 'm1',
-        status: MenuStatus.published,
-      });
+    it('rejects a day published while waiting for the lock', async () => {
+      found(MenuStatus.published);
       await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
         new BadRequestException('Menu is published'),
       );
-      mockPrisma.menuDay.findUnique.mockResolvedValueOnce({
-        id: 'm1',
-        status: MenuStatus.draft,
-      });
+      expect(mockPrisma.menuDay.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects days with orders, cancelled included', async () => {
+      found(MenuStatus.draft);
       mockPrisma.mealOrder.count.mockResolvedValueOnce(1);
       await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
         new BadRequestException('Menu has orders'),
       );
+      expect(mockPrisma.mealOrder.count).toHaveBeenCalledWith({
+        where: { menuDayId: 'm1' },
+      });
+    });
+
+    it('rejects a missing day', async () => {
       mockPrisma.menuDay.findUnique.mockResolvedValueOnce(null);
       await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
         new NotFoundException('Menu day not found'),

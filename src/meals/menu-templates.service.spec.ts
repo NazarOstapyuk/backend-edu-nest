@@ -177,6 +177,21 @@ describe('MenuTemplatesService', () => {
       );
     });
 
+    it('rejects an inactive template', async () => {
+      mockPrisma.menuTemplate.findUnique.mockResolvedValue(
+        template({ active: false }),
+      );
+      await expect(
+        service.apply('t1', {
+          kind: K,
+          from: '2026-10-12',
+          to: '2026-10-16',
+          startWeek: 1,
+        }),
+      ).rejects.toThrow(new BadRequestException('Menu template is inactive'));
+      expect(mockMenus.fill).not.toHaveBeenCalled();
+    });
+
     it('rejects a start week beyond the cycle', async () => {
       await expect(
         service.apply('t1', {

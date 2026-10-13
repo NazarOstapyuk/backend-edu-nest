@@ -14,12 +14,14 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  Matches,
 } from 'class-validator';
 
 export class CreateMenuTemplateDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   name: string;
 
   @IsInt()
@@ -32,6 +34,7 @@ export class UpdateMenuTemplateDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
+  @Matches(/\S/)
   @IsOptional()
   name?: string;
 

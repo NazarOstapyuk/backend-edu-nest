@@ -131,6 +131,8 @@ export class MenuTemplatesService {
 
   async apply(id: string, dto: ApplyTemplateDto) {
     const template = await this.get(id);
+    if (!template.active)
+      throw new BadRequestException('Menu template is inactive');
     if (dto.startWeek > template.weeks)
       throw new BadRequestException('Template week out of range');
     const { from, to } = parsePeriod(dto.from, dto.to, 92);

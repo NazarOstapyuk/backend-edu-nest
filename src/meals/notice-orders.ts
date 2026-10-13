@@ -17,6 +17,7 @@ export async function cancelOrderInTx(
       cancelReason: reason,
     },
   });
+  await tx.$queryRaw`SELECT id FROM "Charge" WHERE id = ${order.chargeId} FOR UPDATE`;
   const charge = await tx.charge.findUnique({
     where: { id: order.chargeId },
     select: { id: true, voidedAt: true },
