@@ -40,6 +40,10 @@ const mockPrisma = {
   schoolLesson: { count: jest.fn() },
   lessonMark: { count: jest.fn() },
   mealOrder: { count: jest.fn() },
+  salaryTerms: { count: jest.fn() },
+  payrollSheet: { count: jest.fn() },
+  payrollAdjustment: { count: jest.fn() },
+  payrollPayment: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -262,6 +266,39 @@ describe('UsersService', () => {
       mockPrisma.schoolLesson.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
       mockPrisma.mealOrder.count.mockResolvedValue(0);
+      mockPrisma.salaryTerms.count.mockResolvedValue(0);
+      mockPrisma.payrollSheet.count.mockResolvedValue(0);
+      mockPrisma.payrollAdjustment.count.mockResolvedValue(0);
+      mockPrisma.payrollPayment.count.mockResolvedValue(0);
+    });
+
+    it('throws BadRequestException when user has salary terms', async () => {
+      mockPrisma.salaryTerms.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
+        where: { OR: [{ teacherId: 'u1' }, { createdById: 'u1' }] },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user has payroll payments', async () => {
+      mockPrisma.payrollPayment.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.payrollSheet.count).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { teacherId: 'u1' },
+            { approvedById: 'u1' },
+            { reopenedById: 'u1' },
+          ],
+        },
+      });
     });
 
     it('deletes a user without financial records', async () => {
@@ -348,6 +385,48 @@ describe('UsersService', () => {
         where: { OR: [{ createdById: 'u1' }, { cancelledById: 'u1' }] },
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update role of a teacher with salary terms', () => {
+    it('rejects changing the role away from teacher', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 't1',
+        login: 'teacher',
+        role: Role.teacher,
+        phone: null,
+      });
+      mockPrisma.salaryTerms.count.mockResolvedValue(2);
+
+      await expect(
+        service.update('t1', { role: Role.admin }, Role.root),
+      ).rejects.toThrow('User has salary terms');
+      expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
+        where: { teacherId: 't1' },
+      });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('allows other changes of a teacher with salary terms', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 't1',
+        login: 'teacher',
+        role: Role.teacher,
+        phone: null,
+      });
+      mockPrisma.salaryTerms.count.mockResolvedValue(2);
+      mockPrisma.user.update.mockResolvedValue({
+        id: 't1',
+        login: 'teacher',
+        role: Role.teacher,
+        password: 'x',
+        refreshToken: null,
+      });
+
+      await service.update('t1', { firstName: 'Олена' }, Role.root);
+
+      expect(mockPrisma.salaryTerms.count).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalled();
     });
   });
 });

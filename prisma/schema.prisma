@@ -80,6 +80,15 @@ model User {
   lessonMarksVoided   LessonMark[]           @relation("LessonMarkVoidedBy")
   mealOrdersCreated   MealOrder[]            @relation("MealOrderCreatedBy")
   mealOrdersCancelled MealOrder[]            @relation("MealOrderCancelledBy")
+  salaryTerms         SalaryTerms[]          @relation("SalaryTermsTeacher")
+  salaryTermsCreated  SalaryTerms[]          @relation("SalaryTermsCreatedBy")
+  payrollSheets       PayrollSheet[]         @relation("PayrollSheetTeacher")
+  payrollApproved     PayrollSheet[]         @relation("PayrollSheetApprovedBy")
+  payrollReopened     PayrollSheet[]         @relation("PayrollSheetReopenedBy")
+  payrollAdjCreated   PayrollAdjustment[]    @relation("PayrollAdjustmentCreatedBy")
+  payrollAdjVoided    PayrollAdjustment[]    @relation("PayrollAdjustmentVoidedBy")
+  payrollPayCreated   PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
+  payrollPayVoided    PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
 }
 
 model Group {
@@ -470,9 +479,10 @@ model ClassGroup {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  teachers User[]             @relation("ClassGroupTeachers")
-  members  ClassGroupMember[]
-  lessons  Lesson[]
+  teachers    User[]             @relation("ClassGroupTeachers")
+  members     ClassGroupMember[]
+  lessons     Lesson[]
+  salaryRates SalaryRate[]
 
   @@unique([directionId, name])
 }
@@ -730,12 +740,13 @@ enum NushLevel {
 }
 
 model Subject {
-  id      String           @id @default(uuid())
-  name    String           @unique
-  active  Boolean          @default(true)
-  entries TimetableEntry[]
-  changes LessonChange[]
-  lessons SchoolLesson[]
+  id          String           @id @default(uuid())
+  name        String           @unique
+  active      Boolean          @default(true)
+  entries     TimetableEntry[]
+  changes     LessonChange[]
+  lessons     SchoolLesson[]
+  salaryRates SalaryRate[]
 }
 
 model Room {
@@ -1049,4 +1060,166 @@ model MealOrderItem {
   dish     Dish       @relation(fields: [dishId], references: [id], onDelete: Restrict)
 
   @@id([orderId, courseId])
+}
+
+enum PayrollCalendar {
+  all
+  kindergarten
+  school_class
+}
+
+enum PayrollLessonType {
+  school_lesson
+  class_group
+  individual
+}
+
+enum PayrollStatus {
+  draft
+  approved
+}
+
+enum PayrollLineType {
+  base
+  allowance
+  lesson
+  correction
+  adjustment
+}
+
+enum PayrollSourceType {
+  school_lesson
+  class_lesson
+}
+
+enum PayrollAdjustmentKind {
+  bonus
+  deduction
+}
+
+enum PayrollPaymentMethod {
+  cash
+  card
+}
+
+model SalaryTerms {
+  id           String            @id @default(uuid())
+  teacherId    String
+  teacher      User              @relation("SalaryTermsTeacher", fields: [teacherId], references: [id])
+  validFrom    DateTime          @db.Date
+  validTo      DateTime?         @db.Date
+  monthlyRate  Decimal           @db.Decimal(12, 2)
+  calendarKind PayrollCalendar   @default(all)
+  note         String?
+  createdById  String
+  createdBy    User              @relation("SalaryTermsCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime          @default(now())
+  rates        SalaryRate[]
+  allowances   SalaryAllowance[]
+
+  @@index([teacherId, validFrom])
+}
+
+model SalaryRate {
+  id           String            @id @default(uuid())
+  termsId      String
+  terms        SalaryTerms       @relation(fields: [termsId], references: [id], onDelete: Cascade)
+  lessonType   PayrollLessonType
+  subjectId    String?
+  subject      Subject?          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  classGroupId String?
+  classGroup   ClassGroup?       @relation(fields: [classGroupId], references: [id], onDelete: Restrict)
+  amount       Decimal           @db.Decimal(12, 2)
+
+  @@index([termsId])
+}
+
+model SalaryAllowance {
+  id      String      @id @default(uuid())
+  termsId String
+  terms   SalaryTerms @relation(fields: [termsId], references: [id], onDelete: Cascade)
+  name    String
+  amount  Decimal     @db.Decimal(12, 2)
+
+  @@index([termsId])
+}
+
+model PayrollSheet {
+  id           String              @id @default(uuid())
+  teacherId    String
+  teacher      User                @relation("PayrollSheetTeacher", fields: [teacherId], references: [id])
+  month        DateTime            @db.Date
+  status       PayrollStatus       @default(draft)
+  workedDays   Int?
+  approvedDays Json?
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?               @relation("PayrollSheetApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  reopenedAt   DateTime?
+  reopenedById String?
+  reopenedBy   User?               @relation("PayrollSheetReopenedBy", fields: [reopenedById], references: [id], onDelete: Restrict)
+  reopenReason String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  lines        PayrollLine[]
+  adjustments  PayrollAdjustment[]
+  payments     PayrollPayment[]
+
+  @@unique([teacherId, month])
+}
+
+model PayrollLine {
+  id         String             @id @default(uuid())
+  sheetId    String
+  sheet      PayrollSheet       @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  position   Int
+  type       PayrollLineType
+  sourceType PayrollSourceType?
+  sourceId   String?
+  lessonType PayrollLessonType?
+  date       DateTime?          @db.Date
+  refMonth   DateTime?          @db.Date
+  title      String
+  amount     Decimal            @db.Decimal(12, 2)
+  meta       Json?
+
+  @@index([sheetId])
+  @@index([sourceType, sourceId])
+}
+
+model PayrollAdjustment {
+  id          String                @id @default(uuid())
+  sheetId     String
+  sheet       PayrollSheet          @relation(fields: [sheetId], references: [id])
+  kind        PayrollAdjustmentKind
+  amount      Decimal               @db.Decimal(12, 2)
+  reason      String
+  createdById String
+  createdBy   User                  @relation("PayrollAdjustmentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime              @default(now())
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?                 @relation("PayrollAdjustmentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([sheetId])
+}
+
+model PayrollPayment {
+  id          String               @id @default(uuid())
+  sheetId     String
+  sheet       PayrollSheet         @relation(fields: [sheetId], references: [id])
+  date        DateTime             @db.Date
+  amount      Decimal              @db.Decimal(12, 2)
+  method      PayrollPaymentMethod
+  comment     String?
+  createdById String
+  createdBy   User                 @relation("PayrollPaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime             @default(now())
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?                @relation("PayrollPaymentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([sheetId])
 }

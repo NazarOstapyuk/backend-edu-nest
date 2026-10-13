@@ -120,6 +120,16 @@ export class UsersService {
       this.prisma.lessonMark.count({
         where: { OR: [{ markedById: id }, { voidedById: id }] },
       }),
+      this.prisma.salaryTerms.count({
+        where: { OR: [{ teacherId: id }, { createdById: id }] },
+      }),
+      this.prisma.payrollSheet.count({
+        where: {
+          OR: [{ teacherId: id }, { approvedById: id }, { reopenedById: id }],
+        },
+      }),
+      this.prisma.payrollAdjustment.count({ where: author }),
+      this.prisma.payrollPayment.count({ where: author }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
@@ -138,6 +148,16 @@ export class UsersService {
 
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
+    if (
+      user.role === Role.teacher &&
+      dto.role !== undefined &&
+      dto.role !== Role.teacher
+    ) {
+      const terms = await this.prisma.salaryTerms.count({
+        where: { teacherId: id },
+      });
+      if (terms > 0) throw new BadRequestException('User has salary terms');
+    }
 
     if (dto.login && dto.login !== user.login) {
       const existing = await this.prisma.user.findUnique({
