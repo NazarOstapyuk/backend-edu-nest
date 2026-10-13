@@ -20,6 +20,7 @@ Admins plan menus (separately for kindergarten and school) from reusable cyclic 
 | Absence notices | Approving a notice cancels orders for its days whose deadline had not passed when the notice was submitted. |
 | Charging | One order = one `Charge` (`category = meals`, `sourceType = meals`, `sourceId = order id`), created with the order; debt allowed. Cancelling voids the charge. |
 | Visibility | Admins see all orders with portion totals; teachers see today's orders of their own groups; parents see their own children. |
+| Day closed later | Marking a day non-working in the calendar never cancels existing meal orders; they stay charged. Admins see a warning on that day and cancel manually if needed; parents still see the day and can cancel before the deadline. |
 
 ## Data Model
 
