@@ -58,7 +58,7 @@ Rate lookup for a lesson: the terms version effective on the lesson date; inside
 One per teacher and month, created lazily on the first mutation (upsert on `(teacherId, month)`).
 
 - `teacherId`, `month` (`@db.Date`, first day), `status` enum `PayrollStatus`: `draft`, `approved`.
-- `workedDays` Int nullable (override; null = default).
+- `workedDays` Int nullable (override; null = default). `approvedDays` Json nullable (the `days` block snapshotted on approval).
 - `approvedAt`, `approvedById`, `reopenedAt`, `reopenedById`, `reopenReason` (last reopen).
 - `@@unique([teacherId, month])`.
 
@@ -66,7 +66,7 @@ One per teacher and month, created lazily on the first mutation (upsert on `(tea
 
 Snapshot rows written on approval, deleted on reopen.
 
-- `sheetId`, `type` enum `PayrollLineType`: `base`, `allowance`, `lesson`, `correction`, `adjustment`.
+- `sheetId`, `position` (display order), `type` enum `PayrollLineType`: `base`, `allowance`, `lesson`, `correction`, `adjustment`.
 - `sourceType` enum `PayrollSourceType` nullable: `school_lesson`, `class_lesson`. `sourceId` nullable (lesson id).
 - `lessonType` nullable, `date` nullable (lesson date), `refMonth` nullable (for `correction`: month of the corrected lesson).
 - `title` (human text: allowance name, subject / class group name, adjustment reason).
@@ -132,7 +132,7 @@ All routes need `JwtAuthGuard` + `RolesGuard`. Management routes: `@Roles(admin,
 - `GET /salary-terms?teacherId=` → versions of the teacher (newest first) with rates (subject / class group names) and allowances.
 - `GET /salary-terms/:id`.
 - `POST /salary-terms` `{ teacherId, validFrom, monthlyRate, calendarKind, note?, rates: [{ lessonType, subjectId?, classGroupId?, amount }], allowances: [{ name, amount }] }`. Teacher must exist with role `teacher` (400 `User is not a teacher`); subject / class group must exist (404 `Subject not found` / `Class group not found`); `rates` ≤ 100, `allowances` ≤ 20.
-- `PATCH /salary-terms/:id` (only not started): same body without `teacherId`.
+- `PATCH /salary-terms/:id` (only not started): same body without `teacherId` and `validFrom` (to move the start, delete and recreate); only the fields sent are changed, `rates` / `allowances` replace the lists.
 - `DELETE /salary-terms/:id` (only not started) → `{ message: 'Salary terms deleted' }`.
 - `PATCH /salary-terms/:id/close` `{ validTo }`.
 
@@ -164,7 +164,7 @@ All routes need `JwtAuthGuard` + `RolesGuard`. Management routes: `@Roles(admin,
 | Status | Message |
 |---|---|
 | 404 | `Salary terms not found`, `Teacher not found`, `Payroll adjustment not found`, `Payroll payment not found` |
-| 400 | `User is not a teacher`, `Salary terms overlap`, `Started salary terms cannot be changed`, `Salary terms are closed`, `Duplicate salary rate`, `Rate does not match class group format`, `Subject rate must be a school lesson`, `Payroll is approved`, `Payroll is not approved`, `Invalid date range`, `Payroll has payments after approval`, `Payroll has later corrections`, `Month is in the future`, `Invalid month`, `Payment date is in the future`, `Adjustment is voided`, `Payment is voided`, `User has salary terms` |
+| 400 | `User is not a teacher`, `Salary terms overlap`, `Started salary terms cannot be changed`, `Salary terms are closed`, `Duplicate salary rate`, `Rate does not match class group format`, `Subject rate must be a school lesson`, `Payroll is approved`, `Payroll is not approved`, `Invalid date range`, `Payroll has payments after approval`, `Payroll has later corrections`, `Month is in the future`, `Invalid month`, `Payment date is in the future`, `Adjustment is voided`, `Payment is voided`, `User has salary terms`, `Invalid year` |
 
 ## Frontend
 
