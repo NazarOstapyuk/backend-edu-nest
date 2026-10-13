@@ -270,8 +270,8 @@ export class PayrollService {
       throw new BadRequestException('Month is in the future');
     await this.prisma.$transaction(async (tx) => {
       const sheet = await this.lockSheet(tx, teacher.id, month);
-      await this.lockApproved(tx, teacher.id);
       assertDraft(sheet.status);
+      await this.lockApproved(tx, teacher.id);
       const computed = await this.builder.compute(
         tx,
         teacher.id,
@@ -316,14 +316,15 @@ export class PayrollService {
   ) {
     const { teacher, month } = await this.target(teacherId, monthValue);
     await this.prisma.$transaction(async (tx) => {
-      await this.lockApproved(tx, teacher.id);
+      const lockedIds = await this.lockApproved(tx, teacher.id);
       const sheet = await tx.payrollSheet.findUnique({
         where: { teacherId_month: { teacherId: teacher.id, month } },
       });
       if (
         !sheet ||
         sheet.status !== PayrollStatus.approved ||
-        !sheet.approvedAt
+        !sheet.approvedAt ||
+        !lockedIds.some((row) => row.id === sheet.id)
       )
         throw new BadRequestException('Payroll is not approved');
       const later = await tx.payrollPayment.count({
@@ -395,6 +396,8 @@ export class PayrollService {
   }
 
   private async lockApproved(tx: Tx, teacherId: string) {
-    await tx.$queryRaw`SELECT id FROM "PayrollSheet" WHERE "teacherId" = ${teacherId} AND status = 'approved' ORDER BY id FOR UPDATE`;
+    return tx.$queryRaw<
+      { id: string }[]
+    >`SELECT id FROM "PayrollSheet" WHERE "teacherId" = ${teacherId} AND status = 'approved' ORDER BY id FOR UPDATE`;
   }
 }

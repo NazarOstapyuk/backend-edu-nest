@@ -143,7 +143,10 @@ export class ClassGroupsService {
     const lessons = await this.prisma.lesson.count({
       where: { classGroupId: id },
     });
-    if (lessons > 0)
+    const rates = await this.prisma.salaryRate.count({
+      where: { classGroupId: id },
+    });
+    if (lessons > 0 || rates > 0)
       throw new BadRequestException('Cannot delete: group is in use');
     await this.prisma.$transaction([
       this.prisma.classGroupMember.deleteMany({ where: { classGroupId: id } }),

@@ -26,6 +26,7 @@ const mockPrisma = {
   tariff: { findUnique: jest.fn() },
   child: { findUnique: jest.fn() },
   lesson: { count: jest.fn() },
+  salaryRate: { count: jest.fn() },
   $transaction: jest.fn(),
 };
 
@@ -193,9 +194,20 @@ describe('ClassGroupsService', () => {
 
   it('refuses to delete a group with lessons', async () => {
     mockPrisma.lesson.count.mockResolvedValue(3);
+    mockPrisma.salaryRate.count.mockResolvedValue(0);
 
     await expect(service.delete('g1')).rejects.toThrow(
       'Cannot delete: group is in use',
     );
+  });
+
+  it('refuses to delete a group referenced by a salary rate', async () => {
+    mockPrisma.lesson.count.mockResolvedValue(0);
+    mockPrisma.salaryRate.count.mockResolvedValue(1);
+
+    await expect(service.delete('g1')).rejects.toThrow(
+      'Cannot delete: group is in use',
+    );
+    expect(mockPrisma.classGroup.delete).not.toHaveBeenCalled();
   });
 });

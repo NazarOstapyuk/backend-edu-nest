@@ -489,6 +489,7 @@ describe('PayrollService', () => {
         'Payroll is approved',
       );
       expect(mockBuilder.compute).not.toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
     it('snapshots computed lines on approval after locking approved sheets', async () => {
@@ -593,7 +594,19 @@ describe('PayrollService', () => {
         ).rejects.toThrow('Payroll is not approved');
       });
 
+      it('rejects when the sheet is not among the locked approved sheets', async () => {
+        mockPrisma.$queryRaw.mockResolvedValue([]);
+        mockPrisma.payrollSheet.findUnique.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved, approvedAt }),
+        );
+        await expect(
+          service.reopen('t1', '2026-10', 'x', admin),
+        ).rejects.toThrow('Payroll is not approved');
+        expect(mockPrisma.payrollLine.deleteMany).not.toHaveBeenCalled();
+      });
+
       it('rejects when a payment was made after approval', async () => {
+        mockPrisma.$queryRaw.mockResolvedValue([{ id: 'ps1' }]);
         mockPrisma.payrollSheet.findUnique.mockResolvedValue(
           sheet({ status: PayrollStatus.approved, approvedAt }),
         );
@@ -611,6 +624,7 @@ describe('PayrollService', () => {
       });
 
       it('rejects when a later sheet booked a correction for this month', async () => {
+        mockPrisma.$queryRaw.mockResolvedValue([{ id: 'ps1' }]);
         mockPrisma.payrollSheet.findUnique.mockResolvedValue(
           sheet({ status: PayrollStatus.approved, approvedAt }),
         );
@@ -629,6 +643,7 @@ describe('PayrollService', () => {
       });
 
       it('deletes the snapshot and returns the sheet to draft', async () => {
+        mockPrisma.$queryRaw.mockResolvedValue([{ id: 'ps1' }]);
         mockPrisma.payrollSheet.findUnique.mockResolvedValue(
           sheet({ status: PayrollStatus.approved, approvedAt }),
         );
