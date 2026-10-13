@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
 import { addDays, kyivToday } from '../tariffs/dates';
+import { positiveAmount } from './amount';
 import {
   CloseSalaryTermsDto,
   CreateSalaryTermsDto,
@@ -16,13 +17,6 @@ import {
   UpdateSalaryTermsDto,
 } from './dto/salary-terms.dto';
 import { termsInclude, toTermsView } from './terms-view';
-
-const positive = (value: string) => {
-  const amount = new Prisma.Decimal(value);
-  if (amount.lte(0))
-    throw new BadRequestException('Amount must be greater than 0');
-  return amount;
-};
 
 @Injectable()
 export class SalaryTermsService {
@@ -190,7 +184,7 @@ export class SalaryTermsService {
   private validateAllowances(allowances: SalaryAllowanceDto[]) {
     return allowances.map((allowance) => ({
       name: allowance.name.trim(),
-      amount: positive(allowance.amount),
+      amount: positiveAmount(allowance.amount),
     }));
   }
 

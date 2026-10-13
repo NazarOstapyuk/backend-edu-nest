@@ -1,5 +1,14 @@
 import { Test } from '@nestjs/testing';
-import { PayrollStatus, Role } from '@prisma/client';
+import {
+  PayrollAdjustmentKind,
+  PayrollLessonType,
+  PayrollLineType,
+  PayrollPaymentMethod,
+  PayrollSourceType,
+  PayrollStatus,
+  Prisma,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayrollBuilder } from './payroll-builder.service';
 import { PayrollService } from './payroll.service';
@@ -234,6 +243,420 @@ describe('PayrollService', () => {
         OCT,
         false,
       );
+    });
+  });
+
+  describe('mutations', () => {
+    const admin = {
+      id: 'a1',
+      role: Role.admin,
+      login: 'admin',
+      mustChangePassword: false,
+    };
+    const dec = (value: string) => new Prisma.Decimal(value);
+    const sheet = (over: Record<string, unknown> = {}) => ({
+      id: 'ps1',
+      teacherId: 't1',
+      month: OCT,
+      status: PayrollStatus.draft,
+      workedDays: null,
+      approvedAt: null,
+      adjustments: [],
+      ...over,
+    });
+    const sqlOf = (index: number) =>
+      (
+        mockPrisma.$queryRaw.mock.calls[index] as [TemplateStringsArray]
+      )[0].join('?');
+
+    beforeEach(() => {
+      mockPrisma.payrollSheet.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(sheet());
+    });
+
+    it('locks the sheet before reading it and stores worked days', async () => {
+      await service.setWorkedDays('t1', '2026-10', 12);
+
+      expect(mockPrisma.payrollSheet.createMany).toHaveBeenCalledWith({
+        data: [{ teacherId: 't1', month: OCT }],
+        skipDuplicates: true,
+      });
+      expect(sqlOf(0)).toContain('FOR UPDATE');
+      expect(
+        mockPrisma.payrollSheet.createMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockPrisma.$queryRaw.mock.invocationCallOrder[0]);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.payrollSheet.findUniqueOrThrow.mock.invocationCallOrder[1],
+      );
+      expect(mockPrisma.payrollSheet.update).toHaveBeenCalledWith({
+        where: { id: 'ps1' },
+        data: { workedDays: 12 },
+      });
+      expect(mockBuilder.detail).toHaveBeenCalledWith(
+        prisma,
+        teacher,
+        OCT,
+        true,
+      );
+    });
+
+    it('rejects worked days on an approved sheet', async () => {
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+        sheet({ status: PayrollStatus.approved }),
+      );
+      await expect(service.setWorkedDays('t1', '2026-10', 12)).rejects.toThrow(
+        'Payroll is approved',
+      );
+      expect(mockPrisma.payrollSheet.update).not.toHaveBeenCalled();
+    });
+
+    it('adds a bonus to a draft', async () => {
+      await service.addAdjustment(
+        't1',
+        '2026-10',
+        {
+          kind: PayrollAdjustmentKind.bonus,
+          amount: '500',
+          reason: ' Премія ',
+        },
+        admin,
+      );
+      expect(mockPrisma.payrollAdjustment.create).toHaveBeenCalledWith({
+        data: {
+          sheetId: 'ps1',
+          kind: PayrollAdjustmentKind.bonus,
+          amount: dec('500'),
+          reason: 'Премія',
+          createdById: 'a1',
+        },
+      });
+    });
+
+    it('rejects a zero adjustment before opening a transaction', async () => {
+      await expect(
+        service.addAdjustment(
+          't1',
+          '2026-10',
+          { kind: PayrollAdjustmentKind.deduction, amount: '0', reason: 'x' },
+          admin,
+        ),
+      ).rejects.toThrow('Amount must be greater than 0');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects an adjustment on an approved sheet', async () => {
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+        sheet({ status: PayrollStatus.approved }),
+      );
+      await expect(
+        service.addAdjustment(
+          't1',
+          '2026-10',
+          { kind: PayrollAdjustmentKind.bonus, amount: '1', reason: 'x' },
+          admin,
+        ),
+      ).rejects.toThrow('Payroll is approved');
+    });
+
+    it('voids an adjustment of a draft', async () => {
+      mockPrisma.payrollAdjustment.findUnique.mockResolvedValue({
+        sheet: { id: 'ps1', teacherId: 't1', month: OCT },
+      });
+      mockPrisma.payrollAdjustment.findUniqueOrThrow.mockResolvedValue({
+        voidedAt: null,
+      });
+
+      await service.voidAdjustment('pa1', ' Помилка ', admin);
+
+      expect(sqlOf(0)).toContain('FOR UPDATE');
+      expect(mockPrisma.payrollAdjustment.update).toHaveBeenCalledWith({
+        where: { id: 'pa1' },
+        data: {
+          voidedAt: expect.any(Date) as Date,
+          voidedById: 'a1',
+          voidReason: 'Помилка',
+        },
+      });
+      expect(mockBuilder.teacher).toHaveBeenCalledWith(prisma, 't1');
+    });
+
+    it('rejects a missing or voided adjustment', async () => {
+      mockPrisma.payrollAdjustment.findUnique.mockResolvedValue(null);
+      await expect(service.voidAdjustment('pa1', 'x', admin)).rejects.toThrow(
+        'Payroll adjustment not found',
+      );
+      mockPrisma.payrollAdjustment.findUnique.mockResolvedValue({
+        sheet: { id: 'ps1', teacherId: 't1', month: OCT },
+      });
+      mockPrisma.payrollAdjustment.findUniqueOrThrow.mockResolvedValue({
+        voidedAt: new Date(),
+      });
+      await expect(service.voidAdjustment('pa1', 'x', admin)).rejects.toThrow(
+        'Adjustment is voided',
+      );
+    });
+
+    it('records a payment on an approved sheet', async () => {
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+        sheet({ status: PayrollStatus.approved }),
+      );
+      await service.addPayment(
+        't1',
+        '2026-10',
+        {
+          date: '2026-10-05',
+          amount: '5000',
+          method: PayrollPaymentMethod.cash,
+        },
+        admin,
+      );
+      expect(mockPrisma.payrollPayment.create).toHaveBeenCalledWith({
+        data: {
+          sheetId: 'ps1',
+          date: day('2026-10-05'),
+          amount: dec('5000'),
+          method: PayrollPaymentMethod.cash,
+          comment: null,
+          createdById: 'a1',
+        },
+      });
+    });
+
+    it('rejects a payment dated in the future', async () => {
+      await expect(
+        service.addPayment(
+          't1',
+          '2026-10',
+          {
+            date: '2099-01-01',
+            amount: '1',
+            method: PayrollPaymentMethod.card,
+          },
+          admin,
+        ),
+      ).rejects.toThrow('Payment date is in the future');
+    });
+
+    it('rejects a missing or voided payment', async () => {
+      mockPrisma.payrollPayment.findUnique.mockResolvedValue(null);
+      await expect(service.voidPayment('pp1', 'x', admin)).rejects.toThrow(
+        'Payroll payment not found',
+      );
+      mockPrisma.payrollPayment.findUnique.mockResolvedValue({
+        sheet: { id: 'ps1', teacherId: 't1', month: OCT },
+      });
+      mockPrisma.payrollPayment.findUniqueOrThrow.mockResolvedValue({
+        voidedAt: new Date(),
+      });
+      await expect(service.voidPayment('pp1', 'x', admin)).rejects.toThrow(
+        'Payment is voided',
+      );
+    });
+
+    it('voids a payment of an approved sheet', async () => {
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+        sheet({ status: PayrollStatus.approved }),
+      );
+      mockPrisma.payrollPayment.findUnique.mockResolvedValue({
+        sheet: { id: 'ps1', teacherId: 't1', month: OCT },
+      });
+      mockPrisma.payrollPayment.findUniqueOrThrow.mockResolvedValue({
+        voidedAt: null,
+      });
+      await service.voidPayment('pp1', 'Дубль', admin);
+      expect(mockPrisma.payrollPayment.update).toHaveBeenCalledWith({
+        where: { id: 'pp1' },
+        data: {
+          voidedAt: expect.any(Date) as Date,
+          voidedById: 'a1',
+          voidReason: 'Дубль',
+        },
+      });
+    });
+
+    it('rejects approving a future month', async () => {
+      await expect(service.approve('t1', '2099-01', admin)).rejects.toThrow(
+        'Month is in the future',
+      );
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects approving an approved sheet', async () => {
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+        sheet({ status: PayrollStatus.approved }),
+      );
+      await expect(service.approve('t1', '2026-10', admin)).rejects.toThrow(
+        'Payroll is approved',
+      );
+      expect(mockBuilder.compute).not.toHaveBeenCalled();
+    });
+
+    it('snapshots computed lines on approval after locking approved sheets', async () => {
+      const days = {
+        normDays: 22,
+        defaultDays: 22,
+        workedDays: 22,
+        override: false,
+      };
+      mockBuilder.compute.mockResolvedValue({
+        days,
+        lines: [
+          {
+            type: PayrollLineType.base,
+            sourceType: null,
+            sourceId: null,
+            lessonType: null,
+            date: null,
+            refMonth: null,
+            title: '',
+            amount: dec('1000'),
+            meta: { normDays: 22, defaultDays: 22, workedDays: 22 },
+          },
+          {
+            type: PayrollLineType.lesson,
+            sourceType: PayrollSourceType.school_lesson,
+            sourceId: 'sl1',
+            lessonType: PayrollLessonType.school_lesson,
+            date: day('2026-10-05'),
+            refMonth: null,
+            title: 'Математика',
+            amount: dec('300'),
+            meta: null,
+          },
+        ],
+        warnings: { noRate: 0, lessonsWithoutTerms: 0 },
+        lessons: 1,
+      });
+
+      await service.approve('t1', '2026-10', admin);
+
+      expect(sqlOf(1)).toContain(`status = 'approved'`);
+      expect(sqlOf(1)).toContain('ORDER BY id FOR UPDATE');
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        mockBuilder.compute.mock.invocationCallOrder[0],
+      );
+      expect(mockBuilder.compute).toHaveBeenCalledWith(
+        mockPrisma,
+        't1',
+        OCT,
+        null,
+        [],
+      );
+      expect(mockPrisma.payrollLine.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            sheetId: 'ps1',
+            position: 0,
+            type: PayrollLineType.base,
+            sourceType: null,
+            sourceId: null,
+            lessonType: null,
+            date: null,
+            refMonth: null,
+            title: '',
+            amount: dec('1000'),
+            meta: { normDays: 22, defaultDays: 22, workedDays: 22 },
+          },
+          {
+            sheetId: 'ps1',
+            position: 1,
+            type: PayrollLineType.lesson,
+            sourceType: PayrollSourceType.school_lesson,
+            sourceId: 'sl1',
+            lessonType: PayrollLessonType.school_lesson,
+            date: day('2026-10-05'),
+            refMonth: null,
+            title: 'Математика',
+            amount: dec('300'),
+            meta: undefined,
+          },
+        ],
+      });
+      expect(mockPrisma.payrollSheet.update).toHaveBeenCalledWith({
+        where: { id: 'ps1' },
+        data: {
+          status: PayrollStatus.approved,
+          approvedAt: expect.any(Date) as Date,
+          approvedById: 'a1',
+          approvedDays: days,
+        },
+      });
+    });
+
+    describe('reopen', () => {
+      const approvedAt = new Date('2026-11-01T09:00:00Z');
+
+      it('rejects a sheet that is not approved', async () => {
+        mockPrisma.payrollSheet.findUnique.mockResolvedValue(sheet());
+        await expect(
+          service.reopen('t1', '2026-10', 'x', admin),
+        ).rejects.toThrow('Payroll is not approved');
+      });
+
+      it('rejects when a payment was made after approval', async () => {
+        mockPrisma.payrollSheet.findUnique.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved, approvedAt }),
+        );
+        mockPrisma.payrollPayment.count.mockResolvedValue(1);
+        await expect(
+          service.reopen('t1', '2026-10', 'x', admin),
+        ).rejects.toThrow('Payroll has payments after approval');
+        expect(mockPrisma.payrollPayment.count).toHaveBeenCalledWith({
+          where: {
+            sheetId: 'ps1',
+            voidedAt: null,
+            createdAt: { gt: approvedAt },
+          },
+        });
+      });
+
+      it('rejects when a later sheet booked a correction for this month', async () => {
+        mockPrisma.payrollSheet.findUnique.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved, approvedAt }),
+        );
+        mockPrisma.payrollPayment.count.mockResolvedValue(0);
+        mockPrisma.payrollLine.count.mockResolvedValue(2);
+        await expect(
+          service.reopen('t1', '2026-10', 'x', admin),
+        ).rejects.toThrow('Payroll has later corrections');
+        expect(mockPrisma.payrollLine.count).toHaveBeenCalledWith({
+          where: {
+            type: PayrollLineType.correction,
+            refMonth: OCT,
+            sheet: { teacherId: 't1', status: PayrollStatus.approved },
+          },
+        });
+      });
+
+      it('deletes the snapshot and returns the sheet to draft', async () => {
+        mockPrisma.payrollSheet.findUnique.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved, approvedAt }),
+        );
+        mockPrisma.payrollPayment.count.mockResolvedValue(0);
+        mockPrisma.payrollLine.count.mockResolvedValue(0);
+
+        await service.reopen('t1', '2026-10', ' Помилка в ставці ', admin);
+
+        expect(sqlOf(0)).toContain('ORDER BY id FOR UPDATE');
+        expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          mockPrisma.payrollSheet.findUnique.mock.invocationCallOrder[0],
+        );
+        expect(mockPrisma.payrollLine.deleteMany).toHaveBeenCalledWith({
+          where: { sheetId: 'ps1' },
+        });
+        expect(mockPrisma.payrollSheet.update).toHaveBeenCalledWith({
+          where: { id: 'ps1' },
+          data: {
+            status: PayrollStatus.draft,
+            approvedAt: null,
+            approvedById: null,
+            approvedDays: Prisma.JsonNull,
+            reopenedAt: expect.any(Date) as Date,
+            reopenedById: 'a1',
+            reopenReason: 'Помилка в ставці',
+          },
+        });
+      });
     });
   });
 });
