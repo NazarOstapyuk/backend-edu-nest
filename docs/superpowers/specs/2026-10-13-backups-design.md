@@ -26,7 +26,7 @@ The database is copied automatically every night to a folder that the user's clo
 - `BACKUP_DIR`: absolute folder path. Not set or empty → backups are disabled; the API reports `configured: false`, the cron does nothing.
 - `BACKUP_PG_CONTAINER`: Docker container with Postgres, default `edu_postgres`. Set to an empty string to call a local `pg_dump` / `pg_restore` from `PATH` instead.
 
-Connection data (user, password, host, port, database) are parsed from `DATABASE_URL`. With Docker the command is `docker exec -e PGPASSWORD=<password> <container> pg_dump -U <user> -d <db> -Fc` and stdout is streamed to the file; without Docker `pg_dump -h <host> -p <port> -U <user> -d <db> -Fc -f <path>` with `PGPASSWORD` in the environment. The password is passed only through the environment, never as an argument, and never logged.
+Connection data (user, password, host, port, database) are parsed from `DATABASE_URL`. With Docker the command is `docker exec -e PGPASSWORD <container> pg_dump -U <user> -d <db> -Fc` and stdout is streamed to the file; without Docker `pg_dump -h <host> -p <port> -U <user> -d <db> -Fc -f <path>` with `PGPASSWORD` in the environment. The password is passed only through the environment (`-e PGPASSWORD` forwards the variable from the docker CLI environment), never as an argument, and never logged.
 
 ## Data model
 
