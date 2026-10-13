@@ -16,6 +16,7 @@ import { ClassesModule } from './classes/classes.module';
 import { ParentCabinetModule } from './parent-cabinet/parent-cabinet.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { TimetableModule } from './timetable/timetable.module';
+import { MealsModule } from './meals/meals.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     ParentCabinetModule,
     AttendanceModule,
     TimetableModule,
+    MealsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
