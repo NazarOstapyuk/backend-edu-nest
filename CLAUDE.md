@@ -117,7 +117,7 @@ Spec: `docs/superpowers/specs/2026-10-12-attendance-register-design.md`. Code in
 - `CalendarDay` entries (void, never edit) make periods non-working or a weekend working; precedence group > group kind > all, `non_working` wins a tie. Default: Mon–Fri working.
 - `DailyAttendance` = one active mark per child and day (`present`, `late`, `left_early`, `absent` + reason). Saving locks the children rows (`ORDER BY id FOR UPDATE`) before reading marks; corrections void the old mark. Teachers: own groups, `today − attendanceEditDays` (AppSetting, default 3) to today; admins any past day, with a reason outside the window. No future days, no non-working days.
 - `AbsenceNotice`: parents submit (today or later, ≤ 60 days, no overlap with pending/approved), admins approve/reject/cancel. Notices are never copied into marks: `register-calc.ts` resolves a day as mark → approved notice → unmarked. Keep day logic there and test it without mocks.
-- The register never touches money. Meals (Part 5) will use `RegisterService.expectedPresence`.
+- The register never touches money. Approving an absence notice cancels the child's meal orders for its days whose deadline had not passed when the notice was submitted (`src/meals/notice-orders.ts`).
 - Parent routes (`/me/children/:id/register`, `/me/children/:id/absence-notices`) check ownership with `assertOwnChild` (`src/common/ownership.ts`) and never return staff notes or staff names.
 
 ### Domain: school timetable
@@ -130,6 +130,17 @@ Spec: `docs/superpowers/specs/2026-10-12-school-timetable-design.md`. Code in `s
 - Saving a timetable or a change rejects real-time conflicts (teacher, room, class vs subgroup, intersecting subgroups) with 409 `Schedule conflict` and a `conflicts` list.
 - `SchoolLesson` is created on first save and snapshots subject/teacher/room; `LessonMark` = one active mark per pupil (children rows locked before reading marks; corrections void). Only the effective teacher (after replacement) or admins record lessons, within `attendanceEditDays`. Daily-register absences show on lessons; lesson marks never change the register.
 - НУШ levels (`needs_support`, `progressing`, `with_help`, `independent`) only; comments are visible to parents. Parent routes `/me/children/:id/schedule` and `/me/children/:id/lessons` use `assertOwnChild`.
+
+### Domain: meals
+
+Spec: `docs/superpowers/specs/2026-10-13-meals-design.md`. Code in `src/meals/`:
+
+- Directories: `MealCourse`, `Dish` (belongs to a course), `MealPriceCategory` (linked to `Group.mealPriceCategoryId`), `MealComplex` (a set of courses) with dated `MealComplexPrice` per category. Deactivated, never deleted.
+- `MenuDay` is one menu per date and group kind (`draft` / `published`) with `MenuDayItem` dishes; several dishes of one course = the parent picks one. Templates (`MenuTemplate`, N-week cycle) and copying create drafts only; template changes never touch existing days. Removing a dish used by an active order → 400 `Dish is ordered`; unpublishing a period with active orders → 400 `Menu has orders`.
+- `MealOrder` = one active order per child and day (child row locked before reading orders; menu day locked `FOR SHARE`). Each order creates a `Charge` (`category meals`, `sourceType meals`, `sourceId` = order id) in the same transaction; cancelling voids it. Snapshots: complex, price category, price, chosen dishes (`MealOrderItem`).
+- Deadline: `AppSetting` `mealOrderDeadline` (default `10:00` Europe/Kyiv on the meal day). Parents order/cancel only before it; admins any time, a cancel after the deadline needs a reason. Per-day order errors are prefixed with the ISO date (`2026-10-14: Menu is not published`).
+- Pure rules live in `meals-calc.ts` (deadline, price on date, dish choice, template week, copy offset); keep them there and test without mocks.
+- Teachers see `GET /meal-orders/today?groupId` for their own groups; parents use `/me/children/:id/menu` and `/me/children/:id/meal-orders` (`assertOwnChild`) and never see staff names.
 
 ## Module conventions
 
