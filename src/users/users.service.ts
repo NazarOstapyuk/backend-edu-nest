@@ -104,6 +104,19 @@ export class UsersService {
       this.prisma.absenceNotice.count({
         where: { OR: [{ createdById: id }, { decidedById: id }] },
       }),
+      this.prisma.timetable.count({ where: { createdById: id } }),
+      this.prisma.timetableEntry.count({ where: { teacherId: id } }),
+      this.prisma.lessonChange.count({
+        where: {
+          OR: [{ createdById: id }, { voidedById: id }, { teacherId: id }],
+        },
+      }),
+      this.prisma.schoolLesson.count({
+        where: { OR: [{ teacherId: id }, { conductedById: id }] },
+      }),
+      this.prisma.lessonMark.count({
+        where: { OR: [{ markedById: id }, { voidedById: id }] },
+      }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

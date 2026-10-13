@@ -34,6 +34,11 @@ const mockPrisma = {
   dailyAttendance: { count: jest.fn() },
   calendarDay: { count: jest.fn() },
   absenceNotice: { count: jest.fn() },
+  timetable: { count: jest.fn() },
+  timetableEntry: { count: jest.fn() },
+  lessonChange: { count: jest.fn() },
+  schoolLesson: { count: jest.fn() },
+  lessonMark: { count: jest.fn() },
 };
 
 describe('UsersService', () => {
@@ -250,6 +255,11 @@ describe('UsersService', () => {
       mockPrisma.dailyAttendance.count.mockResolvedValue(0);
       mockPrisma.calendarDay.count.mockResolvedValue(0);
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.timetable.count.mockResolvedValue(0);
+      mockPrisma.timetableEntry.count.mockResolvedValue(0);
+      mockPrisma.lessonChange.count.mockResolvedValue(0);
+      mockPrisma.schoolLesson.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(0);
     });
 
     it('deletes a user without financial records', async () => {
@@ -287,6 +297,18 @@ describe('UsersService', () => {
       );
       expect(mockPrisma.absenceNotice.count).toHaveBeenCalledWith({
         where: { OR: [{ createdById: 'u1' }, { decidedById: 'u1' }] },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user teaches timetable entries', async () => {
+      mockPrisma.timetableEntry.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1')).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.timetableEntry.count).toHaveBeenCalledWith({
+        where: { teacherId: 'u1' },
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });

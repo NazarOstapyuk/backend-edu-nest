@@ -8,6 +8,8 @@ import { LessonChangesController } from './lesson-changes.controller';
 import { LessonChangesService } from './lesson-changes.service';
 import { LessonsController } from './lessons.controller';
 import { LessonsService } from './lessons.service';
+import { ParentTimetableController } from './parent-timetable.controller';
+import { ParentTimetableService } from './parent-timetable.service';
 import { ScheduleService } from './schedule.service';
 import { SubgroupsController } from './subgroups.controller';
 import { SubgroupsService } from './subgroups.service';
@@ -23,6 +25,7 @@ import { TimetablesService } from './timetables.service';
     TimetablesController,
     LessonChangesController,
     LessonsController,
+    ParentTimetableController,
   ],
   providers: [
     DirectoriesService,
@@ -32,6 +35,7 @@ import { TimetablesService } from './timetables.service';
     TimetablesService,
     LessonChangesService,
     LessonsService,
+    ParentTimetableService,
   ],
 })
 export class TimetableModule {}

@@ -133,11 +133,15 @@ export class GroupsService {
     const group = await this.prisma.group.findUnique({ where: { id } });
     if (!group) throw new NotFoundException('Group not found');
 
-    const [marks, calendarDays] = await Promise.all([
+    const counts = await Promise.all([
       this.prisma.dailyAttendance.count({ where: { groupId: id } }),
       this.prisma.calendarDay.count({ where: { groupId: id } }),
+      this.prisma.timetable.count({ where: { groupId: id } }),
+      this.prisma.lessonChange.count({ where: { groupId: id } }),
+      this.prisma.schoolLesson.count({ where: { groupId: id } }),
+      this.prisma.subgroup.count({ where: { groupId: id } }),
     ]);
-    if (marks > 0 || calendarDays > 0) {
+    if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
         'Cannot delete: group has attendance records',
       );

@@ -120,6 +120,17 @@ Spec: `docs/superpowers/specs/2026-10-12-attendance-register-design.md`. Code in
 - The register never touches money. Meals (Part 5) will use `RegisterService.expectedPresence`.
 - Parent routes (`/me/children/:id/register`, `/me/children/:id/absence-notices`) check ownership with `assertOwnChild` (`src/common/ownership.ts`) and never return staff notes or staff names.
 
+### Domain: school timetable
+
+Spec: `docs/superpowers/specs/2026-10-12-school-timetable-design.md`. Code in `src/timetable/`:
+
+- Directories: `Subject`, `Room`, `BellSchedule` (numbered periods with `HH:MM` times), `Subgroup` (children of one class). Deactivated, never deleted. A school class (`Group.kind = school_class`) links one bell schedule.
+- `Timetable` versions per class (`validFrom`/`validTo`, never overlapping; a new version closes the previous one; started versions are never edited) with `TimetableEntry` (weekday 1–6, period, `every`/`odd`/`even` ISO week, subject, teacher, room, subgroup).
+- Lessons on a date are computed by `ScheduleService.build` from the version, the attendance calendar and `LessonChange`s (`cancel`, `replace`, `extra`; voided, never edited). Pure rules live in `schedule-calc.ts`; keep them there and test without mocks.
+- Saving a timetable or a change rejects real-time conflicts (teacher, room, class vs subgroup, intersecting subgroups) with 409 `Schedule conflict` and a `conflicts` list.
+- `SchoolLesson` is created on first save and snapshots subject/teacher/room; `LessonMark` = one active mark per pupil (children rows locked before reading marks; corrections void). Only the effective teacher (after replacement) or admins record lessons, within `attendanceEditDays`. Daily-register absences show on lessons; lesson marks never change the register.
+- НУШ levels (`needs_support`, `progressing`, `with_help`, `independent`) only; comments are visible to parents. Parent routes `/me/children/:id/schedule` and `/me/children/:id/lessons` use `assertOwnChild`.
+
 ## Module conventions
 
 **Reference module: `src/children/`** (module + controller + service + `dto/` + `service.spec.ts`). For transactions and nested routes see `src/subscriptions/`. Copy these patterns, don't invent new ones.

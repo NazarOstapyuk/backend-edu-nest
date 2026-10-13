@@ -14,6 +14,10 @@ const mockPrisma = {
   user: { findMany: jest.fn() },
   dailyAttendance: { count: jest.fn() },
   calendarDay: { count: jest.fn() },
+  timetable: { count: jest.fn() },
+  lessonChange: { count: jest.fn() },
+  schoolLesson: { count: jest.fn() },
+  subgroup: { count: jest.fn() },
   bellSchedule: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
 };
@@ -51,6 +55,24 @@ describe('GroupsService', () => {
     mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
     mockPrisma.dailyAttendance.count.mockResolvedValue(1);
     mockPrisma.calendarDay.count.mockResolvedValue(0);
+    mockPrisma.timetable.count.mockResolvedValue(0);
+    mockPrisma.lessonChange.count.mockResolvedValue(0);
+    mockPrisma.schoolLesson.count.mockResolvedValue(0);
+    mockPrisma.subgroup.count.mockResolvedValue(0);
+    await expect(service.delete('g1')).rejects.toThrow(
+      new BadRequestException('Cannot delete: group has attendance records'),
+    );
+    expect(mockPrisma.group.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete a group with recorded school lessons', async () => {
+    mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
+    mockPrisma.dailyAttendance.count.mockResolvedValue(0);
+    mockPrisma.calendarDay.count.mockResolvedValue(0);
+    mockPrisma.timetable.count.mockResolvedValue(0);
+    mockPrisma.lessonChange.count.mockResolvedValue(0);
+    mockPrisma.schoolLesson.count.mockResolvedValue(1);
+    mockPrisma.subgroup.count.mockResolvedValue(0);
     await expect(service.delete('g1')).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
@@ -61,6 +83,10 @@ describe('GroupsService', () => {
     mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
     mockPrisma.dailyAttendance.count.mockResolvedValue(0);
     mockPrisma.calendarDay.count.mockResolvedValue(0);
+    mockPrisma.timetable.count.mockResolvedValue(0);
+    mockPrisma.lessonChange.count.mockResolvedValue(0);
+    mockPrisma.schoolLesson.count.mockResolvedValue(0);
+    mockPrisma.subgroup.count.mockResolvedValue(0);
     await expect(service.delete('g1')).resolves.toEqual({
       message: 'Group deleted',
     });

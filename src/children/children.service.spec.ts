@@ -24,6 +24,8 @@ const mockPrisma = {
   package: { count: jest.fn() },
   dailyAttendance: { count: jest.fn() },
   absenceNotice: { count: jest.fn() },
+  subgroupMember: { count: jest.fn() },
+  lessonMark: { count: jest.fn() },
 };
 
 describe('ChildrenService', () => {
@@ -270,6 +272,8 @@ describe('ChildrenService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.dailyAttendance.count.mockResolvedValue(0);
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.subgroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(0);
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
@@ -292,6 +296,8 @@ describe('ChildrenService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.dailyAttendance.count.mockResolvedValue(0);
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.subgroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(0);
 
       await expect(service.delete('child-1')).rejects.toThrow(
         'Cannot delete: child has financial records',
@@ -310,6 +316,28 @@ describe('ChildrenService', () => {
       mockPrisma.package.count.mockResolvedValue(1);
       mockPrisma.dailyAttendance.count.mockResolvedValue(0);
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.subgroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(0);
+
+      await expect(service.delete('child-1')).rejects.toThrow(
+        'Cannot delete: child has financial records',
+      );
+      expect(mockPrisma.child.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a child with lesson marks', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.charge.count.mockResolvedValue(0);
+      mockPrisma.payment.count.mockResolvedValue(0);
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.classGroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonAttendance.count.mockResolvedValue(0);
+      mockPrisma.package.count.mockResolvedValue(0);
+      mockPrisma.dailyAttendance.count.mockResolvedValue(0);
+      mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.subgroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(1);
 
       await expect(service.delete('child-1')).rejects.toThrow(
         'Cannot delete: child has financial records',
@@ -328,6 +356,8 @@ describe('ChildrenService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.dailyAttendance.count.mockResolvedValue(1);
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
+      mockPrisma.subgroupMember.count.mockResolvedValue(0);
+      mockPrisma.lessonMark.count.mockResolvedValue(0);
 
       await expect(service.delete('child-1')).rejects.toThrow(
         'Cannot delete: child has financial records',
