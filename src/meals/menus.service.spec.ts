@@ -29,7 +29,11 @@ const mockPrisma = {
     updateMany: jest.fn(),
     delete: jest.fn(),
   },
-  menuDayItem: { deleteMany: jest.fn(), createMany: jest.fn() },
+  menuDayItem: {
+    deleteMany: jest.fn(),
+    createMany: jest.fn(),
+    findMany: jest.fn(),
+  },
   dish: { findMany: jest.fn() },
   mealOrder: { groupBy: jest.fn(), count: jest.fn() },
   mealOrderItem: { count: jest.fn() },
@@ -193,27 +197,29 @@ describe('MenusService', () => {
       await expect(
         service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
       ).rejects.toThrow(new BadRequestException('Dish is inactive'));
-      mockPrisma.menuDay.findUnique.mockResolvedValueOnce({
-        id: 'm1',
-        status: MenuStatus.draft,
-        items: [{ dishId: 'soup' }],
-      });
+      mockPrisma.menuDay.findUnique.mockResolvedValueOnce({ id: 'm1' });
+      mockPrisma.menuDayItem.findMany.mockResolvedValueOnce([
+        { dishId: 'soup' },
+      ]);
       await expect(
         service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
       ).resolves.toBeDefined();
     });
 
     it('rejects removing a dish used by an active order and locks the day first', async () => {
-      mockPrisma.menuDay.findUnique.mockResolvedValue({
-        id: 'm1',
-        status: MenuStatus.published,
-        items: [{ dishId: 'soup' }, { dishId: 'rice' }],
-      });
+      mockPrisma.menuDay.findUnique.mockResolvedValue({ id: 'm1' });
+      mockPrisma.menuDayItem.findMany.mockResolvedValue([
+        { dishId: 'soup' },
+        { dishId: 'rice' },
+      ]);
       mockPrisma.mealOrderItem.count.mockResolvedValue(1);
       await expect(
         service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
       ).rejects.toThrow(new BadRequestException('Dish is ordered'));
       expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.mealOrderItem.count.mock.invocationCallOrder[0],
+      );
       expect(
         firstArg<{ where: object }>(mockPrisma.mealOrderItem.count).where,
       ).toEqual({
@@ -223,11 +229,11 @@ describe('MenusService', () => {
     });
 
     it('allows removing a dish used only by cancelled orders', async () => {
-      mockPrisma.menuDay.findUnique.mockResolvedValue({
-        id: 'm1',
-        status: MenuStatus.published,
-        items: [{ dishId: 'soup' }, { dishId: 'rice' }],
-      });
+      mockPrisma.menuDay.findUnique.mockResolvedValue({ id: 'm1' });
+      mockPrisma.menuDayItem.findMany.mockResolvedValue([
+        { dishId: 'soup' },
+        { dishId: 'rice' },
+      ]);
       mockPrisma.mealOrderItem.count.mockResolvedValue(0);
       await service.saveDay('2026-10-14', K, { dishIds: ['soup'] });
       expect(mockPrisma.menuDayItem.deleteMany).toHaveBeenCalledWith({
@@ -298,6 +304,30 @@ describe('MenusService', () => {
       expect(mockPrisma.menuDayItem.createMany).toHaveBeenCalledWith({
         data: [{ menuDayId: 'd1', dishId: 'b' }],
       });
+    });
+
+    it('locks targets and skips days published or ordered meanwhile', async () => {
+      mockPrisma.menuDay.findMany
+        .mockResolvedValueOnce([
+          { id: 'd1', date: day('2026-10-20'), status: MenuStatus.draft },
+          { id: 'd2', date: day('2026-10-21'), status: MenuStatus.draft },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'd1', status: MenuStatus.published },
+          { id: 'd2', status: MenuStatus.draft },
+        ]);
+      mockPrisma.mealOrder.groupBy.mockResolvedValue([{ menuDayId: 'd2' }]);
+      const result = await service.fill(
+        K,
+        [
+          { date: day('2026-10-20'), dishIds: ['a'] },
+          { date: day('2026-10-21'), dishIds: ['b'] },
+        ],
+        true,
+      );
+      expect(result).toEqual({ created: 0, overwritten: 0, skipped: 2 });
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.menuDayItem.deleteMany).not.toHaveBeenCalled();
     });
 
     it('skips existing drafts without overwrite', async () => {

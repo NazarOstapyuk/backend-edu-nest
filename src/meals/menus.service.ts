@@ -128,11 +128,17 @@ export class MenusService {
     await this.prisma.$transaction(async (tx) => {
       const existing = await tx.menuDay.findUnique({
         where: { date_kind: { date, kind } },
-        include: { items: { select: { dishId: true } } },
+        select: { id: true },
       });
-      if (existing)
+      let current: string[] = [];
+      if (existing) {
         await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id = ${existing.id} FOR UPDATE`;
-      const current = existing?.items.map((i) => i.dishId) ?? [];
+        const items = await tx.menuDayItem.findMany({
+          where: { menuDayId: existing.id },
+          select: { dishId: true },
+        });
+        current = items.map((i) => i.dishId);
+      }
       if (dishes.some((d) => !d.active && !current.includes(d.id)))
         throw new BadRequestException('Dish is inactive');
       const removed = current.filter((id) => !dto.dishIds.includes(id));
@@ -218,6 +224,22 @@ export class MenusService {
     ]);
     const working = this.workingFor(kind, entries);
     await this.prisma.$transaction(async (tx) => {
+      const blocked = new Set<string>();
+      if (overwrite && existing.length) {
+        const ids = existing.map((e) => e.id);
+        await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
+        const fresh = await tx.menuDay.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, status: true },
+        });
+        const ordered = await tx.mealOrder.groupBy({
+          by: ['menuDayId'],
+          where: { menuDayId: { in: ids }, cancelledAt: null },
+        });
+        for (const f of fresh)
+          if (f.status === MenuStatus.published) blocked.add(f.id);
+        for (const o of ordered) blocked.add(o.menuDayId);
+      }
       for (const item of plan) {
         if (!working(item.date).working) {
           result.skipped++;
@@ -227,7 +249,11 @@ export class MenusService {
           (e) => e.date.getTime() === item.date.getTime(),
         );
         if (current) {
-          if (!overwrite || current.status === MenuStatus.published) {
+          if (
+            !overwrite ||
+            current.status === MenuStatus.published ||
+            blocked.has(current.id)
+          ) {
             result.skipped++;
             continue;
           }
