@@ -142,6 +142,18 @@ Spec: `docs/superpowers/specs/2026-10-13-meals-design.md`. Code in `src/meals/`:
 - Pure rules live in `meals-calc.ts` (deadline, price on date, dish choice, template week, copy offset); keep them there and test without mocks.
 - Teachers see `GET /meal-orders/today?groupId` for their own groups; parents use `/me/children/:id/menu` and `/me/children/:id/meal-orders` (`assertOwnChild`) and never see staff names.
 
+### Domain: payroll
+
+Spec: `docs/superpowers/specs/2026-10-13-payroll-design.md`. Code in `src/payroll/`:
+
+- `SalaryTerms` versions per teacher (`validFrom`/`validTo`, never overlapping; a new version closes the open one; started versions are never edited, only closed; not started ones can be edited or deleted, deleting reopens the previous one) with `SalaryRate` (per lesson type, optional subject or class group; the most specific wins) and `SalaryAllowance` (monthly, prorated like the rate).
+- Conducted lessons: a `SchoolLesson` row (paid to `teacherId`, the teacher after replacement) and a classes `Lesson` with at least one active `present` attendance (paid to `conductedById`). Lessons outside any terms are ignored and counted as a warning.
+- Pure rules live in `payroll-calc.ts` (working days via `dayInfo` with the terms' `calendarKind`, proration `rate × segment days / norm × worked / default`, rate lookup, corrections); keep them there and test without mocks.
+- `PayrollSheet` per teacher and month is created lazily. A `draft` is computed live by `PayrollBuilder`; `approve` snapshots `PayrollLine`s and `approvedDays`, and an approved sheet never changes. Lessons added or removed in an approved month become `correction` lines in later drafts (booked = `lesson` + `correction` lines of approved sheets for that lesson, dated before the draft month).
+- Mutations lock the sheet row (`createMany skipDuplicates` + `FOR UPDATE`); `approve` then locks all approved sheets of the teacher (id-ordered); `reopen` locks that set first. Reopen is refused after a payment created after approval or a later correction for that month.
+- `PayrollAdjustment` (bonus/deduction, drafts only) and `PayrollPayment` (cash/card, advances and overpayment allowed) are voided, never edited. Taxes are not tracked.
+- Teachers read only their own payroll via `/me/payroll` (no staff names, no voided records). Users with salary terms or payroll records cannot be deleted; a teacher with salary terms cannot change role (400 `User has salary terms`).
+
 ## Module conventions
 
 **Reference module: `src/children/`** (module + controller + service + `dto/` + `service.spec.ts`). For transactions and nested routes see `src/subscriptions/`. Copy these patterns, don't invent new ones.
