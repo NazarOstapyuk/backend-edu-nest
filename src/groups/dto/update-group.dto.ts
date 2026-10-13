@@ -28,4 +28,9 @@ export class UpdateGroupDto {
   @IsUUID('4')
   @IsOptional()
   bellScheduleId?: string | null;
+
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('4')
+  @IsOptional()
+  mealPriceCategoryId?: string | null;
 }

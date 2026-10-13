@@ -56,6 +56,20 @@ export class GroupsService {
       throw new BadRequestException('Bell period is in use');
   }
 
+  private async assertMealCategory(
+    id: string | null | undefined,
+    currentId: string | null,
+  ) {
+    if (!id) return;
+    const category = await this.prisma.mealPriceCategory.findUnique({
+      where: { id },
+      select: { id: true, active: true },
+    });
+    if (!category) throw new NotFoundException('Meal price category not found');
+    if (!category.active && id !== currentId)
+      throw new BadRequestException('Meal price category is inactive');
+  }
+
   async create(dto: CreateGroupDto) {
     const existing = await this.prisma.group.findUnique({
       where: { name: dto.name },
@@ -68,12 +82,14 @@ export class GroupsService {
       dto.kind ?? GroupKind.kindergarten,
       dto.bellScheduleId,
     );
+    await this.assertMealCategory(dto.mealPriceCategoryId, null);
 
     return this.prisma.group.create({
       data: {
         name: dto.name,
         kind: dto.kind,
         bellScheduleId: dto.bellScheduleId,
+        mealPriceCategoryId: dto.mealPriceCategoryId,
         teachers: dto.teacherIds
           ? { connect: dto.teacherIds.map((id) => ({ id })) }
           : undefined,
@@ -111,6 +127,10 @@ export class GroupsService {
       dto.kind ?? group.kind,
       dto.bellScheduleId,
     );
+    await this.assertMealCategory(
+      dto.mealPriceCategoryId,
+      group.mealPriceCategoryId,
+    );
 
     return this.prisma.group.update({
       where: { id },
@@ -118,6 +138,7 @@ export class GroupsService {
         name: dto.name,
         kind: dto.kind,
         bellScheduleId: dto.bellScheduleId,
+        mealPriceCategoryId: dto.mealPriceCategoryId,
         teachers: dto.teacherIds
           ? { set: dto.teacherIds.map((id) => ({ id })) }
           : undefined,

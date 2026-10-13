@@ -95,6 +95,9 @@ export class UsersService {
       this.prisma.lessonAttendance.count({
         where: { OR: [{ markedById: id }, { voidedById: id }] },
       }),
+      this.prisma.mealOrder.count({
+        where: { OR: [{ createdById: id }, { cancelledById: id }] },
+      }),
       this.prisma.sessionUsage.count({ where: { voidedById: id } }),
       this.prisma.classGroup.count({ where: { teachers: { some: { id } } } }),
       this.prisma.dailyAttendance.count({

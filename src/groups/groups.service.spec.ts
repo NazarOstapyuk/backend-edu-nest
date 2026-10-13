@@ -19,6 +19,7 @@ const mockPrisma = {
   schoolLesson: { count: jest.fn() },
   subgroup: { count: jest.fn() },
   bellSchedule: { findUnique: jest.fn() },
+  mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
 };
 
@@ -118,5 +119,100 @@ describe('GroupsService', () => {
     await expect(
       service.update('g1', { bellScheduleId: 'b9' }),
     ).rejects.toThrow(new NotFoundException('Bell schedule not found'));
+  });
+
+  describe('meal price category', () => {
+    it('stores the meal price category on update', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Сонечко',
+        kind: GroupKind.kindergarten,
+        mealPriceCategoryId: null,
+      });
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValue({
+        id: 'pc1',
+        active: true,
+      });
+      mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
+      await service.update('g1', { mealPriceCategoryId: 'pc1' });
+      expect(
+        firstArg<{ data: { mealPriceCategoryId: string } }>(
+          mockPrisma.group.update,
+        ).data.mealPriceCategoryId,
+      ).toBe('pc1');
+    });
+
+    it('clears the meal price category with null', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Сонечко',
+        kind: GroupKind.kindergarten,
+        mealPriceCategoryId: 'pc1',
+      });
+      mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
+      await service.update('g1', { mealPriceCategoryId: null });
+      expect(mockPrisma.mealPriceCategory.findUnique).not.toHaveBeenCalled();
+      expect(
+        firstArg<{ data: { mealPriceCategoryId: null } }>(
+          mockPrisma.group.update,
+        ).data.mealPriceCategoryId,
+      ).toBeNull();
+    });
+
+    it('rejects an unknown meal price category', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Сонечко',
+        kind: GroupKind.kindergarten,
+        mealPriceCategoryId: null,
+      });
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValue(null);
+      await expect(
+        service.update('g1', { mealPriceCategoryId: 'pc9' }),
+      ).rejects.toThrow(new NotFoundException('Meal price category not found'));
+    });
+
+    it('rejects an inactive meal price category that is not current', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Сонечко',
+        kind: GroupKind.kindergarten,
+        mealPriceCategoryId: null,
+      });
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValue({
+        id: 'pc2',
+        active: false,
+      });
+      await expect(
+        service.update('g1', { mealPriceCategoryId: 'pc2' }),
+      ).rejects.toThrow(
+        new BadRequestException('Meal price category is inactive'),
+      );
+    });
+
+    it('keeps the current inactive category on update', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Сонечко',
+        kind: GroupKind.kindergarten,
+        mealPriceCategoryId: 'pc2',
+      });
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValue({
+        id: 'pc2',
+        active: false,
+      });
+      mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
+      await expect(
+        service.update('g1', { mealPriceCategoryId: 'pc2' }),
+      ).resolves.toEqual({ id: 'g1' });
+    });
+
+    it('validates the category on create', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(null);
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValue(null);
+      await expect(
+        service.create({ name: 'Нова', mealPriceCategoryId: 'pc9' }),
+      ).rejects.toThrow(new NotFoundException('Meal price category not found'));
+    });
   });
 });

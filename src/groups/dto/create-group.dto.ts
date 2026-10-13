@@ -25,4 +25,8 @@ export class CreateGroupDto {
   @IsUUID('4')
   @IsOptional()
   bellScheduleId?: string | null;
+
+  @IsUUID('4')
+  @IsOptional()
+  mealPriceCategoryId?: string | null;
 }

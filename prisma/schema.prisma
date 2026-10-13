@@ -78,24 +78,28 @@ model User {
   schoolLessonsLed    SchoolLesson[]         @relation("SchoolLessonConductedBy")
   lessonMarksMarked   LessonMark[]           @relation("LessonMarkMarkedBy")
   lessonMarksVoided   LessonMark[]           @relation("LessonMarkVoidedBy")
+  mealOrdersCreated   MealOrder[]            @relation("MealOrderCreatedBy")
+  mealOrdersCancelled MealOrder[]            @relation("MealOrderCancelledBy")
 }
 
 model Group {
-  id               String            @id @default(uuid())
-  name             String            @unique
-  teachers         User[]            @relation("GroupTeachers")
-  children         Child[]
-  kind             GroupKind         @default(kindergarten)
-  dailyAttendances DailyAttendance[]
-  calendarDays     CalendarDay[]
-  bellScheduleId   String?
-  bellSchedule     BellSchedule?     @relation(fields: [bellScheduleId], references: [id], onDelete: Restrict)
-  subgroups        Subgroup[]
-  timetables       Timetable[]
-  lessonChanges    LessonChange[]
-  schoolLessons    SchoolLesson[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                  String             @id @default(uuid())
+  name                String             @unique
+  teachers            User[]             @relation("GroupTeachers")
+  children            Child[]
+  kind                GroupKind          @default(kindergarten)
+  dailyAttendances    DailyAttendance[]
+  calendarDays        CalendarDay[]
+  bellScheduleId      String?
+  bellSchedule        BellSchedule?      @relation(fields: [bellScheduleId], references: [id], onDelete: Restrict)
+  subgroups           Subgroup[]
+  timetables          Timetable[]
+  lessonChanges       LessonChange[]
+  schoolLessons       SchoolLesson[]
+  mealPriceCategoryId String?
+  mealPriceCategory   MealPriceCategory? @relation(fields: [mealPriceCategoryId], references: [id], onDelete: Restrict)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 }
 
 model Child {
@@ -122,6 +126,7 @@ model Child {
   absenceNotices      AbsenceNotice[]
   subgroupMemberships SubgroupMember[]
   lessonMarks         LessonMark[]
+  mealOrders          MealOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -223,6 +228,7 @@ model Charge {
 
   allocations     Allocation[]
   billedPeriod    BilledPeriod?
+  mealOrder       MealOrder?
   adaptationVisit AdaptationVisit?
   package         Package?         @relation("PackageCharge")
   sessionUsage    SessionUsage?    @relation("SessionCharge")
@@ -892,4 +898,155 @@ model LessonMark {
 
   @@index([lessonId])
   @@index([childId])
+}
+
+model MealCourse {
+  id         String              @id @default(uuid())
+  name       String              @unique
+  sortOrder  Int                 @default(0)
+  active     Boolean             @default(true)
+  dishes     Dish[]
+  complexes  MealComplexCourse[]
+  orderItems MealOrderItem[]
+}
+
+model Dish {
+  id            String             @id @default(uuid())
+  name          String
+  courseId      String
+  course        MealCourse         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  description   String?
+  active        Boolean            @default(true)
+  menuItems     MenuDayItem[]
+  templateItems MenuTemplateItem[]
+  orderItems    MealOrderItem[]
+
+  @@unique([courseId, name])
+}
+
+model MealPriceCategory {
+  id        String             @id @default(uuid())
+  name      String             @unique
+  sortOrder Int                @default(0)
+  active    Boolean            @default(true)
+  groups    Group[]
+  prices    MealComplexPrice[]
+  orders    MealOrder[]
+}
+
+model MealComplex {
+  id          String              @id @default(uuid())
+  name        String              @unique
+  description String?
+  sortOrder   Int                 @default(0)
+  active      Boolean             @default(true)
+  courses     MealComplexCourse[]
+  prices      MealComplexPrice[]
+  orders      MealOrder[]
+}
+
+model MealComplexCourse {
+  complexId String
+  complex   MealComplex @relation(fields: [complexId], references: [id], onDelete: Cascade)
+  courseId  String
+  course    MealCourse  @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  @@id([complexId, courseId])
+}
+
+model MealComplexPrice {
+  id              String            @id @default(uuid())
+  complexId       String
+  complex         MealComplex       @relation(fields: [complexId], references: [id], onDelete: Restrict)
+  priceCategoryId String
+  priceCategory   MealPriceCategory @relation(fields: [priceCategoryId], references: [id], onDelete: Restrict)
+  price           Decimal           @db.Decimal(10, 2)
+  validFrom       DateTime          @db.Date
+  createdAt       DateTime          @default(now())
+
+  @@unique([complexId, priceCategoryId, validFrom])
+}
+
+enum MenuStatus {
+  draft
+  published
+}
+
+model MenuDay {
+  id          String        @id @default(uuid())
+  date        DateTime      @db.Date
+  kind        GroupKind
+  status      MenuStatus    @default(draft)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  items       MenuDayItem[]
+  orders      MealOrder[]
+
+  @@unique([date, kind])
+}
+
+model MenuDayItem {
+  menuDayId String
+  menuDay   MenuDay @relation(fields: [menuDayId], references: [id], onDelete: Cascade)
+  dishId    String
+  dish      Dish    @relation(fields: [dishId], references: [id], onDelete: Restrict)
+
+  @@id([menuDayId, dishId])
+}
+
+model MenuTemplate {
+  id     String             @id @default(uuid())
+  name   String             @unique
+  weeks  Int
+  active Boolean            @default(true)
+  items  MenuTemplateItem[]
+}
+
+model MenuTemplateItem {
+  templateId String
+  template   MenuTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  week       Int
+  weekday    Int
+  dishId     String
+  dish       Dish         @relation(fields: [dishId], references: [id], onDelete: Restrict)
+
+  @@id([templateId, week, weekday, dishId])
+}
+
+model MealOrder {
+  id              String            @id @default(uuid())
+  childId         String
+  child           Child             @relation(fields: [childId], references: [id], onDelete: Restrict)
+  date            DateTime          @db.Date
+  menuDayId       String
+  menuDay         MenuDay           @relation(fields: [menuDayId], references: [id], onDelete: Restrict)
+  complexId       String
+  complex         MealComplex       @relation(fields: [complexId], references: [id], onDelete: Restrict)
+  priceCategoryId String
+  priceCategory   MealPriceCategory @relation(fields: [priceCategoryId], references: [id], onDelete: Restrict)
+  price           Decimal           @db.Decimal(10, 2)
+  chargeId        String            @unique
+  charge          Charge            @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  createdById     String
+  createdBy       User              @relation("MealOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt       DateTime          @default(now())
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelledBy     User?             @relation("MealOrderCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  cancelReason    String?
+  items           MealOrderItem[]
+
+  @@index([date, childId])
+}
+
+model MealOrderItem {
+  orderId  String
+  order    MealOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courseId String
+  course   MealCourse @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  dishId   String
+  dish     Dish       @relation(fields: [dishId], references: [id], onDelete: Restrict)
+
+  @@id([orderId, courseId])
 }
