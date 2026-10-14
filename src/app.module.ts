@@ -18,6 +18,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { TimetableModule } from './timetable/timetable.module';
 import { MealsModule } from './meals/meals.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { BackupsModule } from './backups/backups.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -40,6 +41,7 @@ import { UsersModule } from './users/users.module';
     TimetableModule,
     MealsModule,
     PayrollModule,
+    BackupsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
