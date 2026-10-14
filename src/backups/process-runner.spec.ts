@@ -62,6 +62,26 @@ describe('ProcessRunner', () => {
     expect(result.code).not.toBe(0);
   });
 
+  it('fails when the output file cannot be written', async () => {
+    const bad = join(dir, 'missing-dir', 'out.bin');
+    const small = await runner.run(node("process.stdout.write('data')"), {
+      stdoutFile: bad,
+      timeoutMs: 5000,
+    });
+    expect(small.code).not.toBe(0);
+    expect(small.stderr).not.toBe('');
+
+    const large = await runner.run(
+      node(
+        'const b = Buffer.alloc(1 << 20, 1); let i = 0; const w = () => { while (i < 8) { i++; if (!process.stdout.write(b)) return process.stdout.once("drain", w); } }; w();',
+      ),
+      { stdoutFile: bad, timeoutMs: 5000 },
+    );
+    expect(large.timedOut).toBe(false);
+    expect(large.code).not.toBe(0);
+    expect(large.stderr).not.toBe('');
+  });
+
   it('reports a missing command', async () => {
     const result = await runner.run(
       { command: 'definitely-missing-command-xyz', args: [], env: {} },

@@ -34,6 +34,7 @@ export class ProcessRunner {
       let exitCode: number | null = null;
       let exited = false;
       let flushed = !options.stdoutFile;
+      let writeFailed = false;
       const finish = (code: number | null) => {
         if (settled) return;
         settled = true;
@@ -41,7 +42,7 @@ export class ProcessRunner {
         resolve({ code, stderr, timedOut });
       };
       const maybeFinish = () => {
-        if (exited && flushed) finish(exitCode);
+        if (exited && flushed) finish(writeFailed ? null : exitCode);
       };
       const timer = setTimeout(() => {
         timedOut = true;
@@ -62,7 +63,9 @@ export class ProcessRunner {
         });
         out.on('error', (error) => {
           stderr += error.message;
+          writeFailed = true;
           flushed = true;
+          child.kill();
           maybeFinish();
         });
         child.stdout.pipe(out);
