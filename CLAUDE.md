@@ -14,6 +14,7 @@ npm run start:dev               # watch mode, port from PORT or 3000
 npm run build                   # nest build -> dist/
 npm run lint                    # eslint WITH --fix: rewrites files, check git diff after
 npm run format                  # prettier (singleQuote, trailingComma all)
+npm run backup:restore -- <file>   # restore a database copy (backend stopped), see docs/backups.md
 
 npm test                        # unit tests (*.spec.ts under src/)
 npx jest src/users/users.service.spec.ts   # single file
@@ -33,6 +34,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 ## Environment
 
 `.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies).
+Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backups), `BACKUP_PG_CONTAINER` (default `edu_postgres`, empty = local `pg_dump`).
 
 ## Architecture
 
@@ -153,6 +155,15 @@ Spec: `docs/superpowers/specs/2026-10-13-payroll-design.md`. Code in `src/payrol
 - Mutations lock the sheet row (`createMany skipDuplicates` + `FOR UPDATE`); `approve` then locks all approved sheets of the teacher (id-ordered); `reopen` locks that set first. Reopen is refused after a payment created after approval or a later correction for that month.
 - `PayrollAdjustment` (bonus/deduction, drafts only) and `PayrollPayment` (cash/card, advances and overpayment allowed) are voided, never edited. Taxes are not tracked.
 - Teachers read only their own payroll via `/me/payroll` (no staff names, no voided records). Users with salary terms or payroll records cannot be deleted; a teacher with salary terms cannot change role (400 `User has salary terms`).
+
+### Domain: backups
+
+Spec: `docs/superpowers/specs/2026-10-13-backups-design.md`. Code in `src/backups/`, user guide in `docs/backups.md`:
+
+- `BackupsService.create` runs `pg_dump -Fc` (inside `BACKUP_PG_CONTAINER` via `docker exec`, or locally) into `<name>.part` under `BACKUP_DIR`, renames it on success and records a `BackupRun`. One run at a time per process (409 `Backup is already running`); 10-minute timeout; runs left `running` are marked `Interrupted` at startup.
+- The password goes only into the child environment (`PGPASSWORD`); stored errors pass through `maskSecret`. Never put it in arguments or logs.
+- Names and retention are pure (`backup-retention.ts`): 30 newest scheduled copies + newest per month for 12 months, manual copies 30 days, pre-restore copies kept; only our file names are ever deleted.
+- Daily cron at 02:00 Europe/Kyiv (`BackupsScheduler`). `GET /backups`, `POST /backups`, `GET /backups/runs` for root/admin. There is no restore or delete endpoint: restore is `npm run backup:restore` with the backend stopped, after a safety copy.
 
 ## Module conventions
 
