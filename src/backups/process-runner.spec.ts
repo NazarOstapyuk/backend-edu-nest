@@ -62,6 +62,12 @@ describe('ProcessRunner', () => {
     expect(result.code).not.toBe(0);
   });
 
+  it('settles shortly after the timeout', async () => {
+    const started = Date.now();
+    await runner.run(node('setTimeout(() => {}, 20000)'), { timeoutMs: 200 });
+    expect(Date.now() - started).toBeLessThan(200 + 5000);
+  });
+
   it('fails when the output file cannot be written', async () => {
     const bad = join(dir, 'missing-dir', 'out.bin');
     const small = await runner.run(node("process.stdout.write('data')"), {

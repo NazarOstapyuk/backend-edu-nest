@@ -15,6 +15,7 @@ export interface RunResult {
 }
 
 const MAX_STDERR = 10_000;
+const KILL_GRACE_MS = 5000;
 
 export class ProcessRunner {
   run(spec: CommandSpec, options: RunOptions): Promise<RunResult> {
@@ -35,10 +36,12 @@ export class ProcessRunner {
       let exited = false;
       let flushed = !options.stdoutFile;
       let writeFailed = false;
+      let grace: NodeJS.Timeout | undefined;
       const finish = (code: number | null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(grace);
         resolve({ code, stderr, timedOut });
       };
       const maybeFinish = () => {
@@ -47,6 +50,7 @@ export class ProcessRunner {
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill();
+        grace = setTimeout(() => finish(null), KILL_GRACE_MS);
       }, options.timeoutMs);
       child.stderr?.on('data', (chunk: Buffer) => {
         if (stderr.length < MAX_STDERR) stderr += chunk.toString();

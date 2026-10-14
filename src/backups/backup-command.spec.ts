@@ -3,6 +3,7 @@ import {
   maskSecret,
   parseDatabaseUrl,
   passwordOf,
+  resetSchemaCommand,
   restoreCommand,
 } from './backup-command';
 
@@ -53,6 +54,7 @@ describe('dumpCommand', () => {
         '-d',
         'edu_db',
         '-Fc',
+        '--exclude-table-data="BackupRun"',
       ],
       env: { PGPASSWORD: 'p@ss' },
     });
@@ -73,6 +75,7 @@ describe('dumpCommand', () => {
         '-d',
         'edu_db',
         '-Fc',
+        '--exclude-table-data="BackupRun"',
         '-f',
         'C:/b/x.part',
       ],
@@ -89,6 +92,9 @@ describe('dumpCommand', () => {
       expect(
         restoreCommand(db, container, 'f').spec.args.join(' '),
       ).not.toContain('p@ss');
+      expect(resetSchemaCommand(db, container).args.join(' ')).not.toContain(
+        'p@ss',
+      );
     }
   });
 });
@@ -108,9 +114,8 @@ describe('restoreCommand', () => {
       'PGPASSWORD',
       'edu_postgres',
       'pg_restore',
-      '--clean',
-      '--if-exists',
       '--no-owner',
+      '--exit-on-error',
       '-U',
       'postgres',
       '-d',
@@ -122,9 +127,8 @@ describe('restoreCommand', () => {
   it('passes the file to a local pg_restore', () => {
     const { spec, stdinFromFile } = restoreCommand(db, null, 'C:/b/x.dump');
     expect(spec.args).toEqual([
-      '--clean',
-      '--if-exists',
       '--no-owner',
+      '--exit-on-error',
       '-h',
       'localhost',
       '-p',
@@ -136,6 +140,53 @@ describe('restoreCommand', () => {
       'C:/b/x.dump',
     ]);
     expect(stdinFromFile).toBe(false);
+  });
+});
+
+describe('resetSchemaCommand', () => {
+  const sql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;';
+
+  it('runs psql inside the container', () => {
+    expect(resetSchemaCommand(db, 'edu_postgres')).toEqual({
+      command: 'docker',
+      args: [
+        'exec',
+        '-e',
+        'PGPASSWORD',
+        'edu_postgres',
+        'psql',
+        '-U',
+        'postgres',
+        '-d',
+        'edu_db',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-c',
+        sql,
+      ],
+      env: { PGPASSWORD: 'p@ss' },
+    });
+  });
+
+  it('runs a local psql', () => {
+    expect(resetSchemaCommand(db, null)).toEqual({
+      command: 'psql',
+      args: [
+        '-h',
+        'localhost',
+        '-p',
+        '5432',
+        '-U',
+        'postgres',
+        '-d',
+        'edu_db',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-c',
+        sql,
+      ],
+      env: { PGPASSWORD: 'p@ss' },
+    });
   });
 });
 

@@ -8,6 +8,7 @@ import {
   dumpCommand,
   maskSecret,
   parseDatabaseUrl,
+  resetSchemaCommand,
   restoreCommand,
 } from '../src/backups/backup-command';
 import { backupFileName } from '../src/backups/backup-retention';
@@ -45,6 +46,8 @@ async function main() {
   const db = parseDatabaseUrl(process.env.DATABASE_URL ?? '');
   const raw = process.env.BACKUP_PG_CONTAINER;
   const container = raw === undefined ? 'edu_postgres' : raw.trim() || null;
+  if (!yes && !process.stdin.isTTY)
+    fail('Run with --yes when not in an interactive terminal');
   if (!yes) {
     const prompt = createInterface({
       input: process.stdin,
@@ -70,6 +73,14 @@ async function main() {
     );
   }
   console.log(`Safety copy: ${safety}`);
+  const reset = await runner.run(resetSchemaCommand(db, container), {
+    timeoutMs: TIMEOUT_MS,
+  });
+  if (reset.timedOut || reset.code !== 0)
+    fail(
+      `Schema reset failed (safety copy kept: ${safety}):
+${maskSecret(reset.stderr, db.password)}`,
+    );
   const restore = restoreCommand(db, container, file);
   const restored = await runner.run(restore.spec, {
     stdinFile: restore.stdinFromFile ? file : undefined,
@@ -79,7 +90,9 @@ async function main() {
     fail(
       `Restore failed (safety copy kept: ${safety}):\n${maskSecret(restored.stderr, db.password)}`,
     );
-  console.log(`Restored ${file} into ${db.database}`);
+  console.log(
+    `Restored ${file} into ${db.database}. Run "npx prisma migrate deploy" before starting the backend.`,
+  );
 }
 
 main().catch((error: unknown) =>

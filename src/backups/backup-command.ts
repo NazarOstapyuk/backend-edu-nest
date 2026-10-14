@@ -42,6 +42,10 @@ export function passwordOf(url: string | undefined): string {
 
 const passwordEnv = (db: DbConfig) => ({ PGPASSWORD: db.password });
 
+const EXCLUDE_RUNS = '--exclude-table-data="BackupRun"';
+
+const RESET_SQL = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;';
+
 const connection = (db: DbConfig) => [
   '-h',
   db.host,
@@ -73,6 +77,7 @@ export function dumpCommand(
           '-d',
           db.database,
           '-Fc',
+          EXCLUDE_RUNS,
         ],
         env: passwordEnv(db),
       },
@@ -81,14 +86,43 @@ export function dumpCommand(
   return {
     spec: {
       command: 'pg_dump',
-      args: [...connection(db), '-Fc', '-f', file],
+      args: [...connection(db), '-Fc', EXCLUDE_RUNS, '-f', file],
       env: passwordEnv(db),
     },
     stdoutToFile: false,
   };
 }
 
-const RESTORE_FLAGS = ['--clean', '--if-exists', '--no-owner'];
+const RESTORE_FLAGS = ['--no-owner', '--exit-on-error'];
+
+export function resetSchemaCommand(
+  db: DbConfig,
+  container: string | null,
+): CommandSpec {
+  const tail = ['-v', 'ON_ERROR_STOP=1', '-c', RESET_SQL];
+  if (container)
+    return {
+      command: 'docker',
+      args: [
+        'exec',
+        '-e',
+        'PGPASSWORD',
+        container,
+        'psql',
+        '-U',
+        db.user,
+        '-d',
+        db.database,
+        ...tail,
+      ],
+      env: passwordEnv(db),
+    };
+  return {
+    command: 'psql',
+    args: [...connection(db), ...tail],
+    env: passwordEnv(db),
+  };
+}
 
 export function restoreCommand(
   db: DbConfig,

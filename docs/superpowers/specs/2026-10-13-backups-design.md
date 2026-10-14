@@ -48,6 +48,7 @@ Users who created backup runs cannot be deleted (added to the existing user dele
 - Only one copy runs at a time per process: a second request gets 409 `Backup is already running`. At startup every `running` row (left by a stopped process; the backend runs as a single process) is marked `failed` with error `Interrupted`.
 - Timeout 10 minutes: the process is killed and the run is `failed` with error `Timed out`.
 - The `BACKUP_DIR` folder is created if missing (`mkdir -p`); an unwritable folder fails the run with the OS error.
+- At startup, if backups are configured and no copy succeeded in the last 24 hours, a scheduled copy starts in the background (the PC may have been off at 02:00).
 - Scheduled run: `@Cron('0 2 * * *', { timeZone: 'Europe/Kyiv' })`, errors are caught and stored, never thrown out of the scheduler.
 
 ## Retention
@@ -80,8 +81,8 @@ There is no download, delete or restore endpoint.
 2. Refuses to run while the backend answers on `PORT` (default 3000): prints «Stop the backend first» and exits 1.
 3. Asks for confirmation by typing the database name (skipped with `--yes`).
 4. Makes a `pre_restore` copy into `BACKUP_DIR` with the same dump command (not recorded in `BackupRun`: the restore replaces that table anyway); if it fails, the restore is aborted.
-5. Runs `pg_restore --clean --if-exists --no-owner -d <db>` (through `docker exec -i` with the file on stdin, or locally).
-6. Prints the result; non-zero exit on failure, leaving the pre-restore copy for rollback.
+5. Resets the `public` schema (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` via `psql`) and runs `pg_restore --no-owner --exit-on-error -d <db>` (through `docker exec -i` with the file on stdin, or locally).
+6. Prints the result and reminds to run `npx prisma migrate deploy` before starting the backend; non-zero exit on failure, leaving the pre-restore copy for rollback.
 
 Step-by-step instructions (including restoring on a new PC: install Docker, `docker compose up -d`, `npx prisma migrate deploy` is NOT needed before restore because the dump contains the schema) go to `docs/backups.md`.
 

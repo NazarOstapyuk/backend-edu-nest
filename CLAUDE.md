@@ -163,7 +163,7 @@ Spec: `docs/superpowers/specs/2026-10-13-backups-design.md`. Code in `src/backup
 - `BackupsService.create` runs `pg_dump -Fc` (inside `BACKUP_PG_CONTAINER` via `docker exec`, or locally) into `<name>.part` under `BACKUP_DIR`, renames it on success and records a `BackupRun`. One run at a time per process (409 `Backup is already running`); 10-minute timeout; runs left `running` are marked `Interrupted` at startup.
 - The password goes only into the child environment (`PGPASSWORD`); stored errors pass through `maskSecret`. Never put it in arguments or logs.
 - Names and retention are pure (`backup-retention.ts`): 30 newest scheduled copies + newest per month for 12 months, manual copies 30 days, pre-restore copies kept; only our file names are ever deleted.
-- Daily cron at 02:00 Europe/Kyiv (`BackupsScheduler`). `GET /backups`, `POST /backups`, `GET /backups/runs` for root/admin. There is no restore or delete endpoint: restore is `npm run backup:restore` with the backend stopped, after a safety copy.
+- Daily cron at 02:00 Europe/Kyiv (`BackupsScheduler`); at startup a background catch-up copy runs when no copy succeeded in the last 24 hours. Restore resets the `public` schema first (`DROP SCHEMA ... CASCADE`), then `pg_restore`; run `npx prisma migrate deploy` afterwards. Dumps skip `BackupRun` rows. `GET /backups`, `POST /backups`, `GET /backups/runs` for root/admin. There is no restore or delete endpoint: restore is `npm run backup:restore` with the backend stopped, after a safety copy.
 
 ## Module conventions
 
