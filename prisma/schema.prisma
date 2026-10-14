@@ -89,6 +89,7 @@ model User {
   payrollAdjVoided    PayrollAdjustment[]    @relation("PayrollAdjustmentVoidedBy")
   payrollPayCreated   PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
   payrollPayVoided    PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
+  backupRunsCreated   BackupRun[]            @relation("BackupRunCreatedBy")
 }
 
 model Group {
@@ -1222,4 +1223,31 @@ model PayrollPayment {
   voidReason  String?
 
   @@index([sheetId])
+}
+
+enum BackupKind {
+  scheduled
+  manual
+  pre_restore
+}
+
+enum BackupStatus {
+  running
+  succeeded
+  failed
+}
+
+model BackupRun {
+  id          String       @id @default(uuid())
+  kind        BackupKind
+  status      BackupStatus
+  fileName    String?
+  sizeBytes   BigInt?
+  error       String?
+  startedAt   DateTime     @default(now())
+  finishedAt  DateTime?
+  createdById String?
+  createdBy   User?        @relation("BackupRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([startedAt])
 }

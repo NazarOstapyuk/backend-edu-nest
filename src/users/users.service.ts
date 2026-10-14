@@ -130,6 +130,7 @@ export class UsersService {
       }),
       this.prisma.payrollAdjustment.count({ where: author }),
       this.prisma.payrollPayment.count({ where: author }),
+      this.prisma.backupRun.count({ where: { createdById: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
