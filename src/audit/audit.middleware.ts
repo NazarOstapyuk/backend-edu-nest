@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -14,6 +14,8 @@ type RoutedRequest = Omit<Request, 'route'> & {
 
 @Injectable()
 export class AuditMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(AuditMiddleware.name);
+
   constructor(private audit: AuditService) {}
 
   use(req: RoutedRequest, res: Response, next: NextFunction) {
@@ -21,31 +23,35 @@ export class AuditMiddleware implements NestMiddleware {
     runWithRequest(requestId, () => {
       const readResponseId = responseIdReader();
       res.on('finish', () => {
-        if (!shouldRecordEvent(req.method, req.originalUrl)) return;
-        const path = req.route?.path
-          ? `${req.baseUrl}${req.route.path}`
-          : req.originalUrl.split('?')[0];
-        const route = `${req.method} ${path}`;
-        const params = (req.params ?? {}) as Record<string, string>;
-        const { entityType, entityId } = entityFromRoute(
-          route,
-          params,
-          readResponseId(),
-        );
-        const meta = requestMeta(req);
-        void this.audit.recordEvent({
-          requestId,
-          actorId: req.user?.id ?? null,
-          actorRole: req.user?.role ?? null,
-          method: req.method,
-          route,
-          entityType,
-          entityId,
-          statusCode: res.statusCode,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-          body: sanitizeBody(req.body),
-        });
+        try {
+          if (!shouldRecordEvent(req.method, req.originalUrl)) return;
+          const path = req.route?.path
+            ? `${req.baseUrl}${req.route.path}`
+            : req.originalUrl.split('?')[0];
+          const route = `${req.method} ${path}`;
+          const params = (req.params ?? {}) as Record<string, string>;
+          const { entityType, entityId } = entityFromRoute(
+            route,
+            params,
+            req.method === 'POST' ? readResponseId() : null,
+          );
+          const meta = requestMeta(req);
+          void this.audit.recordEvent({
+            requestId,
+            actorId: req.user?.id ?? null,
+            actorRole: req.user?.role ?? null,
+            method: req.method,
+            route,
+            entityType,
+            entityId,
+            statusCode: res.statusCode,
+            ip: meta.ip,
+            userAgent: meta.userAgent,
+            body: sanitizeBody(req.body),
+          });
+        } catch (error) {
+          this.logger.error(`Audit event not recorded: ${String(error)}`);
+        }
       });
       next();
     });

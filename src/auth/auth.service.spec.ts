@@ -206,11 +206,11 @@ describe('AuthService', () => {
     const reqWith = (token?: string) =>
       ({ cookies: token ? { refreshToken: token } : {} }) as unknown as Request;
 
-    it('records a missing cookie', async () => {
+    it('does not record a missing cookie', async () => {
       await expect(
         service.refresh(reqWith(), mockRes as unknown as Response, meta),
       ).rejects.toThrow('Invalid refresh token');
-      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed(null, ''));
+      expect(mockAudit.recordAuth).not.toHaveBeenCalled();
     });
 
     it('records an undecodable token without a user id', async () => {

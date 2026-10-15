@@ -60,6 +60,44 @@ describe('AuditMiddleware', () => {
     );
   });
 
+  it('ignores the response id of a PATCH without an id param', () => {
+    const req = {
+      method: 'PATCH',
+      originalUrl: '/settings',
+      baseUrl: '',
+      route: { path: '/settings' },
+      params: {},
+      body: {},
+      headers: {},
+      ip: '::1',
+    };
+    const res = makeRes();
+    middleware.use(req as never, res as never, () => setResponseId('x1'));
+    res.emit('finish');
+    expect(audit.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: null }),
+    );
+  });
+
+  it('does not throw when recording fails synchronously', () => {
+    audit.recordEvent.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const res = makeRes();
+    middleware.use(
+      {
+        method: 'POST',
+        originalUrl: '/tariffs',
+        baseUrl: '',
+        params: {},
+        headers: {},
+      } as never,
+      res as never,
+      () => undefined,
+    );
+    expect(() => res.emit('finish')).not.toThrow();
+  });
+
   it('skips reads and auth routes', () => {
     for (const [method, url] of [
       ['GET', '/children'],

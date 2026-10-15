@@ -103,7 +103,7 @@ export class AuthService {
   async refresh(req: Request, res: Response, meta: RequestMeta) {
     const token: string | undefined = (req.cookies as Record<string, string>)
       ?.refreshToken;
-    if (!token) return this.refreshFailed(meta, null, '');
+    if (!token) throw new UnauthorizedException('Invalid refresh token');
 
     let payload: { sub: string; role: string };
     try {
