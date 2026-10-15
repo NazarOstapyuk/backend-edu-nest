@@ -54,7 +54,7 @@ Migration: every existing `admin` gets `edit` on all 11 areas; `accessScope` sta
 ### Routes
 
 - New decorator `@Permission(area, level)` (class or method level, method overrides class like `@Roles`).
-- `RolesGuard` becomes: allow when the route has neither decorator (unchanged behaviour); otherwise allow `root`; allow when the user's role is listed in `@Roles`; allow when the route has `@Permission` and the user holds it; else 403 `Insufficient permissions` (routes with only `@Roles` keep the existing 403 `Forbidden resource`).
+- `RolesGuard` becomes: allow when the route has neither decorator (unchanged behaviour); otherwise allow when the user's role is listed in `@Roles`; allow when the route has `@Permission` and the user holds it (root always holds every permission, but gets no extra access to routes with only `@Roles`); else 403 `Insufficient permissions` (routes with only `@Roles` keep the existing 403 `Forbidden resource`).
 - Staff routes drop `Role.admin` from `@Roles` and get `@Permission`. `GET` = `view`, any mutation = `edit`, unless the table says otherwise.
 
 | Controller (prefix) | Area | Notes |
