@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { NoticeStatus } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { childScopeWhere } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { assertOwnChild } from '../common/ownership';
@@ -55,11 +57,14 @@ const withDays = <T extends { startDate: Date; endDate: Date }>(notice: T) => ({
 export class NoticesService {
   constructor(private prisma: PrismaService) {}
 
-  async list(query: ListNoticesQueryDto) {
+  async list(query: ListNoticesQueryDto, user: AuthenticatedUser) {
     const notices = await this.prisma.absenceNotice.findMany({
       where: {
         status: query.status,
-        child: query.groupId ? { groupId: query.groupId } : undefined,
+        child: {
+          ...(query.groupId ? { groupId: query.groupId } : {}),
+          ...childScopeWhere(scopeKind(user)),
+        },
       },
       select: adminSelect,
       orderBy: { createdAt: 'desc' },
@@ -108,9 +113,15 @@ export class NoticesService {
   ) {
     const exists = await this.prisma.absenceNotice.findUnique({
       where: { id },
-      select: { id: true },
+      select: {
+        id: true,
+        child: { select: { group: { select: { kind: true } } } },
+      },
     });
     if (!exists) throw new NotFoundException('Notice not found');
+    const kind = scopeKind(user);
+    if (kind && exists.child?.group?.kind !== kind)
+      throw new NotFoundException('Notice not found');
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.absenceNotice.updateMany({
         where: { id, status: from },

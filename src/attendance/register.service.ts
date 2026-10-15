@@ -11,7 +11,8 @@ import {
   PermissionLevel,
   Prisma,
 } from '@prisma/client';
-import { hasPermission } from '../access/access-calc';
+import { hasPermission, scopeKind } from '../access/access-calc';
+import { groupScopeWhere } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
@@ -71,9 +72,12 @@ export class RegisterService {
 
   groupsFor(user: AuthenticatedUser) {
     return this.prisma.group.findMany({
-      where: canManageRegister(user)
-        ? {}
-        : { teachers: { some: { id: user.id } } },
+      where: {
+        ...(canManageRegister(user)
+          ? {}
+          : { teachers: { some: { id: user.id } } }),
+        ...groupScopeWhere(scopeKind(user)),
+      },
       select: { id: true, name: true, kind: true },
       orderBy: { name: 'asc' },
     });
@@ -94,6 +98,9 @@ export class RegisterService {
       },
     });
     if (!group) throw new NotFoundException('Group not found');
+    const kind = scopeKind(user);
+    if (kind && group.kind !== kind)
+      throw new NotFoundException('Group not found');
     if (
       !canManageRegister(user, level) &&
       !group.teachers.some((t) => t.id === user.id)

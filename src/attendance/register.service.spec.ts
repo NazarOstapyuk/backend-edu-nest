@@ -137,6 +137,35 @@ describe('RegisterService', () => {
       ).rejects.toThrow(new NotFoundException('Group not found'));
     });
 
+    it('limits a scoped manager to groups of their kind', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.groupsFor({
+        ...admin,
+        accessScope: AccessScope.kindergarten,
+      });
+      expect(
+        firstArg<{ where: object }>(mockPrisma.group.findMany).where,
+      ).toEqual({ kind: GroupKind.kindergarten });
+    });
+
+    it('hides groups of another kind from a scoped manager', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        ...group,
+        kind: GroupKind.school_class,
+      });
+      const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+      const notFound = new NotFoundException('Group not found');
+      await expect(
+        service.day('g1', '2026-10-14', scoped, TODAY),
+      ).rejects.toThrow(notFound);
+      await expect(
+        service.save('g1', { date: '2026-10-14', marks: [] }, scoped, TODAY),
+      ).rejects.toThrow(notFound);
+      await expect(service.month('g1', '2026-10', scoped)).rejects.toThrow(
+        notFound,
+      );
+    });
+
     it('lists only own groups for a teacher', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groupsFor(teacher);

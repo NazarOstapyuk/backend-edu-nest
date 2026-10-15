@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AccessScope, NoticeStatus, Role } from '@prisma/client';
+import { AccessScope, GroupKind, NoticeStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoticesService } from './notices.service';
 
@@ -94,6 +94,50 @@ describe('NoticesService', () => {
       );
       await service.reject('n1', 'Немає підстав', admin);
       expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scope', () => {
+    const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+
+    it('adds the kind filter to the list', async () => {
+      mockPrisma.absenceNotice.findMany.mockResolvedValue([]);
+      await service.list({ groupId: 'g1' }, scoped);
+      expect(
+        firstArg<{ where: object }>(mockPrisma.absenceNotice.findMany).where,
+      ).toEqual({
+        status: undefined,
+        child: { groupId: 'g1', group: { kind: GroupKind.kindergarten } },
+      });
+    });
+
+    it('does not filter an unscoped list', async () => {
+      mockPrisma.absenceNotice.findMany.mockResolvedValue([]);
+      await service.list({}, admin);
+      expect(
+        firstArg<{ where: object }>(mockPrisma.absenceNotice.findMany).where,
+      ).toEqual({ status: undefined, child: {} });
+    });
+
+    it('reports a notice outside the scope as not found', async () => {
+      mockPrisma.absenceNotice.findUnique.mockResolvedValue({
+        id: 'n1',
+        child: { group: { kind: GroupKind.school_class } },
+      });
+      await expect(service.approve('n1', scoped)).rejects.toThrow(
+        new NotFoundException('Notice not found'),
+      );
+      expect(mockPrisma.absenceNotice.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('decides a notice inside the scope', async () => {
+      mockPrisma.absenceNotice.findUnique.mockResolvedValue({
+        ...notice({ status: NoticeStatus.rejected }),
+        child: { group: { kind: GroupKind.kindergarten } },
+      });
+      mockPrisma.absenceNotice.updateMany.mockResolvedValue({ count: 1 });
+      await service.reject('n1', 'Немає підстав', scoped);
+      expect(mockPrisma.absenceNotice.updateMany).toHaveBeenCalled();
     });
   });
 

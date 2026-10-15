@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CalendarScope } from '@prisma/client';
+import { CalendarScope, GroupKind } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { OUTSIDE_SCOPE } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
@@ -21,7 +24,22 @@ export class CalendarService {
     });
   }
 
-  async list(fromValue: string, toValue: string, groupId?: string) {
+  private entryInScope(
+    kind: GroupKind | null,
+    entry: { scope: CalendarScope; group?: { kind: GroupKind } | null },
+  ) {
+    if (!kind) return true;
+    if (entry.scope === CalendarScope.group) return entry.group?.kind === kind;
+    return entry.scope === CalendarScope[kind];
+  }
+
+  async list(
+    fromValue: string,
+    toValue: string,
+    groupId: string | undefined,
+    user: AuthenticatedUser,
+  ) {
+    const kind = scopeKind(user);
     const from = parseDay(fromValue);
     const to = parseDay(toValue);
     if (to.getTime() < from.getTime())
@@ -32,12 +50,21 @@ export class CalendarService {
         where: { id: groupId },
         select: { id: true, kind: true },
       });
-      if (!group) throw new NotFoundException('Group not found');
+      if (!group || (kind && group.kind !== kind))
+        throw new NotFoundException('Group not found');
       scopeFilter = {
         OR: [
           { scope: CalendarScope.all },
           { scope: CalendarScope[group.kind] },
           { scope: CalendarScope.group, groupId },
+        ],
+      };
+    } else if (kind) {
+      scopeFilter = {
+        OR: [
+          { scope: CalendarScope.all },
+          { scope: CalendarScope[kind] },
+          { scope: CalendarScope.group, group: { kind } },
         ],
       };
     }
@@ -61,13 +88,23 @@ export class CalendarService {
     const isGroup = dto.scope === CalendarScope.group;
     if (isGroup !== Boolean(dto.groupId))
       throw new BadRequestException('Group is required for group scope');
+    const kind = scopeKind(user);
+    let groupKind: GroupKind | undefined;
     if (dto.groupId) {
       const group = await this.prisma.group.findUnique({
         where: { id: dto.groupId },
-        select: { id: true },
+        select: { id: true, kind: true },
       });
       if (!group) throw new NotFoundException('Group not found');
+      groupKind = group.kind;
     }
+    if (
+      !this.entryInScope(kind, {
+        scope: dto.scope,
+        group: groupKind ? { kind: groupKind } : null,
+      })
+    )
+      throw new ForbiddenException(OUTSIDE_SCOPE);
     return this.prisma.calendarDay.create({
       data: {
         startDate,
@@ -83,8 +120,13 @@ export class CalendarService {
   }
 
   async void(id: string, reason: string, user: AuthenticatedUser) {
-    const entry = await this.prisma.calendarDay.findUnique({ where: { id } });
+    const entry = await this.prisma.calendarDay.findUnique({
+      where: { id },
+      include: { group: { select: { kind: true } } },
+    });
     if (!entry) throw new NotFoundException('Calendar entry not found');
+    if (!this.entryInScope(scopeKind(user), entry))
+      throw new ForbiddenException(OUTSIDE_SCOPE);
     if (entry.voidedAt)
       throw new BadRequestException('Calendar entry is voided');
     return this.prisma.calendarDay.update({

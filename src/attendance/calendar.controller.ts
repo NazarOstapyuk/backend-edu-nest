@@ -30,9 +30,10 @@ export class CalendarController {
   list(
     @Query('from') from: string,
     @Query('to') to: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Query('groupId') groupId?: string,
   ) {
-    return this.calendar.list(from, to, groupId);
+    return this.calendar.list(from, to, groupId, user);
   }
 
   @Post()

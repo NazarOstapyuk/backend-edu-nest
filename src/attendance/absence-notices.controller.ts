@@ -24,8 +24,11 @@ export class AbsenceNoticesController {
   constructor(private notices: NoticesService) {}
 
   @Get()
-  list(@Query() query: ListNoticesQueryDto) {
-    return this.notices.list(query);
+  list(
+    @Query() query: ListNoticesQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notices.list(query, user);
   }
 
   @Permission(PermissionArea.register, PermissionLevel.edit)

@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   CalendarDayType,
@@ -139,7 +143,7 @@ describe('CalendarService', () => {
       kind: GroupKind.school_class,
     });
     mockPrisma.calendarDay.findMany.mockResolvedValue([]);
-    await service.list('2026-10-01', '2026-10-31', 'g1');
+    await service.list('2026-10-01', '2026-10-31', 'g1', admin);
     const where = firstArg<{ where: { OR: object[] } }>(
       mockPrisma.calendarDay.findMany,
     ).where;
@@ -148,6 +152,82 @@ describe('CalendarService', () => {
       { scope: CalendarScope.school_class },
       { scope: CalendarScope.group, groupId: 'g1' },
     ]);
+  });
+
+  describe('scope', () => {
+    const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+    const base = {
+      startDate: '2026-10-14',
+      type: CalendarDayType.non_working,
+      title: 'x',
+    };
+    const outside = new ForbiddenException('Outside access scope');
+
+    it('refuses entries for everyone', async () => {
+      await expect(
+        service.create({ ...base, scope: CalendarScope.all }, scoped),
+      ).rejects.toThrow(outside);
+      expect(mockPrisma.calendarDay.create).not.toHaveBeenCalled();
+    });
+
+    it('creates an entry of the own kind and refuses the other', async () => {
+      mockPrisma.calendarDay.create.mockResolvedValue({ id: 'c1' });
+      await service.create(
+        { ...base, scope: CalendarScope.kindergarten },
+        scoped,
+      );
+      expect(mockPrisma.calendarDay.create).toHaveBeenCalledTimes(1);
+      await expect(
+        service.create({ ...base, scope: CalendarScope.school_class }, scoped),
+      ).rejects.toThrow(outside);
+    });
+
+    it('checks the kind of the group for group entries', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        kind: GroupKind.school_class,
+      });
+      await expect(
+        service.create(
+          { ...base, scope: CalendarScope.group, groupId: 'g1' },
+          scoped,
+        ),
+      ).rejects.toThrow(outside);
+    });
+
+    it('refuses to void an entry for everyone', async () => {
+      mockPrisma.calendarDay.findUnique.mockResolvedValue({
+        id: 'c1',
+        scope: CalendarScope.all,
+        voidedAt: null,
+        group: null,
+      });
+      await expect(service.void('c1', 'x', scoped)).rejects.toThrow(outside);
+      expect(mockPrisma.calendarDay.update).not.toHaveBeenCalled();
+    });
+
+    it('scopes the list without a group', async () => {
+      mockPrisma.calendarDay.findMany.mockResolvedValue([]);
+      await service.list('2026-10-01', '2026-10-31', undefined, scoped);
+      expect(
+        firstArg<{ where: { OR: object[] } }>(mockPrisma.calendarDay.findMany)
+          .where.OR,
+      ).toEqual([
+        { scope: CalendarScope.all },
+        { scope: CalendarScope.kindergarten },
+        { scope: CalendarScope.group, group: { kind: GroupKind.kindergarten } },
+      ]);
+    });
+
+    it('hides a group of another kind in the list', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        kind: GroupKind.school_class,
+      });
+      await expect(
+        service.list('2026-10-01', '2026-10-31', 'g1', scoped),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+    });
   });
 
   it('voids an entry once', async () => {
