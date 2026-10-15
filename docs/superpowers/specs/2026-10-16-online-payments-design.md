@@ -31,7 +31,7 @@ Parents pay by card online, from the parent cabinet or from a payment link an ad
 2. **Link.** An admin creates a link for a child, category, amount (defaults to the category's debt) and optional comment. Backend creates a `PaymentRequest` (`source link`, `expiresAt = now + 7 days`) and returns `url = ${PUBLIC_APP_URL}/pay/<key>` once (the key itself is never stored). The payer opens the page and presses «Оплатити»: an invoice is created then (each press is a new attempt).
 3. **Status.** Webhook or polling calls `applyInvoiceStatus(invoiceId, providerStatus)` in one transaction:
    - lock the invoice row (`SELECT … FOR UPDATE`); if already `success` → no-op;
-   - `success`: if the provider amount ≠ `amountKop` → `failure` with `failureReason = 'amount mismatch'`, nothing is credited; otherwise create `Payment` (`method online`, `status confirmed`, `category` of the request, `amount`, `reference = invoiceId`, `externalId = invoiceId`, `receivedAt = paidAt`, `createdById null`, note `Онлайн-оплата`), allocate it with `suggestAllocation` to that category's oldest open charges (remainder stays a prepayment), set invoice `success` + `paymentId`, request `paid` + `paidAt`;
+   - `success`: if the provider amount ≠ `amountKop` → `failure` with `failureReason = 'amount mismatch'`, nothing is credited; otherwise create `Payment` (`method online`, `status confirmed`, `category` of the request, `amount`, `reference = invoiceId`, `externalId = invoiceId`, `receivedAt = paidAt`, `createdById null`, note `Онлайн-оплата`; allocation rows are created by the root user because `Allocation.createdById` is required), allocate it with `suggestAllocation` to that category's oldest open charges (remainder stays a prepayment), set invoice `success` + `paymentId`, request `paid` + `paidAt`;
    - `failure` / `expired`: set on the invoice; the request stays `open`;
    - `pending`: only `checkedAt` changes.
 4. Two successful invoices for one request (two tabs) both become `Payment`s — money received is always recorded; the second is a prepayment visible on the card.
@@ -90,6 +90,7 @@ Security: link keys are 32 random bytes (base64url), stored only as SHA-256; unk
 | 400 | `Payment request is not open` |
 | 502 | `Payment provider error` |
 | 404 | `Invoice not found` |
+| 404 | `Payment request not found` |
 
 ## Testing
 
