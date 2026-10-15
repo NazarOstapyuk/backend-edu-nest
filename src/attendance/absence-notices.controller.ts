@@ -7,18 +7,18 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { NoticesService } from './notices.service';
 import { ListNoticesQueryDto } from './dto/list-notices-query.dto';
 import { ReasonDto } from './dto/reason.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.register, PermissionLevel.view)
 @Controller('absence-notices')
 export class AbsenceNoticesController {
   constructor(private notices: NoticesService) {}
@@ -28,11 +28,13 @@ export class AbsenceNoticesController {
     return this.notices.list(query);
   }
 
+  @Permission(PermissionArea.register, PermissionLevel.edit)
   @Post(':id/approve')
   approve(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.notices.approve(id, user);
   }
 
+  @Permission(PermissionArea.register, PermissionLevel.edit)
   @Post(':id/reject')
   reject(
     @Param('id') id: string,
@@ -42,6 +44,7 @@ export class AbsenceNoticesController {
     return this.notices.reject(id, dto.reason, user);
   }
 
+  @Permission(PermissionArea.register, PermissionLevel.edit)
   @Post(':id/cancel')
   cancel(
     @Param('id') id: string,

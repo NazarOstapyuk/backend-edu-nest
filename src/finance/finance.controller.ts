@@ -7,11 +7,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ChargesService } from './charges.service';
 import { AllocateDto } from './dto/allocate.dto';
@@ -21,7 +21,7 @@ import { FinanceService } from './finance.service';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.finance, PermissionLevel.view)
 @Controller()
 export class FinanceController {
   constructor(
@@ -35,6 +35,7 @@ export class FinanceController {
     return this.finance.getBalances(query);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('charges/:id/void')
   async voidCharge(
     @Param('id') id: string,
@@ -45,6 +46,7 @@ export class FinanceController {
     return this.finance.getChildFinance(charge.childId);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('payments/:id/allocations')
   async allocate(
     @Param('id') id: string,
@@ -55,6 +57,7 @@ export class FinanceController {
     return this.finance.getChildFinance(payment.childId);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('payments/:id/void')
   async voidPayment(
     @Param('id') id: string,
@@ -65,6 +68,7 @@ export class FinanceController {
     return this.finance.getChildFinance(payment.childId);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('allocations/:id/void')
   async voidAllocation(
     @Param('id') id: string,

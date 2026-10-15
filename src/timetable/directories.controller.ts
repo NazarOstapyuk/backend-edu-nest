@@ -7,23 +7,25 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DirectoriesService } from './directories.service';
 import { CreateNamedDto, UpdateNamedDto } from './dto/named.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.timetable, PermissionLevel.edit)
 @Controller()
 export class DirectoriesController {
   constructor(private directories: DirectoriesService) {}
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.timetable, PermissionLevel.view)
   @Get('subjects')
-  @Roles(Role.root, Role.admin, Role.teacher)
   subjects(@CurrentUser() user: AuthenticatedUser) {
     return this.directories.listSubjects(user);
   }
@@ -38,8 +40,9 @@ export class DirectoriesController {
     return this.directories.updateSubject(id, dto);
   }
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.timetable, PermissionLevel.view)
   @Get('rooms')
-  @Roles(Role.root, Role.admin, Role.teacher)
   rooms(@CurrentUser() user: AuthenticatedUser) {
     return this.directories.listRooms(user);
   }

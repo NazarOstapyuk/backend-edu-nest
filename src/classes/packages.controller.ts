@@ -7,11 +7,11 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { VoidDto } from '../finance/dto/void.dto';
 import { ExtendPackageDto } from './dto/extend-package.dto';
@@ -21,7 +21,7 @@ import { LegacyService } from './legacy.service';
 import { PackagesService } from './packages.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.classes, PermissionLevel.view)
 @Controller()
 export class PackagesController {
   constructor(
@@ -34,6 +34,7 @@ export class PackagesController {
     return this.packages.listForChild(childId);
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('children/:childId/packages')
   purchase(
     @Param('childId') childId: string,
@@ -43,6 +44,7 @@ export class PackagesController {
     return this.packages.purchase(childId, dto, user.id);
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('packages/:id/extend')
   extend(
     @Param('id') id: string,
@@ -52,6 +54,7 @@ export class PackagesController {
     return this.packages.extend(id, dto, user.id);
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('packages/:id/void')
   void(
     @Param('id') id: string,
@@ -61,6 +64,7 @@ export class PackagesController {
     return this.packages.void(id, dto.reason, user.id);
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('packages/:id/reconcile')
   reconcile(
     @Param('id') id: string,
@@ -75,6 +79,7 @@ export class PackagesController {
     return this.packages.reconciliationList();
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('legacy/subscriptions/migrate')
   @HttpCode(200)
   migrate(@CurrentUser() user: AuthenticatedUser) {

@@ -7,9 +7,10 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { BellSchedulesService } from './bell-schedules.service';
 import {
@@ -18,13 +19,14 @@ import {
 } from './dto/bell-schedule.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.timetable, PermissionLevel.edit)
 @Controller('bell-schedules')
 export class BellSchedulesController {
   constructor(private schedules: BellSchedulesService) {}
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.timetable, PermissionLevel.view)
   @Get()
-  @Roles(Role.root, Role.admin, Role.teacher)
   list() {
     return this.schedules.list();
   }

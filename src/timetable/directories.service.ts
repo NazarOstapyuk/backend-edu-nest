@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
-import { isAdmin } from './roles';
+import { isTimetableManager } from './roles';
 import { CreateNamedDto, UpdateNamedDto } from './dto/named.dto';
 
 @Injectable()
@@ -14,7 +14,7 @@ export class DirectoriesService {
 
   listSubjects(user: AuthenticatedUser) {
     return this.prisma.subject.findMany({
-      where: isAdmin(user) ? {} : { active: true },
+      where: isTimetableManager(user) ? {} : { active: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -44,7 +44,7 @@ export class DirectoriesService {
 
   listRooms(user: AuthenticatedUser) {
     return this.prisma.room.findMany({
-      where: isAdmin(user) ? {} : { active: true },
+      where: isTimetableManager(user) ? {} : { active: true },
       orderBy: { name: 'asc' },
     });
   }

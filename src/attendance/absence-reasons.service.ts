@@ -3,7 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
+import { hasPermission } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { CreateAbsenceReasonDto } from './dto/create-absence-reason.dto';
@@ -14,7 +15,11 @@ export class AbsenceReasonsService {
   constructor(private prisma: PrismaService) {}
 
   list(user: AuthenticatedUser) {
-    const admin = user.role === Role.root || user.role === Role.admin;
+    const admin = hasPermission(
+      user,
+      PermissionArea.register,
+      PermissionLevel.view,
+    );
     return this.prisma.absenceReason.findMany({
       where: admin ? {} : { active: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],

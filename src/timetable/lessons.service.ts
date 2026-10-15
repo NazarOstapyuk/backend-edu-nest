@@ -5,13 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { LessonStatus, Prisma } from '@prisma/client';
+import { LessonStatus, PermissionLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
 import { RegisterService } from '../attendance/register.service';
 import { addDays, isoDay, kyivToday } from '../tariffs/dates';
-import { isAdmin } from './roles';
+import { isTimetableManager } from './roles';
 import { type Slot, pupilState } from './schedule-calc';
 import { ScheduleService, subgroupKey } from './schedule.service';
 import { SaveLessonDto } from './dto/save-lesson.dto';
@@ -32,7 +32,7 @@ export class LessonsService {
     teacherId?: string,
   ) {
     const date = parseDay(dateValue);
-    const target = isAdmin(user) && teacherId ? teacherId : user.id;
+    const target = isTimetableManager(user) && teacherId ? teacherId : user.id;
     const schedules = await this.schedule.build(date, date);
     const rows = schedules.flatMap((s) =>
       s.days[0].slots
@@ -85,7 +85,10 @@ export class LessonsService {
       (s) => !s.cancelled && s.period === period && s.subgroupId === subgroupId,
     );
     if (!schedule || !slot) throw new NotFoundException('Lesson not found');
-    if (!isAdmin(user) && slot.teacherId !== user.id)
+    if (
+      !isTimetableManager(user, PermissionLevel.edit) &&
+      slot.teacherId !== user.id
+    )
       throw new ForbiddenException('Not your lesson');
     return { date, slot, group: schedule.group };
   }
@@ -166,8 +169,10 @@ export class LessonsService {
         topic: lesson.topic,
         homework: lesson.homework,
       },
-      canEdit: time(date) <= time(today) && (isAdmin(user) || inWindow),
-      needsReason: isAdmin(user) && !inWindow,
+      canEdit:
+        time(date) <= time(today) &&
+        (isTimetableManager(user, PermissionLevel.edit) || inWindow),
+      needsReason: isTimetableManager(user, PermissionLevel.edit) && !inWindow,
       pupils: children.map((child) => {
         const dayState =
           dayRows.find((r) => r.childId === child.id)?.days[0] ?? null;
@@ -214,7 +219,7 @@ export class LessonsService {
     const editDays = await this.register.getEditDays();
     const reason = dto.reason?.trim() || null;
     if (time(date) < time(addDays(today, -editDays))) {
-      if (!isAdmin(user))
+      if (!isTimetableManager(user, PermissionLevel.edit))
         throw new ForbiddenException('Edit window has passed');
       if (!reason) throw new BadRequestException('Reason is required');
     }

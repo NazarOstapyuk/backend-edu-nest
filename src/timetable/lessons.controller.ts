@@ -8,17 +8,19 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { LessonsService } from './lessons.service';
 import { SaveLessonDto } from './dto/save-lesson.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin, Role.teacher)
+@Roles(Role.teacher)
+@Permission(PermissionArea.timetable, PermissionLevel.view)
 @Controller()
 export class LessonsController {
   constructor(private lessons: LessonsService) {}
@@ -43,6 +45,7 @@ export class LessonsController {
     return this.lessons.view(id, date, period, subgroupId ?? null, user);
   }
 
+  @Permission(PermissionArea.timetable, PermissionLevel.edit)
   @Put('groups/:id/lessons/:date/:period')
   save(
     @Param('id') id: string,

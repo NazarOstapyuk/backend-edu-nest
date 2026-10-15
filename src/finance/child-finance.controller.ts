@@ -7,11 +7,11 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ChargesService } from './charges.service';
 import { AllocationSuggestionDto } from './dto/allocation-suggestion.dto';
@@ -21,7 +21,7 @@ import { FinanceService } from './finance.service';
 import { PaymentsService } from './payments.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.finance, PermissionLevel.view)
 @Controller('children/:childId')
 export class ChildFinanceController {
   constructor(
@@ -49,6 +49,7 @@ export class ChildFinanceController {
     return this.finance.suggest(childId, dto);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('charges')
   async createCharge(
     @Param('childId') childId: string,
@@ -59,6 +60,7 @@ export class ChildFinanceController {
     return this.finance.getChildFinance(childId);
   }
 
+  @Permission(PermissionArea.finance, PermissionLevel.edit)
   @Post('payments')
   async createPayment(
     @Param('childId') childId: string,

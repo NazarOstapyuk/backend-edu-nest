@@ -8,10 +8,10 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { MealDirectoriesService } from './meal-directories.service';
 import { MealSettingsService } from './meal-settings.service';
 import {
@@ -24,7 +24,7 @@ import {
 import { UpdateMealSettingsDto } from './dto/meal-settings.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.meals, PermissionLevel.view)
 @Controller()
 export class MealDirectoriesController {
   constructor(
@@ -37,11 +37,13 @@ export class MealDirectoriesController {
     return this.directories.listCourses();
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('meal-courses')
   createCourse(@Body() dto: CreateSortedNamedDto) {
     return this.directories.createCourse(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Patch('meal-courses/:id')
   updateCourse(@Param('id') id: string, @Body() dto: UpdateSortedNamedDto) {
     return this.directories.updateCourse(id, dto);
@@ -52,11 +54,13 @@ export class MealDirectoriesController {
     return this.directories.listDishes(query);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('dishes')
   createDish(@Body() dto: CreateDishDto) {
     return this.directories.createDish(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Patch('dishes/:id')
   updateDish(@Param('id') id: string, @Body() dto: UpdateDishDto) {
     return this.directories.updateDish(id, dto);
@@ -67,11 +71,13 @@ export class MealDirectoriesController {
     return this.directories.listPriceCategories();
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('meal-price-categories')
   createPriceCategory(@Body() dto: CreateSortedNamedDto) {
     return this.directories.createPriceCategory(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Patch('meal-price-categories/:id')
   updatePriceCategory(
     @Param('id') id: string,
@@ -85,6 +91,7 @@ export class MealDirectoriesController {
     return { mealOrderDeadline: await this.settings.getDeadline() };
   }
 
+  @Permission(PermissionArea.settings, PermissionLevel.edit)
   @Patch('meals/settings')
   updateSettings(@Body() dto: UpdateMealSettingsDto) {
     return this.settings.setDeadline(dto.mealOrderDeadline);

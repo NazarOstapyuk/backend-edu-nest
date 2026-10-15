@@ -8,11 +8,11 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { VoidDto } from '../finance/dto/void.dto';
 import { BillingService } from './billing.service';
@@ -22,7 +22,7 @@ import { EndEnrollmentDto } from './dto/end-enrollment.dto';
 import { EnrollmentsService } from './enrollments.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.tariffs, PermissionLevel.view)
 @Controller()
 export class EnrollmentsController {
   constructor(
@@ -35,6 +35,7 @@ export class EnrollmentsController {
     return this.enrollments.listForChild(childId);
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('children/:childId/enrollments')
   create(
     @Param('childId') childId: string,
@@ -44,11 +45,13 @@ export class EnrollmentsController {
     return this.enrollments.create(childId, dto, user.id);
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Patch('enrollments/:id/end')
   end(@Param('id') id: string, @Body() dto: EndEnrollmentDto) {
     return this.enrollments.end(id, dto);
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('enrollments/:id/adjustments')
   addAdjustment(
     @Param('id') id: string,
@@ -58,6 +61,7 @@ export class EnrollmentsController {
     return this.enrollments.addAdjustment(id, dto, user.id);
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('adjustments/:id/void')
   voidAdjustment(
     @Param('id') id: string,
@@ -67,6 +71,7 @@ export class EnrollmentsController {
     return this.enrollments.voidAdjustment(id, dto.reason, user.id);
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('enrollments/:id/bill')
   @HttpCode(200)
   async bill(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
@@ -78,6 +83,7 @@ export class EnrollmentsController {
     };
   }
 
+  @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('billed-periods/:id/recalculate')
   async recalculate(
     @Param('id') id: string,

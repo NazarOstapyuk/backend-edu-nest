@@ -9,8 +9,10 @@ import {
   DailyStatus,
   GroupKind,
   NoticeStatus,
+  PermissionLevel,
   Role,
 } from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from './calendar.service';
 import { RegisterService } from './register.service';
@@ -24,7 +26,7 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
-  permissions: {},
+  permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
   id: 't1',
@@ -141,6 +143,28 @@ describe('RegisterService', () => {
       expect(
         firstArg<{ where: object }>(mockPrisma.group.findMany).where,
       ).toEqual({ teachers: { some: { id: 't1' } } });
+    });
+  });
+
+  describe('register permissions', () => {
+    it('lists all groups for a teacher with register view', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.groupsFor({
+        ...teacher,
+        permissions: { register: PermissionLevel.view },
+      });
+      expect(
+        firstArg<{ where: object }>(mockPrisma.group.findMany).where,
+      ).toEqual({});
+    });
+
+    it('lets a teacher with register edit edit outside the window with a reason', async () => {
+      const editor = {
+        ...teacher,
+        permissions: { register: PermissionLevel.edit },
+      };
+      const view = await service.day('g1', '2026-10-09', editor, TODAY);
+      expect(view).toMatchObject({ canEdit: true, needsReason: true });
     });
   });
 

@@ -9,10 +9,11 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ClassGroupsService } from './class-groups.service';
@@ -24,7 +25,8 @@ import { UpdateClassGroupDto } from './dto/update-class-group.dto';
 import { LessonsService } from './lessons.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin, Role.teacher)
+@Roles(Role.teacher)
+@Permission(PermissionArea.classes, PermissionLevel.view)
 @Controller()
 export class ClassGroupsController {
   constructor(
@@ -32,19 +34,22 @@ export class ClassGroupsController {
     private lessons: LessonsService,
   ) {}
 
-  @Roles(Role.root, Role.admin)
+  @Roles()
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('class-groups')
   create(@Body() dto: CreateClassGroupDto) {
     return this.groups.create(dto);
   }
 
-  @Roles(Role.root, Role.admin)
+  @Roles()
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Patch('class-groups/:id')
   update(@Param('id') id: string, @Body() dto: UpdateClassGroupDto) {
     return this.groups.update(id, dto);
   }
 
-  @Roles(Role.root, Role.admin)
+  @Roles()
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Delete('class-groups/:id')
   delete(@Param('id') id: string) {
     return this.groups.delete(id);
@@ -60,7 +65,8 @@ export class ClassGroupsController {
     return this.groups.myGroups(user);
   }
 
-  @Roles(Role.root, Role.admin)
+  @Roles()
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post('class-groups/:id/members')
   addMember(
     @Param('id') id: string,
@@ -70,7 +76,8 @@ export class ClassGroupsController {
     return this.groups.addMember(id, dto, user.id);
   }
 
-  @Roles(Role.root, Role.admin)
+  @Roles()
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Patch('class-group-members/:id/end')
   endMember(@Param('id') id: string, @Body() dto: EndMemberDto) {
     return this.groups.endMember(id, dto);
@@ -85,6 +92,7 @@ export class ClassGroupsController {
     return this.lessons.getRoster(id, date, user);
   }
 
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Put('class-groups/:id/lessons/:date')
   async mark(
     @Param('id') id: string,

@@ -4,7 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DailyStatus, NoticeStatus, Prisma, Role } from '@prisma/client';
+import {
+  DailyStatus,
+  NoticeStatus,
+  PermissionArea,
+  PermissionLevel,
+  Prisma,
+} from '@prisma/client';
+import { hasPermission } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
@@ -31,8 +38,10 @@ const childSelect = {
 
 const time = (day: Date) => day.getTime();
 
-const isAdmin = (user: AuthenticatedUser) =>
-  user.role === Role.root || user.role === Role.admin;
+const canManageRegister = (
+  user: AuthenticatedUser,
+  level: PermissionLevel = PermissionLevel.view,
+) => hasPermission(user, PermissionArea.register, level);
 
 @Injectable()
 export class RegisterService {
@@ -62,7 +71,9 @@ export class RegisterService {
 
   groupsFor(user: AuthenticatedUser) {
     return this.prisma.group.findMany({
-      where: isAdmin(user) ? {} : { teachers: { some: { id: user.id } } },
+      where: canManageRegister(user)
+        ? {}
+        : { teachers: { some: { id: user.id } } },
       select: { id: true, name: true, kind: true },
       orderBy: { name: 'asc' },
     });
@@ -79,7 +90,10 @@ export class RegisterService {
       },
     });
     if (!group) throw new NotFoundException('Group not found');
-    if (!isAdmin(user) && !group.teachers.some((t) => t.id === user.id)) {
+    if (
+      !canManageRegister(user) &&
+      !group.teachers.some((t) => t.id === user.id)
+    ) {
       throw new ForbiddenException('Not your group');
     }
     return group;
@@ -149,8 +163,11 @@ export class RegisterService {
       date: isoDay(date),
       working: info.working,
       calendarTitle: info.title,
-      canEdit: info.working && notFuture && (isAdmin(user) || window),
-      needsReason: isAdmin(user) && !window,
+      canEdit:
+        info.working &&
+        notFuture &&
+        (canManageRegister(user, PermissionLevel.edit) || window),
+      needsReason: canManageRegister(user, PermissionLevel.edit) && !window,
       children: children.map((child) => {
         const own = marks.filter((m) => m.childId === child.id);
         const ownNotices = notices.filter((n) => n.childId === child.id);
@@ -202,7 +219,7 @@ export class RegisterService {
       throw new BadRequestException('Not a working day');
     const reason = dto.reason?.trim() || null;
     if (!this.inWindow(date, today, editDays)) {
-      if (!isAdmin(user))
+      if (!canManageRegister(user, PermissionLevel.edit))
         throw new ForbiddenException('Edit window has passed');
       if (!reason) throw new BadRequestException('Reason is required');
     }

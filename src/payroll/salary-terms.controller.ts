@@ -9,11 +9,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { SalaryTermsService } from './salary-terms.service';
 import {
@@ -24,7 +24,7 @@ import {
 } from './dto/salary-terms.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.payroll, PermissionLevel.view)
 @Controller('salary-terms')
 export class SalaryTermsController {
   constructor(private terms: SalaryTermsService) {}
@@ -39,6 +39,7 @@ export class SalaryTermsController {
     return this.terms.get(id);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post()
   create(
     @Body() dto: CreateSalaryTermsDto,
@@ -47,16 +48,19 @@ export class SalaryTermsController {
     return this.terms.create(dto, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Patch(':id/close')
   close(@Param('id') id: string, @Body() dto: CloseSalaryTermsDto) {
     return this.terms.close(id, dto);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateSalaryTermsDto) {
     return this.terms.update(id, dto);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.terms.remove(id);

@@ -1,6 +1,13 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AccessScope, GroupKind, Prisma, Role } from '@prisma/client';
+import {
+  AccessScope,
+  GroupKind,
+  PermissionLevel,
+  Prisma,
+  Role,
+} from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { MealViewsService } from './meal-views.service';
 
@@ -11,7 +18,7 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
-  permissions: {},
+  permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
   id: 't1',

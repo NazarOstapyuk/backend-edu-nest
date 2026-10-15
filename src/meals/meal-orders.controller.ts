@@ -7,10 +7,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { MealOrdersService } from './meal-orders.service';
@@ -19,7 +20,7 @@ import { AdminMealOrdersDto, CancelMealOrderDto } from './dto/meal-order.dto';
 import { MealOrdersQueryDto, TodayOrdersQueryDto } from './dto/meal-views.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.meals, PermissionLevel.view)
 @Controller('meal-orders')
 export class MealOrdersController {
   constructor(
@@ -32,8 +33,9 @@ export class MealOrdersController {
     return this.views.adminList(query);
   }
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.meals, PermissionLevel.view)
   @Get('today')
-  @Roles(Role.root, Role.admin, Role.teacher)
   today(
     @Query() query: TodayOrdersQueryDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -41,6 +43,7 @@ export class MealOrdersController {
     return this.views.today(query.groupId, user);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post()
   create(
     @Body() dto: AdminMealOrdersDto,
@@ -49,6 +52,7 @@ export class MealOrdersController {
     return this.orders.create(dto.childId, dto.days, user);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post(':id/cancel')
   cancel(
     @Param('id') id: string,

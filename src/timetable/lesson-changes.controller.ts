@@ -1,16 +1,16 @@
 import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ReasonDto } from '../attendance/dto/reason.dto';
 import { LessonChangesService } from './lesson-changes.service';
 import { CreateLessonChangeDto } from './dto/lesson-change.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.timetable, PermissionLevel.edit)
 @Controller()
 export class LessonChangesController {
   constructor(private changes: LessonChangesService) {}

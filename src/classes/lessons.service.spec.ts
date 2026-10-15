@@ -1,13 +1,15 @@
 import { Test } from '@nestjs/testing';
 import {
+  AccessScope,
   AttendanceStatus,
   ChargeSource,
   FinanceCategory,
   MissedLessonRule,
+  PermissionLevel,
   Prisma,
   Role,
-  AccessScope,
 } from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { LessonsService } from './lessons.service';
 
@@ -21,7 +23,7 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
-  permissions: {},
+  permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
   id: 't1',

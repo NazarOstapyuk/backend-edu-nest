@@ -7,10 +7,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { CalendarService } from './calendar.service';
@@ -18,13 +19,14 @@ import { CreateCalendarDayDto } from './dto/create-calendar-day.dto';
 import { ReasonDto } from './dto/reason.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.register, PermissionLevel.edit)
 @Controller('calendar')
 export class CalendarController {
   constructor(private calendar: CalendarService) {}
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.register, PermissionLevel.view)
   @Get()
-  @Roles(Role.root, Role.admin, Role.teacher)
   list(
     @Query('from') from: string,
     @Query('to') to: string,

@@ -7,21 +7,23 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { SubgroupsService } from './subgroups.service';
 import { CreateSubgroupDto, UpdateSubgroupDto } from './dto/subgroup.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.timetable, PermissionLevel.edit)
 @Controller()
 export class SubgroupsController {
   constructor(private subgroups: SubgroupsService) {}
 
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.timetable, PermissionLevel.view)
   @Get('groups/:id/subgroups')
-  @Roles(Role.root, Role.admin, Role.teacher)
   list(@Param('id') id: string) {
     return this.subgroups.list(id);
   }

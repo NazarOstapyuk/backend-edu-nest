@@ -1,15 +1,17 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
+import { hasPermission } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { isoDay, toDay } from '../tariffs/dates';
 
 export function assertGroupAccess(
   group: { teachers: { id: string }[] },
   user: AuthenticatedUser,
+  area: PermissionArea = PermissionArea.classes,
 ) {
   if (
-    user.role === Role.teacher &&
-    !group.teachers.some((t) => t.id === user.id)
+    !group.teachers.some((t) => t.id === user.id) &&
+    !hasPermission(user, area, PermissionLevel.view)
   ) {
     throw new ForbiddenException('Not your class group');
   }

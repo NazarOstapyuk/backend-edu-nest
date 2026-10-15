@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AccessScope, Role } from '@prisma/client';
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { AbsenceReasonsService } from './absence-reasons.service';
 
@@ -19,7 +20,7 @@ const user = (role: Role) => ({
   login: 'x',
   mustChangePassword: false,
   accessScope: AccessScope.all,
-  permissions: {},
+  permissions: role === Role.admin ? allPermissions(PermissionLevel.edit) : {},
 });
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
 

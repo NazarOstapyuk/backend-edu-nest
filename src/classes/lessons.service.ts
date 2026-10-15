@@ -5,7 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChargeSource, Prisma, Role } from '@prisma/client';
+import {
+  ChargeSource,
+  PermissionArea,
+  PermissionLevel,
+  Prisma,
+} from '@prisma/client';
+import { hasPermission } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { voidChargeInTx } from '../finance/void-charge';
@@ -167,7 +173,11 @@ export class LessonsService {
     if (found.length !== ids.length)
       throw new NotFoundException('Child not found');
 
-    const isTeacher = user.role === Role.teacher;
+    const isTeacher = !hasPermission(
+      user,
+      PermissionArea.classes,
+      PermissionLevel.edit,
+    );
     const isLate = date.getTime() < today.getTime();
     const reason = dto.reason?.trim() ?? '';
 

@@ -1,7 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AttendancesService } from './attendances.service';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
@@ -11,7 +20,8 @@ import { CreateAttendanceDto } from './dto/create-attendance.dto';
 export class AttendancesController {
   constructor(private service: AttendancesService) {}
 
-  @Roles(Role.root, Role.admin, Role.teacher)
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post()
   create(
     @Param('subscriptionId') subscriptionId: string,
@@ -20,13 +30,14 @@ export class AttendancesController {
     return this.service.create(subscriptionId, dto);
   }
 
-  @Roles(Role.root, Role.admin, Role.teacher)
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.classes, PermissionLevel.view)
   @Get()
   findAll(@Param('subscriptionId') subscriptionId: string) {
     return this.service.findBySubscription(subscriptionId);
   }
 
-  @Roles(Role.root, Role.admin)
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Delete(':id')
   delete(
     @Param('subscriptionId') subscriptionId: string,

@@ -4,7 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AccessScope, LessonStatus, NushLevel, Role } from '@prisma/client';
+import {
+  AccessScope,
+  LessonStatus,
+  NushLevel,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterService } from '../attendance/register.service';
 import { ScheduleService } from './schedule.service';
@@ -18,7 +25,7 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
-  permissions: {},
+  permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
   id: 't1',
@@ -178,6 +185,20 @@ describe('LessonsService', () => {
     await expect(
       service.view('g1', '2026-10-14', 2, null, admin, TODAY),
     ).rejects.toThrow(new NotFoundException('Lesson not found'));
+  });
+
+  it('lets a teacher with timetable edit open another teacher lesson', async () => {
+    mockSchedule.build.mockResolvedValue(
+      schedule([slot({ teacherId: 't2', source: 'replace' })]),
+    );
+    const manager = {
+      ...teacher,
+      id: 't3',
+      permissions: { timetable: PermissionLevel.edit },
+    };
+    await expect(
+      service.view('g1', '2026-10-14', 1, null, manager, TODAY),
+    ).resolves.toBeDefined();
   });
 
   it('shows register absences on the lesson and lets a lesson mark win', async () => {

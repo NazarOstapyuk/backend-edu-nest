@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
 import { addDays, dayCount, isoDay, kyivToday } from '../tariffs/dates';
-import { isAdmin } from './roles';
+import { isTimetableManager } from './roles';
 import {
   type ConflictItem,
   type EntryLike,
@@ -292,7 +292,7 @@ export class TimetablesService {
     const [schedule] = await this.schedule.build(from, to, [groupId]);
     const slots = schedule.days.flatMap((d) => d.slots);
     if (
-      !isAdmin(user) &&
+      !isTimetableManager(user) &&
       !group.teachers.some((t) => t.id === user.id) &&
       !slots.some((s) => s.teacherId === user.id)
     )

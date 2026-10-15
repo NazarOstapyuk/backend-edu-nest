@@ -10,15 +10,15 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { GroupKind, Role } from '@prisma/client';
+import { GroupKind, PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { MenusService } from './menus.service';
 import { CopyMenuDto, MenuPeriodDto, SaveMenuDayDto } from './dto/menu.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.meals, PermissionLevel.view)
 @Controller('menu-days')
 export class MenusController {
   constructor(private menus: MenusService) {}
@@ -28,21 +28,25 @@ export class MenusController {
     return this.menus.list(query);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('publish')
   publish(@Body() dto: MenuPeriodDto) {
     return this.menus.publish(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('unpublish')
   unpublish(@Body() dto: MenuPeriodDto) {
     return this.menus.unpublish(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('copy')
   copy(@Body() dto: CopyMenuDto) {
     return this.menus.copy(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Put(':date/:kind')
   save(
     @Param('date') date: string,
@@ -52,6 +56,7 @@ export class MenusController {
     return this.menus.saveDay(date, kind, dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Delete(':date/:kind')
   remove(
     @Param('date') date: string,

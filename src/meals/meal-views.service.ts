@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PermissionArea } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { assertGroupAccess, parseDay } from '../classes/access';
@@ -95,7 +96,7 @@ export class MealViewsService {
       select: { id: true, teachers: { select: { id: true } } },
     });
     if (!group) throw new NotFoundException('Group not found');
-    assertGroupAccess(group, user);
+    assertGroupAccess(group, user, PermissionArea.meals);
     const rows = await this.prisma.mealOrder.findMany({
       where: { date: today, cancelledAt: null, child: { groupId } },
       select: { ...orderSelect, child: person },

@@ -8,11 +8,11 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { VoidDto } from '../finance/dto/void.dto';
 import { PayrollService } from './payroll.service';
@@ -24,7 +24,7 @@ import {
 } from './dto/payroll.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.payroll, PermissionLevel.view)
 @Controller()
 export class PayrollController {
   constructor(private payroll: PayrollService) {}
@@ -39,6 +39,7 @@ export class PayrollController {
     return this.payroll.detail(teacherId, month);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Patch('payroll/:teacherId/:month/worked-days')
   workedDays(
     @Param('teacherId') teacherId: string,
@@ -48,6 +49,7 @@ export class PayrollController {
     return this.payroll.setWorkedDays(teacherId, month, dto.workedDays ?? null);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll/:teacherId/:month/adjustments')
   addAdjustment(
     @Param('teacherId') teacherId: string,
@@ -58,6 +60,7 @@ export class PayrollController {
     return this.payroll.addAdjustment(teacherId, month, dto, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll-adjustments/:id/void')
   voidAdjustment(
     @Param('id') id: string,
@@ -67,6 +70,7 @@ export class PayrollController {
     return this.payroll.voidAdjustment(id, dto.reason, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll/:teacherId/:month/payments')
   addPayment(
     @Param('teacherId') teacherId: string,
@@ -77,6 +81,7 @@ export class PayrollController {
     return this.payroll.addPayment(teacherId, month, dto, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll-payments/:id/void')
   voidPayment(
     @Param('id') id: string,
@@ -86,6 +91,7 @@ export class PayrollController {
     return this.payroll.voidPayment(id, dto.reason, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll/:teacherId/:month/approve')
   approve(
     @Param('teacherId') teacherId: string,
@@ -95,6 +101,7 @@ export class PayrollController {
     return this.payroll.approve(teacherId, month, user);
   }
 
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Post('payroll/:teacherId/:month/reopen')
   reopen(
     @Param('teacherId') teacherId: string,

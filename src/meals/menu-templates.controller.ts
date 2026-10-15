@@ -8,10 +8,10 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { Permission } from '../common/decorators/permission.decorator';
 import { MenuTemplatesService } from './menu-templates.service';
 import {
   ApplyTemplateDto,
@@ -21,7 +21,7 @@ import {
 } from './dto/menu-template.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.root, Role.admin)
+@Permission(PermissionArea.meals, PermissionLevel.view)
 @Controller('menu-templates')
 export class MenuTemplatesController {
   constructor(private templates: MenuTemplatesService) {}
@@ -31,21 +31,25 @@ export class MenuTemplatesController {
     return this.templates.list();
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post()
   create(@Body() dto: CreateMenuTemplateDto) {
     return this.templates.create(dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateMenuTemplateDto) {
     return this.templates.update(id, dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Put(':id/items')
   saveItems(@Param('id') id: string, @Body() dto: SaveTemplateItemsDto) {
     return this.templates.saveItems(id, dto);
   }
 
+  @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post(':id/apply')
   apply(@Param('id') id: string, @Body() dto: ApplyTemplateDto) {
     return this.templates.apply(id, dto);

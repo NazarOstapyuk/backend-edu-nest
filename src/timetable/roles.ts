@@ -1,5 +1,8 @@
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
+import { hasPermission } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 
-export const isAdmin = (user: AuthenticatedUser): boolean =>
-  user.role === Role.root || user.role === Role.admin;
+export const isTimetableManager = (
+  user: AuthenticatedUser,
+  level: PermissionLevel = PermissionLevel.view,
+): boolean => hasPermission(user, PermissionArea.timetable, level);
