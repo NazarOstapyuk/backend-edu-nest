@@ -78,6 +78,7 @@ export class LessonsService {
     period: number,
     subgroupId: string | null,
     user: AuthenticatedUser,
+    level: PermissionLevel,
   ) {
     const date = parseDay(dateValue);
     const [schedule] = await this.schedule.build(date, date, [groupId]);
@@ -85,10 +86,7 @@ export class LessonsService {
       (s) => !s.cancelled && s.period === period && s.subgroupId === subgroupId,
     );
     if (!schedule || !slot) throw new NotFoundException('Lesson not found');
-    if (
-      !isTimetableManager(user, PermissionLevel.edit) &&
-      slot.teacherId !== user.id
-    )
+    if (!isTimetableManager(user, level) && slot.teacherId !== user.id)
       throw new ForbiddenException('Not your lesson');
     return { date, slot, group: schedule.group };
   }
@@ -143,6 +141,7 @@ export class LessonsService {
       period,
       subgroupId,
       user,
+      PermissionLevel.view,
     );
     const lesson = await this.prisma.schoolLesson.findUnique({
       where: this.lessonKey(groupId, date, period, slot),
@@ -213,6 +212,7 @@ export class LessonsService {
       period,
       subgroupId,
       user,
+      PermissionLevel.edit,
     );
     if (time(date) > time(today))
       throw new BadRequestException('Cannot mark future days');

@@ -136,6 +136,22 @@ describe('LessonsService.mark', () => {
     ).rejects.toThrow('Not your class group');
   });
 
+  it('forbids marking another group with only classes view', async () => {
+    await expect(
+      service.mark(
+        'g1',
+        '2026-10-11',
+        mark(AttendanceStatus.present),
+        {
+          ...teacher,
+          id: 't2',
+          permissions: { classes: PermissionLevel.view },
+        },
+        TODAY,
+      ),
+    ).rejects.toThrow('Not your class group');
+  });
+
   it('rejects a future date and an invalid date', async () => {
     await expect(
       service.mark(

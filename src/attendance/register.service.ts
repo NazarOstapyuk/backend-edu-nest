@@ -79,7 +79,11 @@ export class RegisterService {
     });
   }
 
-  private async loadGroup(groupId: string, user: AuthenticatedUser) {
+  private async loadGroup(
+    groupId: string,
+    user: AuthenticatedUser,
+    level: PermissionLevel = PermissionLevel.view,
+  ) {
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       select: {
@@ -91,7 +95,7 @@ export class RegisterService {
     });
     if (!group) throw new NotFoundException('Group not found');
     if (
-      !canManageRegister(user) &&
+      !canManageRegister(user, level) &&
       !group.teachers.some((t) => t.id === user.id)
     ) {
       throw new ForbiddenException('Not your group');
@@ -207,7 +211,7 @@ export class RegisterService {
     user: AuthenticatedUser,
     today: Date = kyivToday(),
   ) {
-    const group = await this.loadGroup(groupId, user);
+    const group = await this.loadGroup(groupId, user, PermissionLevel.edit);
     const date = parseDay(dto.date);
     if (time(date) > time(today))
       throw new BadRequestException('Cannot mark future days');

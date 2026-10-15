@@ -201,6 +201,23 @@ describe('LessonsService', () => {
     ).resolves.toBeDefined();
   });
 
+  it('lets timetable view open but not save another teacher lesson', async () => {
+    mockSchedule.build.mockResolvedValue(
+      schedule([slot({ teacherId: 't2', source: 'replace' })]),
+    );
+    const viewer = {
+      ...teacher,
+      id: 't3',
+      permissions: { timetable: PermissionLevel.view },
+    };
+    await expect(
+      service.view('g1', '2026-10-14', 1, null, viewer, TODAY),
+    ).resolves.toBeDefined();
+    await expect(
+      service.save('g1', '2026-10-14', 1, null, { marks: [] }, viewer, TODAY),
+    ).rejects.toThrow(new ForbiddenException('Not your lesson'));
+  });
+
   it('shows register absences on the lesson and lets a lesson mark win', async () => {
     mockPrisma.schoolLesson.findUnique.mockResolvedValue({
       id: 'L1',

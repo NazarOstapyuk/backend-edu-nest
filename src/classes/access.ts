@@ -8,10 +8,11 @@ export function assertGroupAccess(
   group: { teachers: { id: string }[] },
   user: AuthenticatedUser,
   area: PermissionArea = PermissionArea.classes,
+  level: PermissionLevel = PermissionLevel.view,
 ) {
   if (
     !group.teachers.some((t) => t.id === user.id) &&
-    !hasPermission(user, area, PermissionLevel.view)
+    !hasPermission(user, area, level)
   ) {
     throw new ForbiddenException('Not your class group');
   }

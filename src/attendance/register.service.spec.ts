@@ -147,6 +147,23 @@ describe('RegisterService', () => {
   });
 
   describe('register permissions', () => {
+    it('forbids saving another group with only register view', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        ...group,
+        teachers: [{ id: 'other' }],
+      });
+      const viewer = {
+        ...teacher,
+        permissions: { register: PermissionLevel.view },
+      };
+      await expect(
+        service.day('g1', '2026-10-14', viewer, TODAY),
+      ).resolves.toBeDefined();
+      await expect(
+        service.save('g1', { date: '2026-10-14', marks: [] }, viewer, TODAY),
+      ).rejects.toThrow(new ForbiddenException('Not your group'));
+    });
+
     it('lists all groups for a teacher with register view', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groupsFor({

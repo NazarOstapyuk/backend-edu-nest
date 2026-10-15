@@ -159,7 +159,12 @@ export class LessonsService {
       include: markGroupInclude,
     });
     if (!group) throw new NotFoundException('Class group not found');
-    assertGroupAccess(group, user);
+    assertGroupAccess(
+      group,
+      user,
+      PermissionArea.classes,
+      PermissionLevel.edit,
+    );
     const date = parseDay(dateValue);
     if (date.getTime() > today.getTime())
       throw new BadRequestException('Lesson date must not be in the future');
