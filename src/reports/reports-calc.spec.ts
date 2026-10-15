@@ -1,15 +1,22 @@
 import {
+  CalendarDayType,
+  CalendarScope,
   ChargeSource,
+  DailyStatus,
   FinanceCategory,
+  GroupKind,
+  NoticeStatus,
   PaymentMethod,
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
 import { childMoney } from '../parent-cabinet/cabinet-calc';
 import {
+  attendanceReport,
   chargeDay,
   chargesReport,
   debtsReport,
+  mealsReport,
   paymentsReport,
 } from './reports-calc';
 
@@ -175,5 +182,232 @@ describe('debtsReport', () => {
     expect(r.rows.map((x) => x.child)).toEqual(['В']);
     expect(r.totals).toMatchObject({ child: 'Разом', due: '45.50' });
     expect(r.period).toBeNull();
+  });
+});
+
+describe('attendanceReport', () => {
+  const week = { from: d('2026-10-05'), to: d('2026-10-11') };
+  const group = { id: 'g1', kind: GroupKind.kindergarten, name: 'Сонечко' };
+  const mark = (
+    iso: string,
+    status: DailyStatus,
+    reasonId: string | null = null,
+  ) => ({ date: d(iso), status, reasonId, voidedAt: null });
+  const notice = (iso: string, reasonId: string) => ({
+    startDate: d(iso),
+    endDate: d(iso),
+    reasonId,
+    status: NoticeStatus.approved,
+  });
+  const excused = new Set(['sick']);
+  const child = (
+    extra: Partial<Parameters<typeof attendanceReport>[1][0]> = {},
+  ) => ({
+    child: 'А Олег',
+    group,
+    marks: [
+      mark('2026-10-05', DailyStatus.present),
+      mark('2026-10-06', DailyStatus.late),
+      mark('2026-10-07', DailyStatus.absent, 'sick'),
+    ],
+    notices: [notice('2026-10-08', 'trip')],
+    ...extra,
+  });
+
+  it('counts working days and builds the timesheet codes', () => {
+    const r = attendanceReport(week, [child()], [], excused);
+    expect(r.title).toBe('Відвідування');
+    expect(r.fileName).toBe('відвідування');
+    expect(r.rows[0]).toMatchObject({
+      working: 5,
+      present: 2,
+      excused: 1,
+      unexcused: 1,
+      unmarked: 1,
+      percent: 0.4,
+    });
+    expect(r.totals).toMatchObject({
+      child: 'Разом',
+      working: 5,
+      present: 2,
+      percent: 0.4,
+    });
+    const sheet = r.sheets[0];
+    expect(sheet.name).toBe('Табель');
+    expect(sheet.columns.slice(2).map((c) => c.label)).toEqual([
+      '05.10',
+      '06.10',
+      '07.10',
+      '08.10',
+      '09.10',
+      '10.10',
+      '11.10',
+    ]);
+    expect(sheet.columns[2].key).toBe('d_2026-10-05');
+    const codes = sheet.columns.slice(2).map((c) => sheet.rows[0][c.key]);
+    expect(codes).toEqual(['П', 'З', 'В', 'Н', '·', '', '']);
+  });
+
+  it('maps left_early and unexcused absence marks', () => {
+    const r = attendanceReport(
+      week,
+      [
+        child({
+          marks: [
+            mark('2026-10-05', DailyStatus.left_early),
+            mark('2026-10-06', DailyStatus.absent),
+          ],
+          notices: [],
+        }),
+      ],
+      [],
+      excused,
+    );
+    const sheet = r.sheets[0];
+    expect(sheet.rows[0]['d_2026-10-05']).toBe('Р');
+    expect(sheet.rows[0]['d_2026-10-06']).toBe('Н');
+    expect(r.rows[0]).toMatchObject({ present: 1, unexcused: 1, unmarked: 3 });
+  });
+
+  it('removes a non-working calendar day from the counts', () => {
+    const entries = [
+      {
+        startDate: d('2026-10-07'),
+        endDate: d('2026-10-07'),
+        type: CalendarDayType.non_working,
+        scope: CalendarScope.kindergarten,
+        groupId: null,
+        title: 'Вихідний',
+        voidedAt: null,
+      },
+    ];
+    const r = attendanceReport(week, [child()], entries, excused);
+    expect(r.rows[0]).toMatchObject({ working: 4, excused: 0 });
+    expect(r.sheets[0].rows[0]['d_2026-10-07']).toBe('В');
+    const bare = attendanceReport(
+      week,
+      [child({ marks: [], notices: [] })],
+      entries,
+      excused,
+    );
+    expect(bare.sheets[0].rows[0]['d_2026-10-07']).toBe('');
+  });
+
+  it('shows a weekend mark but does not count it', () => {
+    const r = attendanceReport(
+      week,
+      [
+        child({
+          marks: [
+            mark('2026-10-05', DailyStatus.present),
+            mark('2026-10-10', DailyStatus.present),
+          ],
+          notices: [],
+        }),
+      ],
+      [],
+      excused,
+    );
+    expect(r.sheets[0].rows[0]['d_2026-10-10']).toBe('П');
+    expect(r.rows[0]).toMatchObject({ working: 5, present: 1, percent: 0.2 });
+  });
+
+  it('gives a null percent without working days', () => {
+    const r = attendanceReport(
+      { from: d('2026-10-10'), to: d('2026-10-11') },
+      [child({ marks: [], notices: [] })],
+      [],
+      excused,
+    );
+    expect(r.rows[0]).toMatchObject({ working: 0, percent: null });
+    expect(r.totals).toMatchObject({ working: 0, percent: null });
+  });
+
+  it('rounds the percent to four places and sorts by group then child', () => {
+    const r = attendanceReport(
+      week,
+      [
+        child({ child: 'Б', group: { ...group, name: 'Я' } }),
+        child({
+          child: 'В',
+          marks: [mark('2026-10-05', DailyStatus.present)],
+          notices: [],
+        }),
+        child({ child: 'А' }),
+      ],
+      [],
+      excused,
+    );
+    expect(r.rows.map((x) => x.child)).toEqual(['А', 'В', 'Б']);
+    const third = attendanceReport(
+      { from: d('2026-10-05'), to: d('2026-10-07') },
+      [
+        child({
+          marks: [mark('2026-10-05', DailyStatus.present)],
+          notices: [],
+        }),
+      ],
+      [],
+      excused,
+    );
+    expect(third.rows[0].percent).toBe(0.3333);
+  });
+});
+
+describe('mealsReport', () => {
+  const order = (
+    iso: string,
+    group: string | null,
+    complex: string,
+    price: string,
+  ) => ({ date: d(iso), group, complex, price: dec(price) });
+
+  it('aggregates by day, group and complex with exact sums', () => {
+    const r = mealsReport(period, [
+      order('2026-10-02', 'Сонечко', 'Повний', '45.50'),
+      order('2026-10-02', 'Сонечко', 'Повний', '45.55'),
+      order('2026-10-01', null, 'Легкий', '30.00'),
+    ]);
+    expect(r.title).toBe('Харчування');
+    expect(r.fileName).toBe('харчування');
+    expect(r.rows).toEqual([
+      {
+        date: '2026-10-01',
+        group: '',
+        complex: 'Легкий',
+        count: 1,
+        amount: '30.00',
+      },
+      {
+        date: '2026-10-02',
+        group: 'Сонечко',
+        complex: 'Повний',
+        count: 2,
+        amount: '91.05',
+      },
+    ]);
+    expect(r.totals).toMatchObject({ count: 3, amount: '121.05' });
+  });
+
+  it('adds sheets by day and by complex with totals', () => {
+    const r = mealsReport(period, [
+      order('2026-10-02', 'Сонечко', 'Повний', '45.50'),
+      order('2026-10-03', 'Сонечко', 'Повний', '45.55'),
+      order('2026-10-03', 'Зайчики', 'Легкий', '30.00'),
+    ]);
+    expect(r.sheets.map((s) => s.name)).toEqual(['За днями', 'За комплексами']);
+    expect(r.sheets[0].rows).toEqual([
+      { date: '2026-10-02', count: 1, amount: '45.50' },
+      { date: '2026-10-03', count: 2, amount: '75.55' },
+    ]);
+    expect(r.sheets[1].rows).toEqual([
+      { complex: 'Легкий', count: 1, amount: '30.00' },
+      { complex: 'Повний', count: 2, amount: '91.05' },
+    ]);
+    expect(r.sheets[1].totals).toMatchObject({
+      complex: 'Разом',
+      count: 3,
+      amount: '121.05',
+    });
   });
 });
