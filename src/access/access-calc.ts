@@ -90,3 +90,19 @@ export function grantDenial(
   }
   return null;
 }
+
+export function coversUser(
+  actor: AccessUser,
+  target: { role: Role; accessScope: AccessScope; permissions: PermissionMap },
+): boolean {
+  if (actor.role === Role.root) return true;
+  if (target.role === Role.root) return false;
+  if (target.role === Role.parent) return true;
+  if (!scopeCovers(actor.accessScope, target.accessScope)) return false;
+  return ALL_AREAS.every((area) => {
+    const level = target.permissions[area];
+    return (
+      level === undefined || levelSatisfies(actor.permissions[area], level)
+    );
+  });
+}

@@ -8,6 +8,7 @@ import {
 import {
   ALL_AREAS,
   allPermissions,
+  coversUser,
   grantDenial,
   hasPermission,
   levelSatisfies,
@@ -238,5 +239,47 @@ describe('grantDenial', () => {
         request({}, AccessScope.kindergarten),
       ),
     ).toBe('too_much');
+  });
+});
+
+describe('coversUser', () => {
+  const edit = PermissionLevel.edit;
+  const view = PermissionLevel.view;
+  const actor = user(Role.admin, {
+    [PermissionArea.users]: edit,
+    [PermissionArea.finance]: edit,
+  });
+
+  it('lets root cover anyone', () => {
+    expect(coversUser(user(Role.root), user(Role.root))).toBe(true);
+  });
+
+  it('never covers root for a non-root actor', () => {
+    expect(coversUser(actor, user(Role.root))).toBe(false);
+  });
+
+  it('covers parents', () => {
+    expect(coversUser(actor, user(Role.parent))).toBe(true);
+  });
+
+  it('covers a target whose levels the actor satisfies', () => {
+    expect(
+      coversUser(actor, user(Role.admin, { [PermissionArea.finance]: view })),
+    ).toBe(true);
+  });
+
+  it('refuses a target with an area the actor lacks', () => {
+    expect(
+      coversUser(actor, user(Role.admin, { [PermissionArea.payroll]: view })),
+    ).toBe(false);
+  });
+
+  it('refuses a wider scope target', () => {
+    const narrow = user(
+      Role.admin,
+      { [PermissionArea.users]: edit },
+      AccessScope.kindergarten,
+    );
+    expect(coversUser(narrow, user(Role.admin))).toBe(false);
   });
 });

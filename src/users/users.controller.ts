@@ -29,7 +29,7 @@ export class UsersController {
   @Post()
   @Permission(PermissionArea.users, PermissionLevel.edit)
   create(@Body() dto: CreateUserDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.usersService.create(dto, user.role);
+    return this.usersService.create(dto, user);
   }
 
   @Get()
@@ -39,8 +39,8 @@ export class UsersController {
 
   @Delete(':id')
   @Permission(PermissionArea.users, PermissionLevel.edit)
-  delete(@Param('id') id: string) {
-    return this.usersService.delete(id);
+  delete(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.delete(id, user);
   }
 
   @Patch(':id/access')
@@ -60,6 +60,6 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.usersService.update(id, dto, user.role);
+    return this.usersService.update(id, dto, user);
   }
 }

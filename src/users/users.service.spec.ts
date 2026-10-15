@@ -54,6 +54,25 @@ const mockPrisma = {
   payrollPayment: { count: jest.fn() },
 };
 
+const actorOf = (
+  role: Role,
+  permissions: Partial<Record<PermissionArea, PermissionLevel>> = {},
+  id = 'actor',
+) => ({
+  id,
+  role,
+  login: 'actor',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions,
+});
+const rootActor = actorOf(Role.root);
+const adminActor = actorOf(Role.admin, {
+  users: PermissionLevel.edit,
+  finance: PermissionLevel.edit,
+});
+const teacherActor = actorOf(Role.teacher, { users: PermissionLevel.edit });
+
 describe('UsersService', () => {
   let service: UsersService;
 
@@ -73,7 +92,7 @@ describe('UsersService', () => {
       await expect(
         service.create(
           { login: 'x', password: 'pass123', role: Role.root },
-          Role.admin,
+          adminActor,
         ),
       ).rejects.toThrow(ForbiddenException);
     });
@@ -83,7 +102,7 @@ describe('UsersService', () => {
       await expect(
         service.create(
           { login: 'taken', password: 'pass123', role: Role.teacher },
-          Role.admin,
+          adminActor,
         ),
       ).rejects.toThrow(ConflictException);
     });
@@ -102,7 +121,7 @@ describe('UsersService', () => {
       });
       const result = await service.create(
         { login: 'newuser', password: 'pass123', role: Role.teacher },
-        Role.admin,
+        adminActor,
       );
       expect(result).not.toHaveProperty('password');
       expect(result).not.toHaveProperty('refreshToken');
@@ -121,7 +140,7 @@ describe('UsersService', () => {
             firstName: 'Olena',
             lastName: 'Koval',
           },
-          Role.admin,
+          adminActor,
         ),
       ).rejects.toThrow('Phone is required for parents');
     });
@@ -145,7 +164,7 @@ describe('UsersService', () => {
           phone: '+380671234567',
           email: 'mom@example.com',
         },
-        Role.admin,
+        adminActor,
       );
 
       const data = (
@@ -177,7 +196,7 @@ describe('UsersService', () => {
       await expect(
         service.create(
           { login: 'root2', password: 'pass123', role: Role.root },
-          Role.root,
+          rootActor,
         ),
       ).resolves.not.toThrow();
     });
@@ -188,6 +207,8 @@ describe('UsersService', () => {
       id: 'p1',
       login: 'mom',
       role: Role.parent,
+      accessScope: AccessScope.all,
+      permissions: [],
       phone: '+380671234567',
     };
 
@@ -202,7 +223,7 @@ describe('UsersService', () => {
     it('forces a password change and drops sessions on admin reset', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(parent);
 
-      await service.update('p1', { password: 'newpass1' }, Role.admin);
+      await service.update('p1', { password: 'newpass1' }, adminActor);
 
       const data = (
         mockPrisma.user.update.mock.calls[0] as [
@@ -220,14 +241,14 @@ describe('UsersService', () => {
       mockPrisma.user.findUnique.mockResolvedValue(parent);
 
       await expect(
-        service.update('p1', { phone: null }, Role.admin),
+        service.update('p1', { phone: null }, adminActor),
       ).rejects.toThrow('Phone is required for parents');
     });
 
     it('keeps a legacy parent without phone editable', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ ...parent, phone: null });
 
-      await service.update('p1', { firstName: 'Olena' }, Role.admin);
+      await service.update('p1', { firstName: 'Olena' }, adminActor);
 
       expect(mockPrisma.user.update).toHaveBeenCalled();
     });
@@ -240,7 +261,7 @@ describe('UsersService', () => {
       });
 
       await expect(
-        service.update('p1', { role: Role.parent }, Role.admin),
+        service.update('p1', { role: Role.parent }, adminActor),
       ).rejects.toThrow('Phone is required for parents');
     });
 
@@ -252,7 +273,7 @@ describe('UsersService', () => {
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
 
-      await service.update('p1', { role: Role.parent }, Role.admin);
+      await service.update('p1', { role: Role.parent }, adminActor);
 
       const data = (
         mockPrisma.user.update.mock.calls[0] as [
@@ -266,11 +287,100 @@ describe('UsersService', () => {
     });
   });
 
+  describe('privilege escalation', () => {
+    const target = (over: Record<string, unknown> = {}) => ({
+      id: 'x1',
+      login: 'x',
+      role: Role.admin,
+      phone: null,
+      accessScope: AccessScope.all,
+      permissions: [
+        { area: PermissionArea.payroll, level: PermissionLevel.edit },
+      ],
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrisma.user.update.mockResolvedValue({ id: 'x1' });
+    });
+
+    it('refuses a non-root actor creating root', async () => {
+      await expect(
+        service.create(
+          { login: 'r', password: 'pass123', role: Role.root },
+          teacherActor,
+        ),
+      ).rejects.toThrow('Forbidden');
+    });
+
+    it('refuses an admin making themselves root', async () => {
+      await expect(
+        service.update('actor', { role: Role.root }, adminActor),
+      ).rejects.toThrow('Forbidden');
+    });
+
+    it('refuses to change own role', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ id: 'actor', role: Role.admin, permissions: [] }),
+      );
+      await expect(
+        service.update('actor', { role: Role.parent }, adminActor),
+      ).rejects.toThrow('Cannot change own access');
+      await expect(
+        service.update('actor', { role: Role.teacher }, rootActor),
+      ).rejects.toThrow('Cannot change own access');
+    });
+
+    it('refuses a non-root actor touching root', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ role: Role.root, permissions: [] }),
+      );
+      await expect(
+        service.update('x1', { password: 'newpass1' }, adminActor),
+      ).rejects.toThrow('Cannot manage this user');
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to update a staff user the actor does not cover', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(target());
+      await expect(
+        service.update('x1', { isActive: false }, adminActor),
+      ).rejects.toThrow('Cannot manage this user');
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('allows updating a parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ role: Role.parent, permissions: [], phone: '+380' }),
+      );
+      await service.update('x1', { firstName: 'A' }, adminActor);
+      expect(mockPrisma.user.update).toHaveBeenCalled();
+    });
+
+    it('allows a non-root actor to update their own fields', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ id: 'actor', permissions: [] }),
+      );
+      await service.update('actor', { firstName: 'A' }, adminActor);
+      expect(mockPrisma.user.update).toHaveBeenCalled();
+    });
+
+    it('refuses to delete a staff user the actor does not cover', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(target());
+      await expect(service.delete('x1', adminActor)).rejects.toThrow(
+        'Cannot manage this user',
+      );
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+  });
+
   describe('delete', () => {
     beforeEach(() => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
         role: Role.admin,
+        accessScope: AccessScope.all,
+        permissions: [],
       });
       mockPrisma.charge.count.mockResolvedValue(0);
       mockPrisma.payment.count.mockResolvedValue(0);
@@ -305,7 +415,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user has salary terms', async () => {
       mockPrisma.salaryTerms.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
@@ -317,7 +427,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user has payroll payments', async () => {
       mockPrisma.payrollPayment.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.payrollSheet.count).toHaveBeenCalledWith({
@@ -334,7 +444,7 @@ describe('UsersService', () => {
     it('deletes a user without financial records', async () => {
       mockPrisma.user.delete.mockResolvedValue({});
 
-      const result = await service.delete('u1');
+      const result = await service.delete('u1', rootActor);
 
       expect(result).toEqual({ message: 'User deleted' });
       expect(mockPrisma.charge.count).toHaveBeenCalledWith({
@@ -345,14 +455,16 @@ describe('UsersService', () => {
     it('throws BadRequestException when user has financial records', async () => {
       mockPrisma.allocation.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(BadRequestException);
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when user marked lessons', async () => {
       mockPrisma.lessonAttendance.count.mockResolvedValue(2);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
@@ -361,7 +473,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user decided absence notices', async () => {
       mockPrisma.absenceNotice.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.absenceNotice.count).toHaveBeenCalledWith({
@@ -373,7 +485,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user teaches timetable entries', async () => {
       mockPrisma.timetableEntry.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.timetableEntry.count).toHaveBeenCalledWith({
@@ -385,7 +497,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user teaches class groups', async () => {
       mockPrisma.classGroup.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.classGroup.count).toHaveBeenCalledWith({
@@ -397,7 +509,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user created tariff records', async () => {
       mockPrisma.enrollmentAdjustment.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
@@ -406,7 +518,7 @@ describe('UsersService', () => {
     it('refuses to delete a user who created meal orders', async () => {
       mockPrisma.mealOrder.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         new BadRequestException(
           'Cannot delete: user has financial records, deactivate instead',
         ),
@@ -420,7 +532,7 @@ describe('UsersService', () => {
     it('throws BadRequestException when user created backup runs', async () => {
       mockPrisma.backupRun.count.mockResolvedValue(1);
 
-      await expect(service.delete('u1')).rejects.toThrow(
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
         'Cannot delete: user has financial records, deactivate instead',
       );
       expect(mockPrisma.backupRun.count).toHaveBeenCalledWith({
@@ -436,12 +548,14 @@ describe('UsersService', () => {
         id: 't1',
         login: 'teacher',
         role: Role.teacher,
+        accessScope: AccessScope.all,
+        permissions: [],
         phone: null,
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(2);
 
       await expect(
-        service.update('t1', { role: Role.admin }, Role.root),
+        service.update('t1', { role: Role.admin }, rootActor),
       ).rejects.toThrow('User has salary terms');
       expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
         where: { teacherId: 't1' },
@@ -454,6 +568,8 @@ describe('UsersService', () => {
         id: 't1',
         login: 'teacher',
         role: Role.teacher,
+        accessScope: AccessScope.all,
+        permissions: [],
         phone: null,
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(2);
@@ -461,11 +577,13 @@ describe('UsersService', () => {
         id: 't1',
         login: 'teacher',
         role: Role.teacher,
+        accessScope: AccessScope.all,
+        permissions: [],
         password: 'x',
         refreshToken: null,
       });
 
-      await service.update('t1', { firstName: 'Олена' }, Role.root);
+      await service.update('t1', { firstName: 'Олена' }, rootActor);
 
       expect(mockPrisma.salaryTerms.count).not.toHaveBeenCalled();
       expect(mockPrisma.user.update).toHaveBeenCalled();

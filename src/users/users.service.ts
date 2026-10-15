@@ -6,9 +6,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AccessScope, Role } from '@prisma/client';
+import {
+  AccessScope,
+  PermissionArea,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { grantDenial, toPermissionMap } from '../access/access-calc';
+import {
+  coversUser,
+  grantDenial,
+  toPermissionMap,
+} from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -21,8 +30,8 @@ const permissionSelect = { select: { area: true, level: true } } as const;
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateUserDto, creatorRole: Role) {
-    if (creatorRole === Role.admin && dto.role === Role.root) {
+  async create(dto: CreateUserDto, actor: AuthenticatedUser) {
+    if (dto.role === Role.root && actor.role !== Role.root) {
       throw new ForbiddenException('Forbidden');
     }
 
@@ -77,11 +86,33 @@ export class UsersService {
     });
   }
 
-  async delete(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+  private assertManageable(
+    actor: AuthenticatedUser,
+    target: {
+      role: Role;
+      accessScope: AccessScope;
+      permissions: { area: PermissionArea; level: PermissionLevel }[];
+    },
+  ) {
+    if (
+      !coversUser(actor, {
+        role: target.role,
+        accessScope: target.accessScope,
+        permissions: toPermissionMap(target.permissions),
+      })
+    )
+      throw new ForbiddenException('Cannot manage this user');
+  }
+
+  async delete(id: string, actor: AuthenticatedUser) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { permissions: permissionSelect },
+    });
     if (!user) throw new NotFoundException('User not found');
     if (user.role === Role.root)
       throw new ForbiddenException('Cannot delete root user');
+    this.assertManageable(actor, user);
 
     const author = { OR: [{ createdById: id }, { voidedById: id }] };
     const counts = await Promise.all([
@@ -150,13 +181,19 @@ export class UsersService {
     return { message: 'User deleted' };
   }
 
-  async update(id: string, dto: UpdateUserDto, updaterRole: Role) {
-    if (updaterRole === Role.admin && dto.role === Role.root) {
+  async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
+    if (dto.role === Role.root && actor.role !== Role.root) {
       throw new ForbiddenException('Forbidden');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { permissions: permissionSelect },
+    });
     if (!user) throw new NotFoundException('User not found');
+    if (actor.id === id && dto.role !== undefined && dto.role !== user.role)
+      throw new ForbiddenException('Cannot change own access');
+    this.assertManageable(actor, user);
     if (
       user.role === Role.teacher &&
       dto.role !== undefined &&
@@ -272,11 +309,10 @@ export class UsersService {
         data: { accessScope: dto.accessScope },
       }),
     ]);
-    const updated = await this.prisma.user.findUnique({
+    return this.prisma.user.findUnique({
       where: { id },
       include: { permissions: permissionSelect },
+      omit: { password: true, refreshToken: true },
     });
-    const { password: _p, refreshToken: _r, ...view } = updated!;
-    return view;
   }
 }
