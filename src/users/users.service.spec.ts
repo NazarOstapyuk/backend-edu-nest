@@ -5,7 +5,12 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import {
+  AccessScope,
+  PermissionArea,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -17,6 +22,8 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
   },
+  userPermission: { deleteMany: jest.fn(), createMany: jest.fn() },
+  $transaction: jest.fn(),
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
   allocation: { count: jest.fn() },
@@ -236,6 +243,27 @@ describe('UsersService', () => {
         service.update('p1', { role: Role.parent }, Role.admin),
       ).rejects.toThrow('Phone is required for parents');
     });
+
+    it('clears access when a teacher becomes a parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...parent,
+        role: Role.teacher,
+        phone: '+380671234567',
+      });
+      mockPrisma.salaryTerms.count.mockResolvedValue(0);
+
+      await service.update('p1', { role: Role.parent }, Role.admin);
+
+      const data = (
+        mockPrisma.user.update.mock.calls[0] as [
+          { data: Record<string, unknown> },
+        ]
+      )[0].data;
+      expect(data).toMatchObject({
+        permissions: { deleteMany: {} },
+        accessScope: AccessScope.all,
+      });
+    });
   });
 
   describe('delete', () => {
@@ -441,6 +469,153 @@ describe('UsersService', () => {
 
       expect(mockPrisma.salaryTerms.count).not.toHaveBeenCalled();
       expect(mockPrisma.user.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('setAccess', () => {
+    const actor = {
+      id: 'g1',
+      role: Role.admin,
+      login: 'deputy',
+      mustChangePassword: false,
+      accessScope: AccessScope.all,
+      permissions: {
+        users: PermissionLevel.edit,
+        finance: PermissionLevel.edit,
+      },
+    };
+    const targetRow = (over: Record<string, unknown> = {}) => ({
+      id: 't1',
+      role: Role.admin,
+      accessScope: AccessScope.all,
+      permissions: [],
+      ...over,
+    });
+
+    beforeEach(() => {
+      mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
+        Promise.all(ops),
+      );
+      mockPrisma.userPermission.deleteMany.mockResolvedValue({ count: 0 });
+      mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user.update.mockResolvedValue({});
+    });
+
+    it('replaces permissions and scope', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(targetRow())
+        .mockResolvedValueOnce({
+          ...targetRow({
+            permissions: [
+              { area: PermissionArea.finance, level: PermissionLevel.view },
+            ],
+          }),
+          login: 'acc',
+        });
+
+      const view = await service.setAccess(
+        't1',
+        {
+          accessScope: AccessScope.all,
+          permissions: [
+            { area: PermissionArea.finance, level: PermissionLevel.view },
+          ],
+        },
+        actor,
+      );
+
+      expect(mockPrisma.userPermission.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 't1' },
+      });
+      expect(mockPrisma.userPermission.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            userId: 't1',
+            area: PermissionArea.finance,
+            level: PermissionLevel.view,
+          },
+        ],
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 't1' },
+        data: { accessScope: AccessScope.all },
+      });
+      expect(view.permissions).toEqual([
+        { area: PermissionArea.finance, level: PermissionLevel.view },
+      ]);
+    });
+
+    it('maps denials to errors', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        targetRow({ role: Role.root }),
+      );
+      await expect(
+        service.setAccess(
+          't1',
+          { accessScope: AccessScope.all, permissions: [] },
+          actor,
+        ),
+      ).rejects.toThrow('Root access cannot be changed');
+
+      mockPrisma.user.findUnique.mockResolvedValue(
+        targetRow({ role: Role.parent }),
+      );
+      await expect(
+        service.setAccess(
+          't1',
+          { accessScope: AccessScope.all, permissions: [] },
+          actor,
+        ),
+      ).rejects.toThrow('Access applies to staff only');
+
+      mockPrisma.user.findUnique.mockResolvedValue(targetRow({ id: 'g1' }));
+      await expect(
+        service.setAccess(
+          'g1',
+          { accessScope: AccessScope.all, permissions: [] },
+          actor,
+        ),
+      ).rejects.toThrow('Cannot change own access');
+
+      mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+      await expect(
+        service.setAccess(
+          't1',
+          {
+            accessScope: AccessScope.all,
+            permissions: [
+              { area: PermissionArea.payroll, level: PermissionLevel.view },
+            ],
+          },
+          actor,
+        ),
+      ).rejects.toThrow('Cannot grant more than you have');
+      expect(mockPrisma.userPermission.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects duplicates and a missing user', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+      await expect(
+        service.setAccess(
+          't1',
+          {
+            accessScope: AccessScope.all,
+            permissions: [
+              { area: PermissionArea.finance, level: PermissionLevel.view },
+              { area: PermissionArea.finance, level: PermissionLevel.edit },
+            ],
+          },
+          actor,
+        ),
+      ).rejects.toThrow('Duplicate permission');
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(
+        service.setAccess(
+          't1',
+          { accessScope: AccessScope.all, permissions: [] },
+          actor,
+        ),
+      ).rejects.toThrow('User not found');
     });
   });
 });

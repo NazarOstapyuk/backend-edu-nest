@@ -6,11 +6,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { AccessScope, Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { grantDenial, toPermissionMap } from '../access/access-calc';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+
+const permissionSelect = { select: { area: true, level: true } } as const;
 
 @Injectable()
 export class UsersService {
@@ -43,6 +48,7 @@ export class UsersService {
         email: dto.email ?? null,
         mustChangePassword: dto.role === Role.parent,
       },
+      include: { permissions: permissionSelect },
     });
 
     const { password: _p, refreshToken: _r, ...result } = user;
@@ -63,6 +69,8 @@ export class UsersService {
         email: true,
         mustChangePassword: true,
         isActive: true,
+        accessScope: true,
+        permissions: permissionSelect,
         createdAt: true,
         updatedAt: true,
       },
@@ -191,6 +199,8 @@ export class UsersService {
       email?: string | null;
       mustChangePassword?: boolean;
       refreshToken?: null;
+      accessScope?: AccessScope;
+      permissions?: { deleteMany: object };
     } = {};
     if (dto.login !== undefined) data.login = dto.login;
     if (dto.password) {
@@ -205,9 +215,68 @@ export class UsersService {
     if (dto.firstName !== undefined) data.firstName = dto.firstName;
     if (dto.lastName !== undefined) data.lastName = dto.lastName;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (becomesParent) {
+      data.permissions = { deleteMany: {} };
+      data.accessScope = AccessScope.all;
+    }
 
-    const updated = await this.prisma.user.update({ where: { id }, data });
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data,
+      include: { permissions: permissionSelect },
+    });
     const { password: _p, refreshToken: _r, ...result } = updated;
     return result;
+  }
+  async setAccess(id: string, dto: UpdateAccessDto, actor: AuthenticatedUser) {
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      include: { permissions: permissionSelect },
+    });
+    if (!target) throw new NotFoundException('User not found');
+    const areas = new Set(dto.permissions.map((p) => p.area));
+    if (areas.size !== dto.permissions.length)
+      throw new BadRequestException('Duplicate permission');
+    const denial = grantDenial(
+      actor,
+      {
+        id: target.id,
+        role: target.role,
+        accessScope: target.accessScope,
+        permissions: toPermissionMap(target.permissions),
+      },
+      {
+        accessScope: dto.accessScope,
+        permissions: toPermissionMap(dto.permissions),
+      },
+    );
+    if (denial === 'root')
+      throw new ForbiddenException('Root access cannot be changed');
+    if (denial === 'staff_only')
+      throw new BadRequestException('Access applies to staff only');
+    if (denial === 'self')
+      throw new ForbiddenException('Cannot change own access');
+    if (denial === 'too_much')
+      throw new ForbiddenException('Cannot grant more than you have');
+    await this.prisma.$transaction([
+      this.prisma.userPermission.deleteMany({ where: { userId: id } }),
+      this.prisma.userPermission.createMany({
+        data: dto.permissions.map((p) => ({
+          userId: id,
+          area: p.area,
+          level: p.level,
+        })),
+      }),
+      this.prisma.user.update({
+        where: { id },
+        data: { accessScope: dto.accessScope },
+      }),
+    ]);
+    const updated = await this.prisma.user.findUnique({
+      where: { id },
+      include: { permissions: permissionSelect },
+    });
+    const { password: _p, refreshToken: _r, ...view } = updated!;
+    return view;
   }
 }
