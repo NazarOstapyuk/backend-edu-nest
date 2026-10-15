@@ -16,8 +16,11 @@ export class AdaptationController {
   constructor(private adaptation: AdaptationService) {}
 
   @Get('children/:childId/adaptation-visits')
-  list(@Param('childId') childId: string) {
-    return this.adaptation.listForChild(childId);
+  list(
+    @Param('childId') childId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adaptation.listForChild(childId, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -27,7 +30,7 @@ export class AdaptationController {
     @Body() dto: CreateAdaptationVisitDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.adaptation.create(childId, dto, user.id);
+    return this.adaptation.create(childId, dto, user.id, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -37,6 +40,6 @@ export class AdaptationController {
     @Body() dto: VoidDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.adaptation.void(id, dto.reason, user.id);
+    return this.adaptation.void(id, dto.reason, user.id, user);
   }
 }

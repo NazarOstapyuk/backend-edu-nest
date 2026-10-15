@@ -1,3 +1,5 @@
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import {
   BillingMode,
@@ -13,7 +15,7 @@ const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);
 
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
   tariff: { findUnique: jest.fn() },
   adaptationVisit: {
     findMany: jest.fn(),
@@ -49,6 +51,24 @@ const firstArg = (fn: jest.Mock): CallArg =>
 
 const dto = { tariffId: 't-ad', date: '2026-10-12', hours: '3' };
 
+const fullAdmin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
+const kgAccountant: AuthenticatedUser = {
+  id: 'kg1',
+  role: Role.admin,
+  login: 'kg',
+  mustChangePassword: false,
+  accessScope: AccessScope.kindergarten,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
 describe('AdaptationService', () => {
   let service: AdaptationService;
 
@@ -72,7 +92,7 @@ describe('AdaptationService', () => {
   it('charges hours times the tariff rate on that date', async () => {
     mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
 
-    await service.create('child-1', dto, 'u1');
+    await service.create('child-1', dto, 'u1', fullAdmin);
 
     const chargeData = firstArg(mockPrisma.charge.create).data;
     expect(chargeData).toMatchObject({
@@ -102,6 +122,7 @@ describe('AdaptationService', () => {
       'child-1',
       { ...dto, hours: '1.5', ratePerHour: '250' },
       'u1',
+      fullAdmin,
     );
 
     expect(firstArg(mockPrisma.charge.create).data.amount.toFixed(2)).toBe(
@@ -122,9 +143,9 @@ describe('AdaptationService', () => {
     async (over, body, message) => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff(over));
 
-      await expect(service.create('child-1', body, 'u1')).rejects.toThrow(
-        message,
-      );
+      await expect(
+        service.create('child-1', body, 'u1', fullAdmin),
+      ).rejects.toThrow(message);
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();
     },
   );
@@ -141,7 +162,7 @@ describe('AdaptationService', () => {
       voidedAt: null,
     });
 
-    await service.void('v1', 'wrong day', 'u1');
+    await service.void('v1', 'wrong day', 'u1', fullAdmin);
 
     expect(mockPrisma.charge.update).toHaveBeenCalledWith({
       where: { id: 'c-ad' },
@@ -173,7 +194,7 @@ describe('AdaptationService', () => {
       voidedAt: new Date(),
     });
 
-    await service.void('v1', 'x', 'u1');
+    await service.void('v1', 'x', 'u1', fullAdmin);
 
     expect(mockPrisma.charge.update).not.toHaveBeenCalled();
     expect(mockPrisma.adaptationVisit.update).toHaveBeenCalled();
@@ -187,8 +208,42 @@ describe('AdaptationService', () => {
       voidedAt: new Date(),
     });
 
-    await expect(service.void('v1', 'x', 'u1')).rejects.toThrow(
+    await expect(service.void('v1', 'x', 'u1', fullAdmin)).rejects.toThrow(
       'Adaptation visit is voided',
     );
+  });
+
+  describe('scope', () => {
+    it('hides an out-of-scope child', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.listForChild('child-1', kgAccountant),
+      ).rejects.toThrow('Child not found');
+      await expect(
+        service.create(
+          'child-1',
+          { tariffId: 't-ad', date: '2026-10-10', hours: '2' },
+          'kg1',
+          kgAccountant,
+        ),
+      ).rejects.toThrow('Child not found');
+      expect(mockPrisma.tariff.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope visit on void', async () => {
+      mockPrisma.$transaction.mockImplementation(
+        (fn: (tx: unknown) => unknown) => fn(mockPrisma),
+      );
+      mockPrisma.adaptationVisit.findUnique.mockResolvedValue({
+        id: 'v1',
+        childId: 'child-1',
+      });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.void('v1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Adaptation visit not found');
+      expect(mockPrisma.adaptationVisit.update).not.toHaveBeenCalled();
+    });
   });
 });

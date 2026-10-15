@@ -31,8 +31,11 @@ export class FinanceController {
   ) {}
 
   @Get('finance/balances')
-  getBalances(@Query() query: BalancesQueryDto) {
-    return this.finance.getBalances(query);
+  getBalances(
+    @Query() query: BalancesQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.finance.getBalances(query, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -42,8 +45,8 @@ export class FinanceController {
     @Body() dto: VoidDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const charge = await this.charges.void(id, dto.reason, user.id);
-    return this.finance.getChildFinance(charge.childId);
+    const charge = await this.charges.void(id, dto.reason, user.id, user);
+    return this.finance.getChildFinance(charge.childId, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -53,8 +56,13 @@ export class FinanceController {
     @Body() dto: AllocateDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const payment = await this.payments.allocate(id, dto.allocations, user.id);
-    return this.finance.getChildFinance(payment.childId);
+    const payment = await this.payments.allocate(
+      id,
+      dto.allocations,
+      user.id,
+      user,
+    );
+    return this.finance.getChildFinance(payment.childId, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -64,8 +72,8 @@ export class FinanceController {
     @Body() dto: VoidDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const payment = await this.payments.void(id, dto.reason, user.id);
-    return this.finance.getChildFinance(payment.childId);
+    const payment = await this.payments.void(id, dto.reason, user.id, user);
+    return this.finance.getChildFinance(payment.childId, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -79,7 +87,8 @@ export class FinanceController {
       id,
       dto.reason,
       user.id,
+      user,
     );
-    return this.finance.getChildFinance(childId);
+    return this.finance.getChildFinance(childId, user);
   }
 }

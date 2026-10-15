@@ -3,6 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope, childScopeWhere } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { AllocationSuggestionDto } from './dto/allocation-suggestion.dto';
 import { BalancesQueryDto } from './dto/balances-query.dto';
@@ -45,7 +48,8 @@ export class FinanceService {
     ]);
   }
 
-  async getChildFinance(childId: string) {
+  async getChildFinance(childId: string, user: AuthenticatedUser) {
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     const child = await this.findChild(childId);
     const [charges, payments] = await this.loadRecords(childId);
     const parents = await this.prisma.user.findMany({
@@ -63,13 +67,19 @@ export class FinanceService {
     return { ...buildChildFinance(child, charges, payments), parents };
   }
 
-  async getHistory(childId: string) {
+  async getHistory(childId: string, user: AuthenticatedUser) {
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     await this.findChild(childId);
     const [charges, payments] = await this.loadRecords(childId);
     return buildHistory(charges, payments);
   }
 
-  async suggest(childId: string, dto: AllocationSuggestionDto) {
+  async suggest(
+    childId: string,
+    dto: AllocationSuggestionDto,
+    user: AuthenticatedUser,
+  ) {
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     await this.findChild(childId);
     const amount = money(dto.amount);
     if (amount.lte(0))
@@ -82,8 +92,9 @@ export class FinanceService {
     return suggestAllocation(charges, amount);
   }
 
-  async getBalances(query: BalancesQueryDto) {
+  async getBalances(query: BalancesQueryDto, user: AuthenticatedUser) {
     const children = await this.prisma.child.findMany({
+      where: childScopeWhere(scopeKind(user)),
       select: balanceChildSelect,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });

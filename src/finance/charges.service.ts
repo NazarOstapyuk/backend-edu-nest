@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ChargeSource } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChargeDto } from './dto/create-charge.dto';
 import { money } from './finance-calc';
@@ -13,7 +16,13 @@ import { voidChargeInTx } from './void-charge';
 export class ChargesService {
   constructor(private prisma: PrismaService) {}
 
-  async create(childId: string, dto: CreateChargeDto, userId: string) {
+  async create(
+    childId: string,
+    dto: CreateChargeDto,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
@@ -45,7 +54,26 @@ export class ChargesService {
     });
   }
 
-  async void(id: string, reason: string, userId: string) {
+  async void(
+    id: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    const kind = scopeKind(user);
+    if (kind) {
+      const charge = await this.prisma.charge.findUnique({
+        where: { id },
+        select: { childId: true },
+      });
+      if (charge)
+        await assertChildInScope(
+          this.prisma,
+          kind,
+          charge.childId,
+          'Charge not found',
+        );
+    }
     return this.prisma.$transaction((tx) =>
       voidChargeInTx(tx, id, reason, userId),
     );

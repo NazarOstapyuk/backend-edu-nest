@@ -31,13 +31,19 @@ export class ChildFinanceController {
   ) {}
 
   @Get('finance')
-  getFinance(@Param('childId') childId: string) {
-    return this.finance.getChildFinance(childId);
+  getFinance(
+    @Param('childId') childId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.finance.getChildFinance(childId, user);
   }
 
   @Get('finance/history')
-  getHistory(@Param('childId') childId: string) {
-    return this.finance.getHistory(childId);
+  getHistory(
+    @Param('childId') childId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.finance.getHistory(childId, user);
   }
 
   @Post('allocation-suggestion')
@@ -45,8 +51,9 @@ export class ChildFinanceController {
   suggest(
     @Param('childId') childId: string,
     @Body() dto: AllocationSuggestionDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.finance.suggest(childId, dto);
+    return this.finance.suggest(childId, dto, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -56,8 +63,8 @@ export class ChildFinanceController {
     @Body() dto: CreateChargeDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.charges.create(childId, dto, user.id);
-    return this.finance.getChildFinance(childId);
+    await this.charges.create(childId, dto, user.id, user);
+    return this.finance.getChildFinance(childId, user);
   }
 
   @Permission(PermissionArea.finance, PermissionLevel.edit)
@@ -67,7 +74,7 @@ export class ChildFinanceController {
     @Body() dto: CreatePaymentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.payments.create(childId, dto, user.id);
-    return this.finance.getChildFinance(childId);
+    await this.payments.create(childId, dto, user.id, user);
+    return this.finance.getChildFinance(childId, user);
   }
 }

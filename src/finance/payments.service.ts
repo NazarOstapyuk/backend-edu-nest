@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { AllocationItem, applyAllocations } from './allocations';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -13,7 +16,13 @@ import { money } from './finance-calc';
 export class PaymentsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(childId: string, dto: CreatePaymentDto, userId: string) {
+  async create(
+    childId: string,
+    dto: CreatePaymentDto,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
@@ -43,14 +52,42 @@ export class PaymentsService {
     });
   }
 
-  async allocate(paymentId: string, items: AllocationItem[], userId: string) {
+  private async assertPaymentInScope(id: string, user: AuthenticatedUser) {
+    const kind = scopeKind(user);
+    if (!kind) return;
+    const payment = await this.prisma.payment.findUnique({
+      where: { id },
+      select: { childId: true },
+    });
+    if (payment)
+      await assertChildInScope(
+        this.prisma,
+        kind,
+        payment.childId,
+        'Payment not found',
+      );
+  }
+
+  async allocate(
+    paymentId: string,
+    items: AllocationItem[],
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    await this.assertPaymentInScope(paymentId, user);
     return this.prisma.$transaction(async (tx) => {
       const { payment } = await applyAllocations(tx, paymentId, items, userId);
       return payment;
     });
   }
 
-  async void(id: string, reason: string, userId: string) {
+  async void(
+    id: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    await this.assertPaymentInScope(id, user);
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${id} FOR UPDATE`;
       const payment = await tx.payment.findUnique({ where: { id } });
@@ -70,13 +107,25 @@ export class PaymentsService {
     });
   }
 
-  async voidAllocation(id: string, reason: string, userId: string) {
+  async voidAllocation(
+    id: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    const kind = scopeKind(user);
     return this.prisma.$transaction(async (tx) => {
       const allocation = await tx.allocation.findUnique({
         where: { id },
         include: { payment: { select: { childId: true } } },
       });
       if (!allocation) throw new NotFoundException('Allocation not found');
+      await assertChildInScope(
+        tx,
+        kind,
+        allocation.payment.childId,
+        'Allocation not found',
+      );
 
       const { count } = await tx.allocation.updateMany({
         where: { id, voidedAt: null },

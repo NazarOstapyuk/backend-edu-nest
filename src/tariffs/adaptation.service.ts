@@ -5,6 +5,9 @@ import {
 } from '@nestjs/common';
 import { ChargeSource, Prisma, TariffUnit } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   activeAllocated,
@@ -47,11 +50,16 @@ const toVisitView = (v: LoadedVisit) => ({
 export class AdaptationService {
   constructor(private prisma: PrismaService) {}
 
-  async listForChild(childId: string) {
+  async listForChild(childId: string, user: AuthenticatedUser) {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    return this.loadForChild(childId);
+  }
+
+  private async loadForChild(childId: string) {
     const visits = await this.prisma.adaptationVisit.findMany({
       where: { childId },
       include: visitInclude,
@@ -60,11 +68,17 @@ export class AdaptationService {
     return visits.map(toVisitView);
   }
 
-  async create(childId: string, dto: CreateAdaptationVisitDto, userId: string) {
+  async create(
+    childId: string,
+    dto: CreateAdaptationVisitDto,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     const tariff = await this.prisma.tariff.findUnique({
       where: { id: dto.tariffId },
       include: { prices: true },
@@ -119,13 +133,25 @@ export class AdaptationService {
         },
       });
     });
-    return this.listForChild(childId);
+    return this.loadForChild(childId);
   }
 
-  async void(id: string, reason: string, userId: string) {
+  async void(
+    id: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    const kind = scopeKind(user);
     const childId = await this.prisma.$transaction(async (tx) => {
       const visit = await tx.adaptationVisit.findUnique({ where: { id } });
       if (!visit) throw new NotFoundException('Adaptation visit not found');
+      await assertChildInScope(
+        tx,
+        kind,
+        visit.childId,
+        'Adaptation visit not found',
+      );
       if (visit.voidedAt)
         throw new BadRequestException('Adaptation visit is voided');
 
@@ -141,6 +167,6 @@ export class AdaptationService {
       });
       return visit.childId;
     });
-    return this.listForChild(childId);
+    return this.loadForChild(childId);
   }
 }

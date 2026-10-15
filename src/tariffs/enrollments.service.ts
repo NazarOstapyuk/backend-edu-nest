@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AdjustmentType, TariffUnit } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { money } from '../finance/finance-calc';
 import { priceOn } from './billing-engine';
@@ -26,11 +29,12 @@ const validValue = (type: AdjustmentType, value: string | undefined) => {
 export class EnrollmentsService {
   constructor(private prisma: PrismaService) {}
 
-  private async assertChild(childId: string) {
+  private async assertChild(childId: string, user: AuthenticatedUser) {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
   }
 
   private async getEnrollment(id: string) {
@@ -42,12 +46,27 @@ export class EnrollmentsService {
     return enrollment;
   }
 
-  async childIdOf(enrollmentId: string) {
-    return (await this.getEnrollment(enrollmentId)).childId;
+  async childIdOf(enrollmentId: string, user: AuthenticatedUser) {
+    const enrollment = await this.getEnrollment(enrollmentId);
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      enrollment.childId,
+      'Enrollment not found',
+    );
+    return enrollment.childId;
   }
 
-  async listForChild(childId: string, today: Date = kyivToday()) {
-    await this.assertChild(childId);
+  async listForChild(
+    childId: string,
+    user: AuthenticatedUser,
+    today: Date = kyivToday(),
+  ) {
+    await this.assertChild(childId, user);
+    return this.loadForChild(childId, today);
+  }
+
+  private async loadForChild(childId: string, today: Date = kyivToday()) {
     const enrollments = await this.prisma.enrollment.findMany({
       where: { childId },
       include: enrollmentInclude,
@@ -56,8 +75,13 @@ export class EnrollmentsService {
     return enrollments.map((e) => toEnrollmentView(e, today));
   }
 
-  async create(childId: string, dto: CreateEnrollmentDto, userId: string) {
-    await this.assertChild(childId);
+  async create(
+    childId: string,
+    dto: CreateEnrollmentDto,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
+    await this.assertChild(childId, user);
     const tariff = await this.prisma.tariff.findUnique({
       where: { id: dto.tariffId },
       include: { prices: true },
@@ -97,11 +121,17 @@ export class EnrollmentsService {
         createdById: userId,
       },
     });
-    return this.listForChild(childId);
+    return this.loadForChild(childId);
   }
 
-  async end(id: string, dto: EndEnrollmentDto) {
+  async end(id: string, dto: EndEnrollmentDto, user: AuthenticatedUser) {
     const enrollment = await this.getEnrollment(id);
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      enrollment.childId,
+      'Enrollment not found',
+    );
     const endDate = toDay(dto.endDate);
     if (endDate.getTime() < enrollment.startDate.getTime()) {
       throw new BadRequestException('End date must not be before start date');
@@ -123,15 +153,22 @@ export class EnrollmentsService {
       );
     }
     await this.prisma.enrollment.update({ where: { id }, data: { endDate } });
-    return this.listForChild(enrollment.childId);
+    return this.loadForChild(enrollment.childId);
   }
 
   async addAdjustment(
     enrollmentId: string,
     dto: CreateAdjustmentDto,
     userId: string,
+    user: AuthenticatedUser,
   ) {
     const enrollment = await this.getEnrollment(enrollmentId);
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      enrollment.childId,
+      'Enrollment not found',
+    );
     const startDate = toDay(dto.startDate);
     const endDate = dto.endDate ? toDay(dto.endDate) : null;
     if (endDate && endDate.getTime() < startDate.getTime()) {
@@ -162,15 +199,26 @@ export class EnrollmentsService {
         createdById: userId,
       },
     });
-    return this.listForChild(enrollment.childId);
+    return this.loadForChild(enrollment.childId);
   }
 
-  async voidAdjustment(id: string, reason: string, userId: string) {
+  async voidAdjustment(
+    id: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
     const adjustment = await this.prisma.enrollmentAdjustment.findUnique({
       where: { id },
       include: { enrollment: { select: { childId: true } } },
     });
     if (!adjustment) throw new NotFoundException('Adjustment not found');
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      adjustment.enrollment.childId,
+      'Adjustment not found',
+    );
     if (adjustment.voidedAt)
       throw new BadRequestException('Adjustment is voided');
 
@@ -178,6 +226,6 @@ export class EnrollmentsService {
       where: { id },
       data: { voidedAt: new Date(), voidedById: userId, voidReason: reason },
     });
-    return this.listForChild(adjustment.enrollment.childId);
+    return this.loadForChild(adjustment.enrollment.childId);
   }
 }

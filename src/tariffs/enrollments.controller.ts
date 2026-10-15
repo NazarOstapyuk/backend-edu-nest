@@ -31,8 +31,11 @@ export class EnrollmentsController {
   ) {}
 
   @Get('children/:childId/enrollments')
-  list(@Param('childId') childId: string) {
-    return this.enrollments.listForChild(childId);
+  list(
+    @Param('childId') childId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.enrollments.listForChild(childId, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -42,13 +45,17 @@ export class EnrollmentsController {
     @Body() dto: CreateEnrollmentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.enrollments.create(childId, dto, user.id);
+    return this.enrollments.create(childId, dto, user.id, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Patch('enrollments/:id/end')
-  end(@Param('id') id: string, @Body() dto: EndEnrollmentDto) {
-    return this.enrollments.end(id, dto);
+  end(
+    @Param('id') id: string,
+    @Body() dto: EndEnrollmentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.enrollments.end(id, dto, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -58,7 +65,7 @@ export class EnrollmentsController {
     @Body() dto: CreateAdjustmentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.enrollments.addAdjustment(id, dto, user.id);
+    return this.enrollments.addAdjustment(id, dto, user.id, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -68,18 +75,18 @@ export class EnrollmentsController {
     @Body() dto: VoidDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.enrollments.voidAdjustment(id, dto.reason, user.id);
+    return this.enrollments.voidAdjustment(id, dto.reason, user.id, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post('enrollments/:id/bill')
   @HttpCode(200)
   async bill(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    const result = await this.billing.billEnrollment(id, user.id);
-    const childId = await this.enrollments.childIdOf(id);
+    const result = await this.billing.billEnrollment(id, user);
+    const childId = await this.enrollments.childIdOf(id, user);
     return {
       result,
-      enrollments: await this.enrollments.listForChild(childId),
+      enrollments: await this.enrollments.listForChild(childId, user),
     };
   }
 
@@ -90,7 +97,12 @@ export class EnrollmentsController {
     @Body() dto: VoidDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const { childId } = await this.billing.recalculate(id, dto.reason, user.id);
-    return this.enrollments.listForChild(childId);
+    const { childId } = await this.billing.recalculate(
+      id,
+      dto.reason,
+      user.id,
+      user,
+    );
+    return this.enrollments.listForChild(childId, user);
   }
 }

@@ -1,3 +1,5 @@
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import {
   AdjustmentType,
@@ -13,7 +15,7 @@ const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);
 
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
   tariff: { findUnique: jest.fn() },
   enrollment: {
     findMany: jest.fn(),
@@ -55,6 +57,24 @@ const loaded = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const fullAdmin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
+const kgAccountant: AuthenticatedUser = {
+  id: 'kg1',
+  role: Role.admin,
+  login: 'kg',
+  mustChangePassword: false,
+  accessScope: AccessScope.kindergarten,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
 describe('EnrollmentsService', () => {
   let service: EnrollmentsService;
 
@@ -74,7 +94,11 @@ describe('EnrollmentsService', () => {
   it('lists enrollments with the next period preview', async () => {
     mockPrisma.enrollment.findMany.mockResolvedValue([loaded()]);
 
-    const [view] = await service.listForChild('child-1', day('2026-10-11'));
+    const [view] = await service.listForChild(
+      'child-1',
+      fullAdmin,
+      day('2026-10-11'),
+    );
 
     expect(view.effectiveBillingMode).toBe(BillingMode.anniversary);
     expect(view.nextPeriod).toMatchObject({
@@ -89,7 +113,7 @@ describe('EnrollmentsService', () => {
     it('creates an enrollment', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
 
-      await service.create('child-1', dto, 'u1');
+      await service.create('child-1', dto, 'u1', fullAdmin);
 
       expect(mockPrisma.enrollment.create).toHaveBeenCalledWith({
         data: {
@@ -116,16 +140,21 @@ describe('EnrollmentsService', () => {
     it.each(tariffRejections)('rejects tariff %p', async (over, message) => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff(over));
 
-      await expect(service.create('child-1', dto, 'u1')).rejects.toThrow(
-        message,
-      );
+      await expect(
+        service.create('child-1', dto, 'u1', fullAdmin),
+      ).rejects.toThrow(message);
     });
 
     it('rejects an end date before the start date', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
 
       await expect(
-        service.create('child-1', { ...dto, endDate: '2026-10-01' }, 'u1'),
+        service.create(
+          'child-1',
+          { ...dto, endDate: '2026-10-01' },
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow('End date must not be before start date');
     });
 
@@ -135,7 +164,9 @@ describe('EnrollmentsService', () => {
         { startDate: day('2026-09-01'), endDate: null },
       ]);
 
-      await expect(service.create('child-1', dto, 'u1')).rejects.toThrow(
+      await expect(
+        service.create('child-1', dto, 'u1', fullAdmin),
+      ).rejects.toThrow(
         'Enrollment overlaps an existing enrollment on this tariff',
       );
     });
@@ -143,9 +174,9 @@ describe('EnrollmentsService', () => {
     it('rejects an unknown child', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.create('missing', dto, 'u1')).rejects.toThrow(
-        'Child not found',
-      );
+      await expect(
+        service.create('missing', dto, 'u1', fullAdmin),
+      ).rejects.toThrow('Child not found');
     });
   });
 
@@ -169,6 +200,7 @@ describe('EnrollmentsService', () => {
           'e1',
           { type, value, startDate: '2026-11-01', reason: 'x' },
           'u1',
+          fullAdmin,
         ),
       ).rejects.toThrow('Invalid adjustment value');
     });
@@ -188,6 +220,7 @@ describe('EnrollmentsService', () => {
             reason: 'sick',
           },
           'u1',
+          fullAdmin,
         ),
       ).rejects.toThrow(
         'Adjustment overlaps an existing adjustment of the same type',
@@ -211,6 +244,7 @@ describe('EnrollmentsService', () => {
           reason: 'second child',
         },
         'u1',
+        fullAdmin,
       );
 
       expect(mockPrisma.enrollmentAdjustment.create).toHaveBeenCalledWith({
@@ -233,16 +267,16 @@ describe('EnrollmentsService', () => {
         enrollment: { childId: 'child-1' },
       });
 
-      await expect(service.voidAdjustment('a1', 'x', 'u1')).rejects.toThrow(
-        'Adjustment is voided',
-      );
+      await expect(
+        service.voidAdjustment('a1', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow('Adjustment is voided');
     });
   });
 
   it('ends an enrollment', async () => {
     mockPrisma.enrollment.findUnique.mockResolvedValue(loaded());
 
-    await service.end('e1', { endDate: '2026-12-31' });
+    await service.end('e1', { endDate: '2026-12-31' }, fullAdmin);
 
     expect(mockPrisma.enrollment.update).toHaveBeenCalledWith({
       where: { id: 'e1' },
@@ -256,12 +290,74 @@ describe('EnrollmentsService', () => {
       { startDate: day('2027-01-01'), endDate: null },
     ]);
 
-    await expect(service.end('e1', { endDate: '2027-02-01' })).rejects.toThrow(
+    await expect(
+      service.end('e1', { endDate: '2027-02-01' }, fullAdmin),
+    ).rejects.toThrow(
       'Enrollment overlaps an existing enrollment on this tariff',
     );
     expect(mockPrisma.enrollment.findMany).toHaveBeenCalledWith({
       where: { childId: 'child-1', tariffId: 't1', id: { not: 'e1' } },
     });
     expect(mockPrisma.enrollment.update).not.toHaveBeenCalled();
+  });
+
+  describe('scope', () => {
+    const row = { id: 'e1', childId: 'child-1' };
+
+    beforeEach(() => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+    });
+
+    it('hides an out-of-scope child on list and create', async () => {
+      await expect(
+        service.listForChild('child-1', kgAccountant),
+      ).rejects.toThrow('Child not found');
+      await expect(
+        service.create(
+          'child-1',
+          { tariffId: 't1', startDate: '2026-10-01' },
+          'kg1',
+          kgAccountant,
+        ),
+      ).rejects.toThrow('Child not found');
+      expect(mockPrisma.enrollment.create).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope enrollment', async () => {
+      mockPrisma.enrollment.findUnique.mockResolvedValue(row);
+      await expect(
+        service.end('e1', { endDate: '2026-12-31' }, kgAccountant),
+      ).rejects.toThrow('Enrollment not found');
+      await expect(
+        service.addAdjustment(
+          'e1',
+          {
+            type: AdjustmentType.pause,
+            startDate: '2026-10-01',
+            reason: 'x',
+          },
+          'kg1',
+          kgAccountant,
+        ),
+      ).rejects.toThrow('Enrollment not found');
+      await expect(service.childIdOf('e1', kgAccountant)).rejects.toThrow(
+        'Enrollment not found',
+      );
+      expect(mockPrisma.enrollment.update).not.toHaveBeenCalled();
+      expect(mockPrisma.enrollmentAdjustment.create).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope adjustment on void', async () => {
+      mockPrisma.enrollmentAdjustment.findUnique.mockResolvedValue({
+        id: 'a1',
+        voidedAt: null,
+        enrollment: { childId: 'child-1' },
+      });
+      await expect(
+        service.voidAdjustment('a1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Adjustment not found');
+      expect(mockPrisma.enrollmentAdjustment.update).not.toHaveBeenCalled();
+    });
   });
 });

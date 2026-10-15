@@ -1,9 +1,17 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ChargeSource, Prisma } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import {
+  OUTSIDE_SCOPE,
+  assertChildInScope,
+  childScopeWhere,
+} from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { voidChargeInTx } from '../finance/void-charge';
 import {
@@ -105,7 +113,7 @@ export class BillingService {
 
   async billEnrollment(
     enrollmentId: string,
-    userId: string,
+    user: AuthenticatedUser,
     today: Date = kyivToday(),
   ) {
     const enrollment = await this.prisma.enrollment.findUnique({
@@ -113,7 +121,23 @@ export class BillingService {
       include: enrollmentInclude,
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
-    return this.billLoaded(enrollment, userId, today, await this.getLeadDays());
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      enrollment.childId,
+      'Enrollment not found',
+    );
+    return this.billLoaded(
+      enrollment,
+      user.id,
+      today,
+      await this.getLeadDays(),
+    );
+  }
+
+  async runForUser(user: AuthenticatedUser) {
+    if (scopeKind(user)) throw new ForbiddenException(OUTSIDE_SCOPE);
+    return this.runAll(user.id);
   }
 
   async runAll(userId: string, today: Date = kyivToday()) {
@@ -138,9 +162,10 @@ export class BillingService {
     return total;
   }
 
-  async problems(today: Date = kyivToday()) {
+  async problems(user: AuthenticatedUser, today: Date = kyivToday()) {
     const leadDays = await this.getLeadDays();
     const enrollments = await this.prisma.enrollment.findMany({
+      where: { child: childScopeWhere(scopeKind(user)) },
       include: enrollmentInclude,
     });
     return enrollments.flatMap((e) =>
@@ -153,12 +178,23 @@ export class BillingService {
     );
   }
 
-  async recalculate(billedPeriodId: string, reason: string, userId: string) {
+  async recalculate(
+    billedPeriodId: string,
+    reason: string,
+    userId: string,
+    user: AuthenticatedUser,
+  ) {
     const period = await this.prisma.billedPeriod.findUnique({
       where: { id: billedPeriodId },
       include: { enrollment: { include: enrollmentInclude } },
     });
     if (!period) throw new NotFoundException('Billed period not found');
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      period.enrollment.childId,
+      'Billed period not found',
+    );
 
     const enrollment = period.enrollment;
     const input = toEngineInput(enrollment);

@@ -1,3 +1,5 @@
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
@@ -12,7 +14,7 @@ import { PaymentsService } from './payments.service';
 const d = (value: string) => new Prisma.Decimal(value);
 
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
   payment: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   charge: { findMany: jest.fn() },
   allocation: {
@@ -45,6 +47,24 @@ const charge = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const fullAdmin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
+const kgAccountant: AuthenticatedUser = {
+  id: 'kg1',
+  role: Role.admin,
+  login: 'kg',
+  mustChangePassword: false,
+  accessScope: AccessScope.kindergarten,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
 
@@ -75,6 +95,7 @@ describe('PaymentsService', () => {
         'p1',
         [{ chargeId: 'c1', amount: '500.00' }],
         'u1',
+        fullAdmin,
       );
 
       expect(result).toEqual(payment());
@@ -107,6 +128,7 @@ describe('PaymentsService', () => {
         'p1',
         [{ chargeId: 'c1', amount: '100.00' }],
         'u1',
+        fullAdmin,
       );
 
       expect(mockPrisma.allocation.create).toHaveBeenCalledTimes(1);
@@ -154,7 +176,12 @@ describe('PaymentsService', () => {
       mockPrisma.charge.findMany.mockResolvedValue([charge(over.charge)]);
 
       await expect(
-        service.allocate('p1', [{ chargeId: 'c1', amount: '400.00' }], 'u1'),
+        service.allocate(
+          'p1',
+          [{ chargeId: 'c1', amount: '400.00' }],
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow(message);
       expect(mockPrisma.allocation.create).not.toHaveBeenCalled();
     });
@@ -167,7 +194,12 @@ describe('PaymentsService', () => {
       ]);
 
       await expect(
-        service.allocate('p1', [{ chargeId: 'c1', amount: '400.00' }], 'u1'),
+        service.allocate(
+          'p1',
+          [{ chargeId: 'c1', amount: '400.00' }],
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow('Allocation exceeds payment free amount');
     });
 
@@ -180,6 +212,7 @@ describe('PaymentsService', () => {
             { chargeId: 'c1', amount: '100.00' },
           ],
           'u1',
+          fullAdmin,
         ),
       ).rejects.toThrow('Duplicate charge in allocations');
       expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
@@ -187,7 +220,12 @@ describe('PaymentsService', () => {
 
     it('rejects zero amounts', async () => {
       await expect(
-        service.allocate('p1', [{ chargeId: 'c1', amount: '0.00' }], 'u1'),
+        service.allocate(
+          'p1',
+          [{ chargeId: 'c1', amount: '0.00' }],
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow('Amount must be greater than 0');
     });
 
@@ -196,7 +234,12 @@ describe('PaymentsService', () => {
       mockPrisma.charge.findMany.mockResolvedValue([]);
 
       await expect(
-        service.allocate('p1', [{ chargeId: 'c1', amount: '100.00' }], 'u1'),
+        service.allocate(
+          'p1',
+          [{ chargeId: 'c1', amount: '100.00' }],
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -208,6 +251,7 @@ describe('PaymentsService', () => {
           'missing',
           [{ chargeId: 'c1', amount: '100.00' }],
           'u1',
+          fullAdmin,
         ),
       ).rejects.toThrow('Payment not found');
     });
@@ -226,7 +270,7 @@ describe('PaymentsService', () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.payment.create.mockResolvedValue(payment());
 
-      const result = await service.create('child-1', dto, 'u1');
+      const result = await service.create('child-1', dto, 'u1', fullAdmin);
 
       expect(result).toEqual(payment());
       expect(mockPrisma.payment.create).toHaveBeenCalledWith({
@@ -255,6 +299,7 @@ describe('PaymentsService', () => {
         'child-1',
         { ...dto, allocations: [{ chargeId: 'c1', amount: '800.00' }] },
         'u1',
+        fullAdmin,
       );
 
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
@@ -281,6 +326,7 @@ describe('PaymentsService', () => {
           'child-1',
           { ...dto, allocations: [{ chargeId: 'c1', amount: '100.00' }] },
           'u1',
+          fullAdmin,
         ),
       ).rejects.toThrow(BadRequestException);
       expect(mockPrisma.allocation.create).not.toHaveBeenCalled();
@@ -289,16 +335,16 @@ describe('PaymentsService', () => {
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.create('missing', dto, 'u1')).rejects.toThrow(
-        'Child not found',
-      );
+      await expect(
+        service.create('missing', dto, 'u1', fullAdmin),
+      ).rejects.toThrow('Child not found');
     });
 
     it('rejects zero amount', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
 
       await expect(
-        service.create('child-1', { ...dto, amount: '0' }, 'u1'),
+        service.create('child-1', { ...dto, amount: '0' }, 'u1', fullAdmin),
       ).rejects.toThrow('Amount must be greater than 0');
     });
   });
@@ -310,7 +356,7 @@ describe('PaymentsService', () => {
         payment({ voidedAt: new Date() }),
       );
 
-      await service.void('p1', 'wrong child', 'u1');
+      await service.void('p1', 'wrong child', 'u1', fullAdmin);
 
       const data = {
         voidedAt: expect.any(Date) as Date,
@@ -333,7 +379,7 @@ describe('PaymentsService', () => {
         payment({ voidedAt: new Date() }),
       );
 
-      await expect(service.void('p1', 'x', 'u1')).rejects.toThrow(
+      await expect(service.void('p1', 'x', 'u1', fullAdmin)).rejects.toThrow(
         'Payment is voided',
       );
     });
@@ -341,9 +387,9 @@ describe('PaymentsService', () => {
     it('throws NotFoundException when payment does not exist', async () => {
       mockPrisma.payment.findUnique.mockResolvedValue(null);
 
-      await expect(service.void('missing', 'x', 'u1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.void('missing', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -355,7 +401,12 @@ describe('PaymentsService', () => {
       });
       mockPrisma.allocation.updateMany.mockResolvedValue({ count: 1 });
 
-      const result = await service.voidAllocation('a1', 'wrong month', 'u1');
+      const result = await service.voidAllocation(
+        'a1',
+        'wrong month',
+        'u1',
+        fullAdmin,
+      );
 
       expect(result).toEqual({ childId: 'child-1' });
       expect(mockPrisma.allocation.updateMany).toHaveBeenCalledWith({
@@ -375,17 +426,62 @@ describe('PaymentsService', () => {
       });
       mockPrisma.allocation.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.voidAllocation('a1', 'x', 'u1')).rejects.toThrow(
-        'Allocation is voided',
-      );
+      await expect(
+        service.voidAllocation('a1', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow('Allocation is voided');
     });
 
     it('throws NotFoundException when allocation does not exist', async () => {
       mockPrisma.allocation.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.voidAllocation('missing', 'x', 'u1'),
+        service.voidAllocation('missing', 'x', 'u1', fullAdmin),
       ).rejects.toThrow('Allocation not found');
+    });
+  });
+
+  describe('scope', () => {
+    beforeEach(() => {
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      mockPrisma.payment.findUnique.mockResolvedValue({ childId: 'child-1' });
+    });
+
+    it('hides the child on create', async () => {
+      await expect(
+        service.create(
+          'child-1',
+          {
+            amount: '10.00',
+            method: PaymentMethod.cash,
+            reference: 'r',
+            receivedAt: '2026-10-10',
+          },
+          'kg1',
+          kgAccountant,
+        ),
+      ).rejects.toThrow('Child not found');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope payment on allocate and void', async () => {
+      await expect(
+        service.allocate('p1', [], 'kg1', kgAccountant),
+      ).rejects.toThrow('Payment not found');
+      await expect(
+        service.void('p1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Payment not found');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope allocation on void', async () => {
+      mockPrisma.allocation.findUnique.mockResolvedValue({
+        id: 'a1',
+        payment: { childId: 'child-1' },
+      });
+      await expect(
+        service.voidAllocation('a1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Allocation not found');
+      expect(mockPrisma.allocation.updateMany).not.toHaveBeenCalled();
     });
   });
 });

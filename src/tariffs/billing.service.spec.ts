@@ -1,3 +1,5 @@
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import {
@@ -5,6 +7,7 @@ import {
   BillingMode,
   ChargeSource,
   FinanceCategory,
+  GroupKind,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +17,7 @@ const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);
 
 const mockPrisma = {
+  child: { findFirst: jest.fn() },
   enrollment: { findUnique: jest.fn(), findMany: jest.fn() },
   billedPeriod: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   charge: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
@@ -53,6 +57,24 @@ const uniqueViolation = () =>
     code: 'P2002',
     clientVersion: 'test',
   });
+
+const fullAdmin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
+const kgAccountant: AuthenticatedUser = {
+  id: 'kg1',
+  role: Role.admin,
+  login: 'kg',
+  mustChangePassword: false,
+  accessScope: AccessScope.kindergarten,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
 
 describe('BillingService', () => {
   let service: BillingService;
@@ -107,7 +129,7 @@ describe('BillingService', () => {
 
       const result = await service.billEnrollment(
         'e1',
-        'u1',
+        fullAdmin,
         day('2026-11-10'),
       );
 
@@ -155,7 +177,7 @@ describe('BillingService', () => {
 
       const result = await service.billEnrollment(
         'e1',
-        'u1',
+        fullAdmin,
         day('2026-11-10'),
       );
 
@@ -169,7 +191,7 @@ describe('BillingService', () => {
 
       const result = await service.billEnrollment(
         'e1',
-        'u1',
+        fullAdmin,
         day('2026-11-10'),
       );
 
@@ -193,7 +215,7 @@ describe('BillingService', () => {
 
       const result = await service.billEnrollment(
         'e1',
-        'u1',
+        fullAdmin,
         day('2026-10-20'),
       );
 
@@ -217,7 +239,7 @@ describe('BillingService', () => {
 
       const result = await service.billEnrollment(
         'e1',
-        'u1',
+        fullAdmin,
         day('2026-10-20'),
       );
 
@@ -237,9 +259,9 @@ describe('BillingService', () => {
     it('throws NotFoundException for an unknown enrollment', async () => {
       mockPrisma.enrollment.findUnique.mockResolvedValue(null);
 
-      await expect(service.billEnrollment('missing', 'u1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.billEnrollment('missing', fullAdmin),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -296,7 +318,7 @@ describe('BillingService', () => {
       });
 
       await expect(
-        service.recalculate('bp1', 'discount added', 'u1'),
+        service.recalculate('bp1', 'discount added', 'u1', fullAdmin),
       ).resolves.toEqual({
         childId: 'child-1',
       });
@@ -328,7 +350,7 @@ describe('BillingService', () => {
         voidedAt: new Date(),
       });
 
-      await service.recalculate('bp1', 'redo', 'u1');
+      await service.recalculate('bp1', 'redo', 'u1', fullAdmin);
 
       expect(mockPrisma.charge.update).not.toHaveBeenCalled();
       expect(mockPrisma.charge.create).toHaveBeenCalledTimes(1);
@@ -347,7 +369,7 @@ describe('BillingService', () => {
         voidedAt: null,
       });
 
-      await service.recalculate('bp1', 'ended', 'u1');
+      await service.recalculate('bp1', 'ended', 'u1', fullAdmin);
 
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();
       expect(firstArg(mockPrisma.billedPeriod.update).data).toMatchObject({
@@ -361,7 +383,9 @@ describe('BillingService', () => {
         billed({ periodStart: day('2026-10-20') }),
       );
 
-      await expect(service.recalculate('bp1', 'x', 'u1')).rejects.toThrow(
+      await expect(
+        service.recalculate('bp1', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow(
         'Billed period no longer matches the enrollment schedule',
       );
       expect(mockPrisma.charge.update).not.toHaveBeenCalled();
@@ -371,9 +395,55 @@ describe('BillingService', () => {
     it('throws NotFoundException for an unknown billed period', async () => {
       mockPrisma.billedPeriod.findUnique.mockResolvedValue(null);
 
-      await expect(service.recalculate('missing', 'x', 'u1')).rejects.toThrow(
-        'Billed period not found',
+      await expect(
+        service.recalculate('missing', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow('Billed period not found');
+    });
+  });
+
+  describe('scope', () => {
+    it('refuses a manual run for a scoped user only', async () => {
+      await expect(service.runForUser(kgAccountant)).rejects.toThrow(
+        'Outside access scope',
       );
+      expect(mockPrisma.enrollment.findMany).not.toHaveBeenCalled();
+      mockPrisma.appSetting.findUnique.mockResolvedValue(null);
+      mockPrisma.enrollment.findMany.mockResolvedValue([]);
+      await expect(service.runForUser(fullAdmin)).resolves.toMatchObject({
+        created: 0,
+      });
+    });
+
+    it('lists problems of the scope only', async () => {
+      mockPrisma.appSetting.findUnique.mockResolvedValue(null);
+      mockPrisma.enrollment.findMany.mockResolvedValue([]);
+      await service.problems(kgAccountant);
+      expect(mockPrisma.enrollment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { child: { group: { kind: GroupKind.kindergarten } } },
+        }),
+      );
+    });
+
+    it('hides an out-of-scope enrollment on bill', async () => {
+      mockPrisma.enrollment.findUnique.mockResolvedValue(enrollment());
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(service.billEnrollment('e1', kgAccountant)).rejects.toThrow(
+        'Enrollment not found',
+      );
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope billed period on recalculate', async () => {
+      mockPrisma.billedPeriod.findUnique.mockResolvedValue({
+        id: 'bp1',
+        enrollment: enrollment(),
+      });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.recalculate('bp1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Billed period not found');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

@@ -26,12 +26,12 @@ export class BillingController {
   @Post('billing/run')
   @HttpCode(200)
   run(@CurrentUser() user: AuthenticatedUser) {
-    return this.billing.runAll(user.id);
+    return this.billing.runForUser(user);
   }
 
   @Get('billing/problems')
-  problems() {
-    return this.billing.problems();
+  problems(@CurrentUser() user: AuthenticatedUser) {
+    return this.billing.problems(user);
   }
 
   @Get('settings/billing')

@@ -1,15 +1,35 @@
+import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ChargeSource, FinanceCategory } from '@prisma/client';
+import { ChargeSource, FinanceCategory, GroupKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChargesService } from './charges.service';
 
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
   charge: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   allocation: { updateMany: jest.fn() },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
+};
+
+const fullAdmin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
+};
+
+const kgAccountant: AuthenticatedUser = {
+  id: 'kg1',
+  role: Role.admin,
+  login: 'kg',
+  mustChangePassword: false,
+  accessScope: AccessScope.kindergarten,
+  permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
 describe('ChargesService', () => {
@@ -45,7 +65,7 @@ describe('ChargesService', () => {
         childId: 'child-1',
       });
 
-      const result = await service.create('child-1', dto, 'u1');
+      const result = await service.create('child-1', dto, 'u1', fullAdmin);
 
       expect(result).toEqual({ id: 'c1', childId: 'child-1' });
       expect(mockPrisma.charge.create).toHaveBeenCalledWith({
@@ -65,9 +85,9 @@ describe('ChargesService', () => {
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.create('missing', dto, 'u1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.create('missing', dto, 'u1', fullAdmin),
+      ).rejects.toThrow(NotFoundException);
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();
     });
 
@@ -75,7 +95,7 @@ describe('ChargesService', () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
 
       await expect(
-        service.create('child-1', { ...dto, amount: '0.00' }, 'u1'),
+        service.create('child-1', { ...dto, amount: '0.00' }, 'u1', fullAdmin),
       ).rejects.toThrow('Amount must be greater than 0');
     });
 
@@ -83,7 +103,12 @@ describe('ChargesService', () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
 
       await expect(
-        service.create('child-1', { ...dto, periodEnd: '2026-09-30' }, 'u1'),
+        service.create(
+          'child-1',
+          { ...dto, periodEnd: '2026-09-30' },
+          'u1',
+          fullAdmin,
+        ),
       ).rejects.toThrow('Period end must not be before period start');
     });
   });
@@ -99,7 +124,7 @@ describe('ChargesService', () => {
         childId: 'child-1',
       });
 
-      const result = await service.void('c1', 'duplicate', 'u1');
+      const result = await service.void('c1', 'duplicate', 'u1', fullAdmin);
 
       expect(result).toEqual({ id: 'c1', childId: 'child-1' });
       expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
@@ -124,9 +149,9 @@ describe('ChargesService', () => {
     it('throws NotFoundException when charge does not exist', async () => {
       mockPrisma.charge.findUnique.mockResolvedValue(null);
 
-      await expect(service.void('missing', 'x', 'u1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.void('missing', 'x', 'u1', fullAdmin),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when already voided', async () => {
@@ -135,10 +160,51 @@ describe('ChargesService', () => {
         voidedAt: new Date(),
       });
 
-      await expect(service.void('c1', 'x', 'u1')).rejects.toThrow(
+      await expect(service.void('c1', 'x', 'u1', fullAdmin)).rejects.toThrow(
         BadRequestException,
       );
       expect(mockPrisma.charge.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scope', () => {
+    it('hides the child on create', async () => {
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create(
+          'child-1',
+          {
+            category: FinanceCategory.tuition,
+            amount: '10.00',
+            description: 'x',
+          },
+          'kg1',
+          kgAccountant,
+        ),
+      ).rejects.toThrow('Child not found');
+      expect(mockPrisma.child.findFirst).toHaveBeenCalledWith({
+        where: { id: 'child-1', group: { kind: GroupKind.kindergarten } },
+        select: { id: true },
+      });
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
+    it('hides an out-of-scope charge on void', async () => {
+      mockPrisma.charge.findUnique.mockResolvedValue({ childId: 'child-1' });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.void('c1', 'x', 'kg1', kgAccountant),
+      ).rejects.toThrow('Charge not found');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.charge.update).not.toHaveBeenCalled();
+    });
+
+    it('skips the extra lookups without a scope', async () => {
+      mockPrisma.charge.findUnique.mockResolvedValue(null);
+      await expect(service.void('c1', 'x', 'u1', fullAdmin)).rejects.toThrow(
+        'Charge not found',
+      );
+      expect(mockPrisma.child.findFirst).not.toHaveBeenCalled();
     });
   });
 });
