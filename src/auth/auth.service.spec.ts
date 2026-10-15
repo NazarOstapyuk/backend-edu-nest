@@ -4,9 +4,10 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
 const mockPrisma = {
   user: {
@@ -31,6 +32,12 @@ const mockConfig = {
   }),
 };
 
+const mockAudit = {
+  recordAuth: jest.fn().mockResolvedValue(undefined),
+};
+
+const meta = { ip: '10.0.0.1', userAgent: 'jest' };
+
 const mockRes = {
   cookie: jest.fn(),
   clearCookie: jest.fn(),
@@ -47,6 +54,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwt },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(AuthService);
@@ -55,9 +63,9 @@ describe('AuthService', () => {
   describe('login', () => {
     it('throws UnauthorizedException when user not found', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(service.login('x', 'y', mockRes as any)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.login('x', 'y', mockRes as unknown as Response, meta),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('throws UnauthorizedException when user is inactive', async () => {
@@ -67,9 +75,9 @@ describe('AuthService', () => {
         isActive: false,
         role: 'admin',
       });
-      await expect(service.login('x', 'pass', mockRes as any)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.login('x', 'pass', mockRes as unknown as Response, meta),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('throws UnauthorizedException when password does not match', async () => {
@@ -80,9 +88,9 @@ describe('AuthService', () => {
         isActive: true,
         role: 'admin',
       });
-      await expect(service.login('x', 'wrong', mockRes as any)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.login('x', 'wrong', mockRes as unknown as Response, meta),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('sets two cookies on successful login', async () => {
@@ -94,7 +102,7 @@ describe('AuthService', () => {
         role: 'admin',
       });
       mockPrisma.user.update.mockResolvedValue({});
-      await service.login('x', 'pass', mockRes as any);
+      await service.login('x', 'pass', mockRes as unknown as Response, meta);
       expect(mockRes.cookie).toHaveBeenCalledTimes(2);
       expect(mockRes.cookie).toHaveBeenCalledWith(
         'accessToken',
@@ -109,13 +117,172 @@ describe('AuthService', () => {
     });
   });
 
+  describe('login audit', () => {
+    it('records an unknown login without a user id', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(
+        service.login('ghost', 'y', mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid credentials');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'login_failed',
+        reason: 'invalid_credentials',
+        userId: null,
+        login: 'ghost',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+    });
+
+    it('records a disabled account with the user id', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u9',
+        password: 'hash',
+        isActive: false,
+        role: 'admin',
+      });
+      await expect(
+        service.login('off', 'pass', mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Account is disabled');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'login_failed',
+        reason: 'account_disabled',
+        userId: 'u9',
+        login: 'off',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+    });
+
+    it('records a wrong password with the user id', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u8',
+        password: await bcrypt.hash('correct', 4),
+        isActive: true,
+        role: 'admin',
+      });
+      await expect(
+        service.login('known', 'wrong', mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid credentials');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'login_failed',
+        reason: 'invalid_credentials',
+        userId: 'u8',
+        login: 'known',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+    });
+
+    it('records a successful login', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u7',
+        password: await bcrypt.hash('pass', 4),
+        isActive: true,
+        role: 'admin',
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      await service.login('ok', 'pass', mockRes as unknown as Response, meta);
+      expect(mockAudit.recordAuth).toHaveBeenCalledTimes(1);
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'login_success',
+        reason: null,
+        userId: 'u7',
+        login: 'ok',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+    });
+  });
+
+  describe('refresh audit', () => {
+    const failed = (userId: string | null, login: string) => ({
+      type: 'refresh_failed',
+      reason: 'invalid_refresh',
+      userId,
+      login,
+      ip: '10.0.0.1',
+      userAgent: 'jest',
+    });
+    const reqWith = (token?: string) =>
+      ({ cookies: token ? { refreshToken: token } : {} }) as unknown as Request;
+
+    it('records a missing cookie', async () => {
+      await expect(
+        service.refresh(reqWith(), mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed(null, ''));
+    });
+
+    it('records an undecodable token without a user id', async () => {
+      mockJwt.verify.mockImplementation(() => {
+        throw new Error('bad');
+      });
+      await expect(
+        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed(null, ''));
+    });
+
+    it('records the decoded sub when the user is missing', async () => {
+      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(
+        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', ''));
+    });
+
+    it('records the login of an inactive user', async () => {
+      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'off',
+        isActive: false,
+        refreshToken: 'h',
+      });
+      await expect(
+        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', 'off'));
+    });
+
+    it('records a rotated token mismatch', async () => {
+      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'on',
+        isActive: true,
+        refreshToken: await bcrypt.hash('other', 4),
+      });
+      await expect(
+        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
+      ).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', 'on'));
+    });
+
+    it('does not record a successful refresh', async () => {
+      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'on',
+        role: 'admin',
+        isActive: true,
+        refreshToken: await bcrypt.hash('t', 4),
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      await service.refresh(reqWith('t'), mockRes as unknown as Response, meta);
+      expect(mockAudit.recordAuth).not.toHaveBeenCalled();
+    });
+  });
+
   describe('logout', () => {
     it('clears refreshToken in DB and clears both cookies', async () => {
-      mockPrisma.user.update.mockResolvedValue({});
-      await service.logout('uid', mockRes as any);
+      mockPrisma.user.update.mockResolvedValue({ login: 'teacher1' });
+      await service.logout('uid', mockRes as unknown as Response, meta);
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'uid' },
         data: { refreshToken: null },
+        select: { login: true },
       });
       expect(mockRes.clearCookie).toHaveBeenCalledWith(
         'accessToken',
@@ -125,6 +292,14 @@ describe('AuthService', () => {
         'refreshToken',
         expect.any(Object),
       );
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'logout',
+        reason: null,
+        userId: 'uid',
+        login: 'teacher1',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
     });
   });
 
@@ -148,6 +323,7 @@ describe('AuthService', () => {
           'u1',
           { currentPassword: 'x', newPassword: 'newpass12' },
           mockRes as unknown as Response,
+          meta,
         ),
       ).rejects.toThrow('Invalid current password');
     });
@@ -160,6 +336,7 @@ describe('AuthService', () => {
           'u1',
           { currentPassword: 'oldpass1', newPassword: 'oldpass1' },
           mockRes as unknown as Response,
+          meta,
         ),
       ).rejects.toThrow('New password must differ from the current one');
     });
@@ -171,6 +348,7 @@ describe('AuthService', () => {
         'u1',
         { currentPassword: 'oldpass1', newPassword: 'newpass12' },
         mockRes as unknown as Response,
+        meta,
       );
 
       expect(result).toEqual({ message: 'Password changed' });
@@ -184,6 +362,49 @@ describe('AuthService', () => {
         refreshToken: null,
       });
       expect(mockRes.cookie).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('password audit', () => {
+    it('records a password change', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'mom',
+        role: 'parent',
+        password: await bcrypt.hash('oldpass1', 4),
+      });
+      await service.changePassword(
+        'u1',
+        { currentPassword: 'oldpass1', newPassword: 'newpass12' },
+        mockRes as unknown as Response,
+        meta,
+      );
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith({
+        type: 'password_changed',
+        reason: null,
+        userId: 'u1',
+        login: 'mom',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+      });
+    });
+
+    it('records nothing for a wrong current password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'mom',
+        role: 'parent',
+        password: await bcrypt.hash('oldpass1', 4),
+      });
+      await expect(
+        service.changePassword(
+          'u1',
+          { currentPassword: 'x', newPassword: 'newpass12' },
+          mockRes as unknown as Response,
+          meta,
+        ),
+      ).rejects.toThrow('Invalid current password');
+      expect(mockAudit.recordAuth).not.toHaveBeenCalled();
     });
   });
 

@@ -5,7 +5,12 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
+import {
+  AuthEventType,
+  PermissionArea,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
 import { allPermissions, toPermissionMap } from '../access/access-calc';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateContactsDto } from './dto/update-contacts.dto';
@@ -15,6 +20,8 @@ import { JwtService } from '@nestjs/jwt';
 import { Request, Response } from 'express';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import type { RequestMeta } from '../audit/request-meta';
 
 @Injectable()
 export class AuthService {
@@ -22,26 +29,81 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private audit: AuditService,
   ) {}
 
-  async login(login: string, password: string, res: Response) {
+  async login(
+    login: string,
+    password: string,
+    res: Response,
+    meta: RequestMeta,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { login } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
-    if (!user.isActive) throw new UnauthorizedException('Account is disabled');
+    if (!user) {
+      await this.audit.recordAuth({
+        ...meta,
+        type: AuthEventType.login_failed,
+        login,
+        userId: null,
+        reason: 'invalid_credentials',
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.isActive) {
+      await this.audit.recordAuth({
+        ...meta,
+        type: AuthEventType.login_failed,
+        login,
+        userId: user.id,
+        reason: 'account_disabled',
+      });
+      throw new UnauthorizedException('Account is disabled');
+    }
 
     const match = await bcrypt.compare(password, user.password);
-    if (!match) throw new UnauthorizedException('Invalid credentials');
+    if (!match) {
+      await this.audit.recordAuth({
+        ...meta,
+        type: AuthEventType.login_failed,
+        login,
+        userId: user.id,
+        reason: 'invalid_credentials',
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const tokens = await this.generateTokens(user.id, user.role);
     await this.storeRefreshToken(user.id, tokens.refreshToken);
     this.setCookies(res, tokens);
+    await this.audit.recordAuth({
+      ...meta,
+      type: AuthEventType.login_success,
+      login,
+      userId: user.id,
+      reason: null,
+    });
     return { message: 'Login successful' };
   }
 
-  async refresh(req: Request, res: Response) {
+  private async refreshFailed(
+    meta: RequestMeta,
+    userId: string | null,
+    login: string,
+  ): Promise<never> {
+    await this.audit.recordAuth({
+      ...meta,
+      type: AuthEventType.refresh_failed,
+      login,
+      userId,
+      reason: 'invalid_refresh',
+    });
+    throw new UnauthorizedException('Invalid refresh token');
+  }
+
+  async refresh(req: Request, res: Response, meta: RequestMeta) {
     const token: string | undefined = (req.cookies as Record<string, string>)
       ?.refreshToken;
-    if (!token) throw new UnauthorizedException('Invalid refresh token');
+    if (!token) return this.refreshFailed(meta, null, '');
 
     let payload: { sub: string; role: string };
     try {
@@ -49,17 +111,18 @@ export class AuthService {
         secret: this.config.get<string>('JWT_SECRET'),
       });
     } catch {
-      throw new UnauthorizedException('Invalid refresh token');
+      return this.refreshFailed(meta, null, '');
     }
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
-    if (!user || !user.isActive || !user.refreshToken)
-      throw new UnauthorizedException('Invalid refresh token');
+    if (!user) return this.refreshFailed(meta, payload.sub, '');
+    if (!user.isActive || !user.refreshToken)
+      return this.refreshFailed(meta, payload.sub, user.login);
 
     const match = await bcrypt.compare(token, user.refreshToken);
-    if (!match) throw new UnauthorizedException('Invalid refresh token');
+    if (!match) return this.refreshFailed(meta, payload.sub, user.login);
 
     const tokens = await this.generateTokens(user.id, user.role);
     await this.storeRefreshToken(user.id, tokens.refreshToken);
@@ -67,10 +130,18 @@ export class AuthService {
     return { message: 'Token refreshed' };
   }
 
-  async logout(userId: string, res: Response) {
-    await this.prisma.user.update({
+  async logout(userId: string, res: Response, meta: RequestMeta) {
+    const user = await this.prisma.user.update({
       where: { id: userId },
       data: { refreshToken: null },
+      select: { login: true },
+    });
+    await this.audit.recordAuth({
+      ...meta,
+      type: AuthEventType.logout,
+      login: user.login,
+      userId,
+      reason: null,
     });
     const cookieBase = {
       httpOnly: true,
@@ -121,7 +192,12 @@ export class AuthService {
     };
   }
 
-  async changePassword(userId: string, dto: ChangePasswordDto, res: Response) {
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    res: Response,
+    meta: RequestMeta,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
     const match = await bcrypt.compare(dto.currentPassword, user.password);
@@ -142,6 +218,13 @@ export class AuthService {
     const tokens = await this.generateTokens(user.id, user.role);
     await this.storeRefreshToken(user.id, tokens.refreshToken);
     this.setCookies(res, tokens);
+    await this.audit.recordAuth({
+      ...meta,
+      type: AuthEventType.password_changed,
+      login: user.login,
+      userId,
+      reason: null,
+    });
     return { message: 'Password changed' };
   }
 
