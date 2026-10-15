@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ChargeSource, Prisma } from '@prisma/client';
+import { AuditAction, ChargeSource, Prisma } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { scopeKind } from '../access/access-calc';
 import {
   OUTSIDE_SCOPE,
@@ -90,7 +91,10 @@ const chargeData = (e: LoadedEnrollment, bill: PeriodBill, userId: string) => ({
 
 @Injectable()
 export class BillingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async getLeadDays(): Promise<number> {
     const setting = await this.prisma.appSetting.findUnique({
@@ -99,14 +103,24 @@ export class BillingService {
     return setting ? Number(setting.value) : DEFAULT_LEAD_DAYS;
   }
 
-  async setLeadDays(value: number) {
+  async setLeadDays(value: number, userId: string) {
     if (!Number.isInteger(value) || value < 0 || value > 60) {
       throw new BadRequestException('Lead days must be between 0 and 60');
     }
+    const previous = await this.getLeadDays();
     await this.prisma.appSetting.upsert({
       where: { key: LEAD_KEY },
       create: { key: LEAD_KEY, value: String(value) },
       update: { value: String(value) },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'settings',
+      entityId: 'chargeLeadDays',
+      action: AuditAction.update,
+      before: { value: String(previous) },
+      after: { value: String(value) },
+      fields: ['value'],
     });
     return { chargeLeadDays: value };
   }

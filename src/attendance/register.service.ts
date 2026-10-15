@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   DailyStatus,
   NoticeStatus,
   PermissionArea,
@@ -13,6 +14,7 @@ import {
 } from '@prisma/client';
 import { hasPermission, scopeKind } from '../access/access-calc';
 import { groupScopeWhere } from '../access/scope';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
@@ -49,6 +51,7 @@ export class RegisterService {
   constructor(
     private prisma: PrismaService,
     private calendar: CalendarService,
+    private audit: AuditService,
   ) {}
 
   async getEditDays(): Promise<number> {
@@ -58,14 +61,24 @@ export class RegisterService {
     return setting ? Number(setting.value) : DEFAULT_EDIT_DAYS;
   }
 
-  async setEditDays(value: number) {
+  async setEditDays(value: number, userId: string) {
     if (!Number.isInteger(value) || value < 0 || value > 30) {
       throw new BadRequestException('Edit days must be between 0 and 30');
     }
+    const previous = await this.getEditDays();
     await this.prisma.appSetting.upsert({
       where: { key: EDIT_KEY },
       create: { key: EDIT_KEY, value: String(value) },
       update: { value: String(value) },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'settings',
+      entityId: 'attendanceEditDays',
+      action: AuditAction.update,
+      before: { value: String(previous) },
+      after: { value: String(value) },
+      fields: ['value'],
     });
     return { editDays: value };
   }

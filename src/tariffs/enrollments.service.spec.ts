@@ -3,11 +3,13 @@ import type { AuthenticatedUser } from '../common/types/authenticated-user.type'
 import { Test } from '@nestjs/testing';
 import {
   AdjustmentType,
+  AuditAction,
   BillingMode,
   FinanceCategory,
   Prisma,
   TariffUnit,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrollmentsService } from './enrollments.service';
 
@@ -75,6 +77,8 @@ const kgAccountant: AuthenticatedUser = {
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 describe('EnrollmentsService', () => {
   let service: EnrollmentsService;
 
@@ -82,10 +86,21 @@ describe('EnrollmentsService', () => {
     jest.clearAllMocks();
     mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
     mockPrisma.enrollment.findMany.mockResolvedValue([]);
+    mockPrisma.enrollment.create.mockResolvedValue(loaded());
+    mockPrisma.enrollment.update.mockResolvedValue(loaded());
+    mockPrisma.enrollmentAdjustment.create.mockResolvedValue({
+      id: 'a2',
+      type: AdjustmentType.discount_percent,
+      value: d('10'),
+      startDate: day('2026-11-01'),
+      endDate: null,
+      voidedAt: null,
+    });
     const module = await Test.createTestingModule({
       providers: [
         EnrollmentsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(EnrollmentsService);
@@ -358,6 +373,138 @@ describe('EnrollmentsService', () => {
         service.voidAdjustment('a1', 'x', 'kg1', kgAccountant),
       ).rejects.toThrow('Adjustment not found');
       expect(mockPrisma.enrollmentAdjustment.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit', () => {
+    const adjustment = (over: Record<string, unknown> = {}) => ({
+      id: 'a1',
+      enrollmentId: 'e1',
+      type: AdjustmentType.discount_amount,
+      value: d('500'),
+      startDate: day('2026-10-15'),
+      endDate: day('2026-12-31'),
+      voidedAt: null,
+      ...over,
+    });
+
+    it('records a created enrollment', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+
+      await service.create(
+        'child-1',
+        { tariffId: 't1', startDate: '2026-10-15' },
+        'u1',
+        fullAdmin,
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'enrollments',
+          entityId: 'e1',
+          action: AuditAction.create,
+          before: null,
+          after: expect.objectContaining({
+            childId: 'child-1',
+            tariffId: 't1',
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records the new end date when ending', async () => {
+      mockPrisma.enrollment.findUnique.mockResolvedValue(loaded());
+      mockPrisma.enrollment.update.mockResolvedValue(
+        loaded({ endDate: day('2026-12-31') }),
+      );
+
+      await service.end('e1', { endDate: '2026-12-31' }, fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'enrollments',
+          entityId: 'e1',
+          action: AuditAction.update,
+          before: expect.objectContaining({ endDate: null }) as unknown,
+          after: expect.objectContaining({
+            endDate: day('2026-12-31'),
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records active adjustments before and after adding one', async () => {
+      mockPrisma.enrollment.findUnique.mockResolvedValue(
+        loaded({
+          adjustments: [
+            adjustment(),
+            adjustment({ id: 'a0', voidedAt: new Date() }),
+          ],
+        }),
+      );
+      mockPrisma.enrollmentAdjustment.findMany.mockResolvedValue([]);
+
+      await service.addAdjustment(
+        'e1',
+        {
+          type: AdjustmentType.discount_percent,
+          value: '10',
+          startDate: '2026-11-01',
+          reason: 'second child',
+        },
+        'u1',
+        fullAdmin,
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'enrollments',
+          entityId: 'e1',
+          action: AuditAction.update,
+          fields: ['adjustments'],
+          before: {
+            adjustments: ['discount_amount 500.00 2026-10-15–2026-12-31'],
+          },
+          after: {
+            adjustments: [
+              'discount_amount 500.00 2026-10-15–2026-12-31',
+              'discount_percent 10.00 2026-11-01–',
+            ],
+          },
+        }),
+      );
+    });
+
+    it('records a voided adjustment with the void action', async () => {
+      mockPrisma.enrollmentAdjustment.findUnique.mockResolvedValue({
+        ...adjustment(),
+        enrollment: { childId: 'child-1' },
+      });
+      mockPrisma.enrollmentAdjustment.findMany.mockResolvedValue([
+        adjustment(),
+      ]);
+
+      await service.voidAdjustment('a1', 'mistake', 'u1', fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'enrollments',
+          entityId: 'e1',
+          action: AuditAction.void,
+          before: {
+            adjustments: ['discount_amount 500.00 2026-10-15–2026-12-31'],
+          },
+          after: { adjustments: [] },
+        }),
+      );
     });
   });
 });

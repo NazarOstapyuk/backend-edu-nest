@@ -3,11 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, TariffUnit } from '@prisma/client';
+import { AuditAction, Prisma, TariffUnit } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatMoney, money } from '../finance/finance-calc';
 import { priceOn } from './billing-engine';
-import { kyivToday, toDay } from './dates';
+import { isoDay, kyivToday, toDay } from './dates';
 import { AddTariffPriceDto } from './dto/add-tariff-price.dto';
 import { CreateTariffDto } from './dto/create-tariff.dto';
 import { UpdateTariffDto } from './dto/update-tariff.dto';
@@ -17,6 +18,26 @@ const tariffInclude = {
 } satisfies Prisma.TariffInclude;
 
 type LoadedTariff = Prisma.TariffGetPayload<{ include: typeof tariffInclude }>;
+
+const TARIFF_FIELDS = [
+  'name',
+  'unit',
+  'billingMode',
+  'validityDays',
+  'isActive',
+  'prices',
+] as const;
+
+const tariffAudit = (tariff: LoadedTariff) => ({
+  name: tariff.name,
+  unit: tariff.unit,
+  billingMode: tariff.billingMode,
+  validityDays: tariff.validityDays,
+  isActive: tariff.isActive,
+  prices: tariff.prices.map(
+    (p) => `${p.price.toFixed(2)}@${isoDay(p.effectiveFrom)}`,
+  ),
+});
 
 export const toTariffView = (tariff: LoadedTariff, today: Date) => {
   const current = priceOn(tariff.prices, today);
@@ -40,7 +61,10 @@ export const toTariffView = (tariff: LoadedTariff, today: Date) => {
 
 @Injectable()
 export class TariffsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   private async get(id: string) {
     const tariff = await this.prisma.tariff.findUnique({
@@ -95,10 +119,19 @@ export class TariffsService {
       },
       include: tariffInclude,
     });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'tariffs',
+      entityId: tariff.id,
+      action: AuditAction.create,
+      before: null,
+      after: tariffAudit(tariff),
+      fields: TARIFF_FIELDS,
+    });
     return toTariffView(tariff, kyivToday());
   }
 
-  async update(id: string, dto: UpdateTariffDto) {
+  async update(id: string, dto: UpdateTariffDto, userId: string) {
     const tariff = await this.get(id);
     if (dto.name !== undefined && dto.name !== tariff.name)
       await this.assertNameFree(dto.name);
@@ -127,11 +160,20 @@ export class TariffsService {
       },
       include: tariffInclude,
     });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'tariffs',
+      entityId: id,
+      action: AuditAction.update,
+      before: tariffAudit(tariff),
+      after: tariffAudit(updated),
+      fields: TARIFF_FIELDS,
+    });
     return toTariffView(updated, kyivToday());
   }
 
   async addPrice(id: string, dto: AddTariffPriceDto, userId: string) {
-    await this.get(id);
+    const before = await this.get(id);
     if (money(dto.price).lte(0))
       throw new BadRequestException('Amount must be greater than 0');
     const effectiveFrom = toDay(dto.effectiveFrom);
@@ -150,11 +192,21 @@ export class TariffsService {
         createdById: userId,
       },
     });
-    return toTariffView(await this.get(id), kyivToday());
+    const after = await this.get(id);
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'tariffs',
+      entityId: id,
+      action: AuditAction.update,
+      before: tariffAudit(before),
+      after: tariffAudit(after),
+      fields: ['prices'],
+    });
+    return toTariffView(after, kyivToday());
   }
 
-  async delete(id: string) {
-    await this.get(id);
+  async delete(id: string, userId: string) {
+    const tariff = await this.get(id);
     const [enrollments, visits, packages, groups] = await Promise.all([
       this.prisma.enrollment.count({ where: { tariffId: id } }),
       this.prisma.adaptationVisit.count({ where: { tariffId: id } }),
@@ -170,6 +222,15 @@ export class TariffsService {
       this.prisma.tariffPrice.deleteMany({ where: { tariffId: id } }),
       this.prisma.tariff.delete({ where: { id } }),
     ]);
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'tariffs',
+      entityId: id,
+      action: AuditAction.delete,
+      before: tariffAudit(tariff),
+      after: null,
+      fields: TARIFF_FIELDS,
+    });
     return { message: 'Tariff deleted' };
   }
 }

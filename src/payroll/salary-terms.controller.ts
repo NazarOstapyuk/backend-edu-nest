@@ -50,19 +50,27 @@ export class SalaryTermsController {
 
   @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Patch(':id/close')
-  close(@Param('id') id: string, @Body() dto: CloseSalaryTermsDto) {
-    return this.terms.close(id, dto);
+  close(
+    @Param('id') id: string,
+    @Body() dto: CloseSalaryTermsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.terms.close(id, dto, user.id);
   }
 
   @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateSalaryTermsDto) {
-    return this.terms.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateSalaryTermsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.terms.update(id, dto, user.id);
   }
 
   @Permission(PermissionArea.payroll, PermissionLevel.edit)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.terms.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.terms.remove(id, user.id);
   }
 }

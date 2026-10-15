@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
+  AuditAction,
   ClassFormat,
   PayrollCalendar,
   PayrollLessonType,
@@ -8,8 +9,10 @@ import {
   Role,
   AccessScope,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SalaryTermsService } from './salary-terms.service';
+import { termsInclude } from './terms-view';
 import type { CreateSalaryTermsDto } from './dto/salary-terms.dto';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
@@ -69,6 +72,8 @@ const mockPrisma = {
   $transaction: jest.fn(),
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 describe('SalaryTermsService', () => {
   let service: SalaryTermsService;
 
@@ -85,12 +90,13 @@ describe('SalaryTermsService', () => {
       role: Role.teacher,
     });
     mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
-    mockPrisma.salaryTerms.create.mockResolvedValue({ id: 'st1' });
+    mockPrisma.salaryTerms.create.mockResolvedValue(row());
     mockPrisma.salaryTerms.findUnique.mockResolvedValue(row());
     const module = await Test.createTestingModule({
       providers: [
         SalaryTermsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(SalaryTermsService);
@@ -146,7 +152,7 @@ describe('SalaryTermsService', () => {
             create: [{ name: 'Класне керівництво', amount: dec('1000') }],
           },
         },
-        select: { id: true },
+        include: termsInclude,
       });
       expect(result.monthlyRate).toBe('20000.00');
       expect(result.started).toBe(false);
@@ -312,16 +318,22 @@ describe('SalaryTermsService', () => {
       mockPrisma.salaryTerms.findUnique.mockResolvedValue(
         row({ validFrom: day('2020-01-01') }),
       );
-      await expect(service.update('st1', { monthlyRate: '1' })).rejects.toThrow(
-        'Started salary terms cannot be changed',
-      );
+      await expect(
+        service.update('st1', { monthlyRate: '1' }, 'a1'),
+      ).rejects.toThrow('Started salary terms cannot be changed');
     });
 
     it('replaces rates of not started terms and keeps allowances', async () => {
-      await service.update('st1', {
-        monthlyRate: '25000',
-        rates: [{ lessonType: PayrollLessonType.school_lesson, amount: '300' }],
-      });
+      await service.update(
+        'st1',
+        {
+          monthlyRate: '25000',
+          rates: [
+            { lessonType: PayrollLessonType.school_lesson, amount: '300' },
+          ],
+        },
+        'a1',
+      );
 
       expect(mockPrisma.salaryRate.deleteMany).toHaveBeenCalledWith({
         where: { termsId: 'st1' },
@@ -350,7 +362,7 @@ describe('SalaryTermsService', () => {
 
     it('throws when terms are missing', async () => {
       mockPrisma.salaryTerms.findUnique.mockResolvedValue(null);
-      await expect(service.update('st1', {})).rejects.toThrow(
+      await expect(service.update('st1', {}, 'a1')).rejects.toThrow(
         new NotFoundException('Salary terms not found'),
       );
     });
@@ -358,7 +370,7 @@ describe('SalaryTermsService', () => {
 
   describe('remove', () => {
     it('reopens the previous version and deletes not started terms', async () => {
-      const result = await service.remove('st1');
+      const result = await service.remove('st1', 'a1');
 
       expect(mockPrisma.salaryTerms.updateMany).toHaveBeenCalledWith({
         where: { teacherId: 't1', validTo: day('2098-12-31') },
@@ -374,7 +386,7 @@ describe('SalaryTermsService', () => {
       mockPrisma.salaryTerms.findUnique.mockResolvedValue(
         row({ validFrom: day('2020-01-01') }),
       );
-      await expect(service.remove('st1')).rejects.toThrow(
+      await expect(service.remove('st1', 'a1')).rejects.toThrow(
         'Started salary terms cannot be changed',
       );
       expect(mockPrisma.salaryTerms.delete).not.toHaveBeenCalled();
@@ -387,19 +399,19 @@ describe('SalaryTermsService', () => {
         row({ validTo: day('2099-02-01') }),
       );
       await expect(
-        service.close('st1', { validTo: '2099-03-01' }),
+        service.close('st1', { validTo: '2099-03-01' }, 'a1'),
       ).rejects.toThrow('Salary terms are closed');
     });
 
     it('rejects an end before the start', async () => {
       await expect(
-        service.close('st1', { validTo: '2098-12-31' }),
+        service.close('st1', { validTo: '2098-12-31' }, 'a1'),
       ).rejects.toThrow('Invalid date range');
     });
 
     it('sets the end date of the open version', async () => {
       mockPrisma.salaryTerms.updateMany.mockResolvedValue({ count: 1 });
-      await service.close('st1', { validTo: '2099-03-01' });
+      await service.close('st1', { validTo: '2099-03-01' }, 'a1');
       expect(mockPrisma.salaryTerms.updateMany).toHaveBeenCalledWith({
         where: { id: 'st1', validTo: null },
         data: { validTo: day('2099-03-01') },
@@ -409,7 +421,7 @@ describe('SalaryTermsService', () => {
     it('rejects when a concurrent close won', async () => {
       mockPrisma.salaryTerms.updateMany.mockResolvedValue({ count: 0 });
       await expect(
-        service.close('st1', { validTo: '2099-03-01' }),
+        service.close('st1', { validTo: '2099-03-01' }, 'a1'),
       ).rejects.toThrow('Salary terms are closed');
     });
   });
@@ -458,6 +470,107 @@ describe('SalaryTermsService', () => {
         role: Role.parent,
       });
       await expect(service.list('p1')).rejects.toThrow('Teacher not found');
+    });
+  });
+
+  describe('audit', () => {
+    const withLines = (over: Record<string, unknown> = {}) =>
+      row({
+        rates: [
+          {
+            id: 'r1',
+            lessonType: PayrollLessonType.school_lesson,
+            subjectId: 's1',
+            classGroupId: null,
+            amount: dec('350'),
+          },
+        ],
+        allowances: [{ id: 'al1', name: 'Доплата', amount: dec('1000') }],
+        ...over,
+      });
+
+    it('records created terms with rates and allowances', async () => {
+      mockPrisma.salaryTerms.create.mockResolvedValue(withLines());
+
+      await service.create(createDto(), admin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a1',
+          entityType: 'salary-terms',
+          entityId: 'st1',
+          action: AuditAction.create,
+          before: null,
+          after: expect.objectContaining({
+            teacherId: 't1',
+            monthlyRate: dec('20000'),
+            rates: ['school_lesson:s1=350.00'],
+            allowances: ['Доплата=1000.00'],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records the monthly rate change on update', async () => {
+      mockPrisma.salaryTerms.findUnique
+        .mockResolvedValueOnce(row())
+        .mockResolvedValueOnce(row())
+        .mockResolvedValueOnce(row({ monthlyRate: dec('25000') }))
+        .mockResolvedValue(row({ monthlyRate: dec('25000') }));
+
+      await service.update('st1', { monthlyRate: '25000' }, 'a1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a1',
+          entityType: 'salary-terms',
+          entityId: 'st1',
+          action: AuditAction.update,
+          before: expect.objectContaining({
+            monthlyRate: dec('20000'),
+          }) as unknown,
+          after: expect.objectContaining({
+            monthlyRate: dec('25000'),
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records deleted terms', async () => {
+      await service.remove('st1', 'a1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a1',
+          entityType: 'salary-terms',
+          entityId: 'st1',
+          action: AuditAction.delete,
+          after: null,
+        }),
+      );
+    });
+
+    it('records the end date on close', async () => {
+      mockPrisma.salaryTerms.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.close('st1', { validTo: '2099-03-01' }, 'a1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a1',
+          entityType: 'salary-terms',
+          entityId: 'st1',
+          action: AuditAction.update,
+          before: expect.objectContaining({ validTo: null }) as unknown,
+          after: expect.objectContaining({
+            validTo: day('2099-03-01'),
+          }) as unknown,
+        }),
+      );
     });
   });
 });

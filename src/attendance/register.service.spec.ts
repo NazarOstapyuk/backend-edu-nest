@@ -6,6 +6,7 @@ import {
 import { Test } from '@nestjs/testing';
 import {
   AccessScope,
+  AuditAction,
   DailyStatus,
   GroupKind,
   NoticeStatus,
@@ -13,6 +14,7 @@ import {
   Role,
 } from '@prisma/client';
 import { allPermissions } from '../access/access-calc';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from './calendar.service';
 import { RegisterService } from './register.service';
@@ -52,6 +54,7 @@ const mockPrisma = {
   $transaction: jest.fn(),
 };
 const mockCalendar = { entriesBetween: jest.fn() };
+const mockAudit = { recordChange: jest.fn() };
 
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
 const group = {
@@ -97,6 +100,7 @@ describe('RegisterService', () => {
           provide: CalendarService,
           useValue: mockCalendar,
         },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = moduleRef.get(RegisterService);
@@ -591,11 +595,34 @@ describe('RegisterService', () => {
   describe('settings', () => {
     it('defaults to 3 and validates the range', async () => {
       await expect(service.getEditDays()).resolves.toBe(3);
-      await expect(service.setEditDays(31)).rejects.toThrow(
+      await expect(service.setEditDays(31, 'u1')).rejects.toThrow(
         new BadRequestException('Edit days must be between 0 and 30'),
       );
       mockPrisma.appSetting.upsert.mockResolvedValue({});
-      await expect(service.setEditDays(5)).resolves.toEqual({ editDays: 5 });
+      await expect(service.setEditDays(5, 'u1')).resolves.toEqual({
+        editDays: 5,
+      });
+    });
+  });
+
+  describe('audit', () => {
+    it('records the previous and new value of attendanceEditDays', async () => {
+      mockPrisma.appSetting.upsert.mockResolvedValue({});
+
+      await service.setEditDays(5, 'u1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'settings',
+          entityId: 'attendanceEditDays',
+          action: AuditAction.update,
+          fields: ['value'],
+          before: { value: '3' },
+          after: { value: '5' },
+        }),
+      );
     });
   });
 });

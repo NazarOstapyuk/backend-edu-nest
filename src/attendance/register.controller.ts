@@ -39,8 +39,11 @@ export class RegisterController {
   @Roles()
   @Permission(PermissionArea.settings, PermissionLevel.edit)
   @Patch('register/settings')
-  updateSettings(@Body() dto: UpdateRegisterSettingsDto) {
-    return this.register.setEditDays(dto.editDays);
+  updateSettings(
+    @Body() dto: UpdateRegisterSettingsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.register.setEditDays(dto.editDays, user.id);
   }
 
   @Get('groups/:id/register')

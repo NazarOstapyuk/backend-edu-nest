@@ -3,18 +3,55 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AdjustmentType, TariffUnit } from '@prisma/client';
+import {
+  AdjustmentType,
+  AuditAction,
+  BillingMode,
+  Prisma,
+  TariffUnit,
+} from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { scopeKind } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { money } from '../finance/finance-calc';
 import { priceOn } from './billing-engine';
-import { kyivToday, overlaps, toDay } from './dates';
+import { isoDay, kyivToday, overlaps, toDay } from './dates';
 import { CreateAdjustmentDto } from './dto/create-adjustment.dto';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import { EndEnrollmentDto } from './dto/end-enrollment.dto';
 import { enrollmentInclude, toEnrollmentView } from './enrollment-view';
+
+const ENROLLMENT_FIELDS = [
+  'childId',
+  'tariffId',
+  'startDate',
+  'endDate',
+  'billingMode',
+] as const;
+
+const enrollmentAudit = (enrollment: {
+  childId: string;
+  tariffId: string;
+  startDate: Date;
+  endDate: Date | null;
+  billingMode: BillingMode | null;
+}) => ({
+  childId: enrollment.childId,
+  tariffId: enrollment.tariffId,
+  startDate: enrollment.startDate,
+  endDate: enrollment.endDate,
+  billingMode: enrollment.billingMode,
+});
+
+const adjustmentLine = (adjustment: {
+  type: AdjustmentType;
+  value: Prisma.Decimal | null;
+  startDate: Date;
+  endDate: Date | null;
+}) =>
+  `${adjustment.type} ${adjustment.value?.toFixed(2) ?? ''} ${isoDay(adjustment.startDate)}–${adjustment.endDate ? isoDay(adjustment.endDate) : ''}`;
 
 const validValue = (type: AdjustmentType, value: string | undefined) => {
   if (type === AdjustmentType.pause) return value === undefined;
@@ -27,7 +64,10 @@ const validValue = (type: AdjustmentType, value: string | undefined) => {
 
 @Injectable()
 export class EnrollmentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   private async assertChild(childId: string, user: AuthenticatedUser) {
     const child = await this.prisma.child.findUnique({
@@ -110,7 +150,7 @@ export class EnrollmentsService {
       );
     }
 
-    await this.prisma.enrollment.create({
+    const created = await this.prisma.enrollment.create({
       data: {
         childId,
         tariffId: dto.tariffId,
@@ -120,6 +160,15 @@ export class EnrollmentsService {
         note: dto.note,
         createdById: userId,
       },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'enrollments',
+      entityId: created.id,
+      action: AuditAction.create,
+      before: null,
+      after: enrollmentAudit(created),
+      fields: ENROLLMENT_FIELDS,
     });
     return this.loadForChild(childId);
   }
@@ -152,7 +201,19 @@ export class EnrollmentsService {
         'Enrollment overlaps an existing enrollment on this tariff',
       );
     }
-    await this.prisma.enrollment.update({ where: { id }, data: { endDate } });
+    const updated = await this.prisma.enrollment.update({
+      where: { id },
+      data: { endDate },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: user.id,
+      entityType: 'enrollments',
+      entityId: id,
+      action: AuditAction.update,
+      before: enrollmentAudit(enrollment),
+      after: enrollmentAudit(updated),
+      fields: ENROLLMENT_FIELDS,
+    });
     return this.loadForChild(enrollment.childId);
   }
 
@@ -188,7 +249,7 @@ export class EnrollmentsService {
       );
     }
 
-    await this.prisma.enrollmentAdjustment.create({
+    const created = await this.prisma.enrollmentAdjustment.create({
       data: {
         enrollmentId,
         type: dto.type,
@@ -198,6 +259,16 @@ export class EnrollmentsService {
         reason: dto.reason,
         createdById: userId,
       },
+    });
+    const active = enrollment.adjustments.filter((a) => !a.voidedAt);
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'enrollments',
+      entityId: enrollmentId,
+      action: AuditAction.update,
+      before: { adjustments: active.map(adjustmentLine) },
+      after: { adjustments: [...active, created].map(adjustmentLine) },
+      fields: ['adjustments'],
     });
     return this.loadForChild(enrollment.childId);
   }
@@ -222,9 +293,23 @@ export class EnrollmentsService {
     if (adjustment.voidedAt)
       throw new BadRequestException('Adjustment is voided');
 
+    const active = await this.prisma.enrollmentAdjustment.findMany({
+      where: { enrollmentId: adjustment.enrollmentId, voidedAt: null },
+    });
     await this.prisma.enrollmentAdjustment.update({
       where: { id },
       data: { voidedAt: new Date(), voidedById: userId, voidReason: reason },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'enrollments',
+      entityId: adjustment.enrollmentId,
+      action: AuditAction.void,
+      before: { adjustments: active.map(adjustmentLine) },
+      after: {
+        adjustments: active.filter((a) => a.id !== id).map(adjustmentLine),
+      },
+      fields: ['adjustments'],
     });
     return this.loadForChild(adjustment.enrollment.childId);
   }

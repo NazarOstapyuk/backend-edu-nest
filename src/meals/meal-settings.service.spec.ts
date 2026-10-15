@@ -1,11 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
+import { AuditAction } from '@prisma/client';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MealSettingsService } from './meal-settings.service';
 
 const mockPrisma = {
   appSetting: { findUnique: jest.fn(), upsert: jest.fn() },
 };
+
+const mockAudit = { recordChange: jest.fn() };
 
 describe('MealSettingsService', () => {
   let service: MealSettingsService;
@@ -16,6 +20,7 @@ describe('MealSettingsService', () => {
       providers: [
         MealSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = moduleRef.get(MealSettingsService);
@@ -32,7 +37,7 @@ describe('MealSettingsService', () => {
   });
 
   it('stores a valid deadline', async () => {
-    await expect(service.setDeadline('08:45')).resolves.toEqual({
+    await expect(service.setDeadline('08:45', 'u1')).resolves.toEqual({
       mealOrderDeadline: '08:45',
     });
     expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith({
@@ -43,8 +48,29 @@ describe('MealSettingsService', () => {
   });
 
   it('rejects an invalid deadline', async () => {
-    await expect(service.setDeadline('25:00')).rejects.toThrow(
+    await expect(service.setDeadline('25:00', 'u1')).rejects.toThrow(
       new BadRequestException('Invalid deadline'),
     );
+  });
+
+  describe('audit', () => {
+    it('records the previous and new value of mealOrderDeadline', async () => {
+      mockPrisma.appSetting.findUnique.mockResolvedValue({ value: '09:30' });
+
+      await service.setDeadline('08:45', 'u1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'settings',
+          entityId: 'mealOrderDeadline',
+          action: AuditAction.update,
+          fields: ['value'],
+          before: { value: '09:30' },
+          after: { value: '08:45' },
+        }),
+      );
+    });
   });
 });

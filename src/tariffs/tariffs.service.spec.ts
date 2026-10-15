@@ -1,11 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import {
+  AuditAction,
   BillingMode,
   FinanceCategory,
   Prisma,
   TariffUnit,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TariffsService } from './tariffs.service';
 
@@ -57,6 +59,8 @@ const dto = {
   effectiveFrom: '2026-09-01',
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 describe('TariffsService', () => {
   let service: TariffsService;
 
@@ -69,6 +73,7 @@ describe('TariffsService', () => {
       providers: [
         TariffsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(TariffsService);
@@ -175,7 +180,7 @@ describe('TariffsService', () => {
       mockPrisma.enrollment.count.mockResolvedValue(2);
 
       await expect(
-        service.update('t1', { billingMode: BillingMode.anniversary }),
+        service.update('t1', { billingMode: BillingMode.anniversary }, 'u1'),
       ).rejects.toThrow('Cannot change billing mode: tariff has enrollments');
       expect(mockPrisma.tariff.update).not.toHaveBeenCalled();
     });
@@ -187,7 +192,11 @@ describe('TariffsService', () => {
         tariff({ billingMode: BillingMode.anniversary }),
       );
 
-      await service.update('t1', { billingMode: BillingMode.anniversary });
+      await service.update(
+        't1',
+        { billingMode: BillingMode.anniversary },
+        'u1',
+      );
 
       expect(mockPrisma.tariff.update).toHaveBeenCalledTimes(1);
     });
@@ -202,7 +211,7 @@ describe('TariffsService', () => {
         tariff({ unit: TariffUnit.package, packageSize: 4 }),
       );
 
-      await service.update('t1', { validityDays: 30 });
+      await service.update('t1', { validityDays: 30 }, 'u1');
 
       const arg = (
         mockPrisma.tariff.update.mock.calls[0] as [
@@ -216,7 +225,7 @@ describe('TariffsService', () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
       mockPrisma.tariff.update.mockResolvedValue(tariff());
 
-      await service.update('t1', { validityDays: 30 });
+      await service.update('t1', { validityDays: 30 }, 'u1');
 
       const arg = (
         mockPrisma.tariff.update.mock.calls[0] as [
@@ -235,7 +244,7 @@ describe('TariffsService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
 
-      await expect(service.delete('t1')).rejects.toThrow(
+      await expect(service.delete('t1', 'u1')).rejects.toThrow(
         'Cannot delete: tariff is in use',
       );
       expect(mockPrisma.tariff.delete).not.toHaveBeenCalled();
@@ -248,7 +257,7 @@ describe('TariffsService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
 
-      await expect(service.delete('t1')).resolves.toEqual({
+      await expect(service.delete('t1', 'u1')).resolves.toEqual({
         message: 'Tariff deleted',
       });
       expect(mockPrisma.tariffPrice.deleteMany).toHaveBeenCalledWith({
@@ -264,6 +273,124 @@ describe('TariffsService', () => {
 
       await expect(service.delete('missing')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+  });
+
+  describe('audit', () => {
+    it('records the created tariff with its prices', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(null);
+      mockPrisma.tariff.create.mockResolvedValue(
+        tariff({ prices: [tariff().prices[1]] }),
+      );
+
+      await service.create(dto, 'u1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'tariffs',
+          entityId: 't1',
+          action: AuditAction.create,
+          before: null,
+          after: expect.objectContaining({
+            name: 'Садочок повний день',
+            prices: ['15500.00@2026-09-01'],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records the changed billing mode on update', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.tariff.update.mockResolvedValue(
+        tariff({ billingMode: BillingMode.anniversary }),
+      );
+
+      await service.update(
+        't1',
+        { billingMode: BillingMode.anniversary },
+        'u1',
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'tariffs',
+          entityId: 't1',
+          action: AuditAction.update,
+          before: expect.objectContaining({
+            billingMode: BillingMode.calendar_full,
+          }) as unknown,
+          after: expect.objectContaining({
+            billingMode: BillingMode.anniversary,
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records the prices before and after adding a price', async () => {
+      mockPrisma.tariff.findUnique
+        .mockResolvedValueOnce(tariff())
+        .mockResolvedValueOnce(
+          tariff({
+            prices: [
+              { id: 'p3', price: d('17000'), effectiveFrom: day('2027-09-01') },
+              ...tariff().prices,
+            ],
+          }),
+        );
+      mockPrisma.tariffPrice.findUnique.mockResolvedValue(null);
+
+      await service.addPrice(
+        't1',
+        { price: '17000.00', effectiveFrom: '2027-09-01' },
+        'u1',
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'tariffs',
+          entityId: 't1',
+          action: AuditAction.update,
+          fields: ['prices'],
+          before: expect.objectContaining({
+            prices: ['16500.00@2027-01-01', '15500.00@2026-09-01'],
+          }) as unknown,
+          after: expect.objectContaining({
+            prices: [
+              '17000.00@2027-09-01',
+              '16500.00@2027-01-01',
+              '15500.00@2026-09-01',
+            ],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records a deleted tariff', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.package.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
+
+      await service.delete('t1', 'u1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'tariffs',
+          entityId: 't1',
+          action: AuditAction.delete,
+          after: null,
+        }),
       );
     });
   });

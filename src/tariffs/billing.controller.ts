@@ -41,7 +41,10 @@ export class BillingController {
 
   @Permission(PermissionArea.settings, PermissionLevel.edit)
   @Patch('settings/billing')
-  updateSettings(@Body() dto: UpdateBillingSettingsDto) {
-    return this.billing.setLeadDays(dto.chargeLeadDays);
+  updateSettings(
+    @Body() dto: UpdateBillingSettingsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.billing.setLeadDays(dto.chargeLeadDays, user.id);
   }
 }

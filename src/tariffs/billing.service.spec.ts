@@ -1,4 +1,9 @@
-import { AccessScope, PermissionLevel, Role } from '@prisma/client';
+import {
+  AccessScope,
+  AuditAction,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
@@ -10,6 +15,7 @@ import {
   GroupKind,
   Prisma,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from './billing.service';
 
@@ -76,6 +82,8 @@ const kgAccountant: AuthenticatedUser = {
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 describe('BillingService', () => {
   let service: BillingService;
 
@@ -92,6 +100,7 @@ describe('BillingService', () => {
       providers: [
         BillingService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(BillingService);
@@ -103,16 +112,16 @@ describe('BillingService', () => {
     });
 
     it('validates the range', async () => {
-      await expect(service.setLeadDays(61)).rejects.toThrow(
+      await expect(service.setLeadDays(61, 'u1')).rejects.toThrow(
         'Lead days must be between 0 and 60',
       );
-      await expect(service.setLeadDays(1.5)).rejects.toThrow(
+      await expect(service.setLeadDays(1.5, 'u1')).rejects.toThrow(
         'Lead days must be between 0 and 60',
       );
     });
 
     it('stores a valid value', async () => {
-      await expect(service.setLeadDays(7)).resolves.toEqual({
+      await expect(service.setLeadDays(7, 'u1')).resolves.toEqual({
         chargeLeadDays: 7,
       });
       expect(mockPrisma.appSetting.upsert).toHaveBeenCalledWith({
@@ -444,6 +453,27 @@ describe('BillingService', () => {
         service.recalculate('bp1', 'x', 'kg1', kgAccountant),
       ).rejects.toThrow('Billed period not found');
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit', () => {
+    it('records the previous and new value of chargeLeadDays', async () => {
+      mockPrisma.appSetting.findUnique.mockResolvedValue({ value: '3' });
+
+      await service.setLeadDays(7, 'u1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'u1',
+          entityType: 'settings',
+          entityId: 'chargeLeadDays',
+          action: AuditAction.update,
+          fields: ['value'],
+          before: { value: '3' },
+          after: { value: '7' },
+        }),
+      );
     });
   });
 });

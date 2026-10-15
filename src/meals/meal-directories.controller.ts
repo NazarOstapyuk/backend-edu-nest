@@ -12,6 +12,8 @@ import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Permission } from '../common/decorators/permission.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { MealDirectoriesService } from './meal-directories.service';
 import { MealSettingsService } from './meal-settings.service';
 import {
@@ -93,7 +95,10 @@ export class MealDirectoriesController {
 
   @Permission(PermissionArea.settings, PermissionLevel.edit)
   @Patch('meals/settings')
-  updateSettings(@Body() dto: UpdateMealSettingsDto) {
-    return this.settings.setDeadline(dto.mealOrderDeadline);
+  updateSettings(
+    @Body() dto: UpdateMealSettingsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.settings.setDeadline(dto.mealOrderDeadline, user.id);
   }
 }

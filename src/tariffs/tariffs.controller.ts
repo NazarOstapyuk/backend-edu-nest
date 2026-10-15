@@ -38,8 +38,12 @@ export class TariffsController {
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateTariffDto) {
-    return this.tariffs.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTariffDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tariffs.update(id, dto, user.id);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -54,7 +58,7 @@ export class TariffsController {
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.tariffs.delete(id);
+  delete(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.tariffs.delete(id, user.id);
   }
 }

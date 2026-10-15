@@ -3,7 +3,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClassFormat, PayrollLessonType, Prisma, Role } from '@prisma/client';
+import {
+  AuditAction,
+  ClassFormat,
+  PayrollLessonType,
+  Prisma,
+  Role,
+} from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
@@ -18,9 +25,41 @@ import {
 } from './dto/salary-terms.dto';
 import { termsInclude, toTermsView } from './terms-view';
 
+const TERMS_FIELDS = [
+  'teacherId',
+  'validFrom',
+  'validTo',
+  'monthlyRate',
+  'calendarKind',
+  'note',
+  'rates',
+  'allowances',
+] as const;
+
+type TermsRow = Prisma.SalaryTermsGetPayload<{ include: typeof termsInclude }>;
+
+const termsAudit = (row: TermsRow) => ({
+  teacherId: row.teacherId,
+  validFrom: row.validFrom,
+  validTo: row.validTo,
+  monthlyRate: row.monthlyRate,
+  calendarKind: row.calendarKind,
+  note: row.note,
+  rates: row.rates.map(
+    (rate) =>
+      `${rate.lessonType}:${rate.subjectId ?? rate.classGroupId ?? '*'}=${rate.amount.toFixed(2)}`,
+  ),
+  allowances: row.allowances.map(
+    (allowance) => `${allowance.name}=${allowance.amount.toFixed(2)}`,
+  ),
+});
+
 @Injectable()
 export class SalaryTermsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async list(teacherId: string) {
     const teacher = await this.prisma.user.findUnique({
@@ -90,14 +129,23 @@ export class SalaryTermsService {
           rates: { create: rates },
           allowances: { create: allowances },
         },
-        select: { id: true },
+        include: termsInclude,
+      });
+      await this.audit.recordChange(tx, {
+        actorId: user.id,
+        entityType: 'salary-terms',
+        entityId: created.id,
+        action: AuditAction.create,
+        before: null,
+        after: termsAudit(created),
+        fields: TERMS_FIELDS,
       });
       return created.id;
     });
     return this.get(id);
   }
 
-  async update(id: string, dto: UpdateSalaryTermsDto) {
+  async update(id: string, dto: UpdateSalaryTermsDto, userId: string) {
     await this.findNotStarted(this.prisma, id);
     const rates = dto.rates ? await this.validateRates(dto.rates) : null;
     const allowances = dto.allowances
@@ -105,7 +153,7 @@ export class SalaryTermsService {
       : null;
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "SalaryTerms" WHERE id = ${id} FOR UPDATE`;
-      await this.findNotStarted(tx, id);
+      const before = await this.findNotStarted(tx, id);
       if (rates) {
         await tx.salaryRate.deleteMany({ where: { termsId: id } });
         await tx.salaryRate.createMany({
@@ -129,11 +177,25 @@ export class SalaryTermsService {
           note: dto.note === undefined ? undefined : dto.note.trim() || null,
         },
       });
+      const after = await tx.salaryTerms.findUnique({
+        where: { id },
+        include: termsInclude,
+      });
+      if (!after) throw new NotFoundException('Salary terms not found');
+      await this.audit.recordChange(tx, {
+        actorId: userId,
+        entityType: 'salary-terms',
+        entityId: id,
+        action: AuditAction.update,
+        before: termsAudit(before),
+        after: termsAudit(after),
+        fields: TERMS_FIELDS,
+      });
     });
     return this.get(id);
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
     await this.findNotStarted(this.prisma, id);
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "SalaryTerms" WHERE id = ${id} FOR UPDATE`;
@@ -146,14 +208,23 @@ export class SalaryTermsService {
         data: { validTo: row.validTo },
       });
       await tx.salaryTerms.delete({ where: { id } });
+      await this.audit.recordChange(tx, {
+        actorId: userId,
+        entityType: 'salary-terms',
+        entityId: id,
+        action: AuditAction.delete,
+        before: termsAudit(row),
+        after: null,
+        fields: TERMS_FIELDS,
+      });
     });
     return { message: 'Salary terms deleted' };
   }
 
-  async close(id: string, dto: CloseSalaryTermsDto) {
+  async close(id: string, dto: CloseSalaryTermsDto, userId: string) {
     const row = await this.prisma.salaryTerms.findUnique({
       where: { id },
-      select: { validFrom: true, validTo: true },
+      include: termsInclude,
     });
     if (!row) throw new NotFoundException('Salary terms not found');
     if (row.validTo !== null)
@@ -167,13 +238,22 @@ export class SalaryTermsService {
     });
     if (result.count === 0)
       throw new BadRequestException('Salary terms are closed');
+    await this.audit.recordChange(this.prisma, {
+      actorId: userId,
+      entityType: 'salary-terms',
+      entityId: id,
+      action: AuditAction.update,
+      before: termsAudit(row),
+      after: termsAudit({ ...row, validTo }),
+      fields: TERMS_FIELDS,
+    });
     return this.get(id);
   }
 
   private async findNotStarted(db: Prisma.TransactionClient, id: string) {
     const row = await db.salaryTerms.findUnique({
       where: { id },
-      select: { teacherId: true, validFrom: true, validTo: true },
+      include: termsInclude,
     });
     if (!row) throw new NotFoundException('Salary terms not found');
     if (row.validFrom.getTime() <= kyivToday().getTime())
