@@ -37,6 +37,7 @@ model User {
   mustChangePassword  Boolean                @default(false)
   refreshToken        String?
   isActive            Boolean                @default(true)
+  accessScope         AccessScope            @default(all)
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
   groups              Group[]                @relation("GroupTeachers")
@@ -90,6 +91,7 @@ model User {
   payrollPayCreated   PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
   payrollPayVoided    PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
   backupRunsCreated   BackupRun[]            @relation("BackupRunCreatedBy")
+  permissions         UserPermission[]
 }
 
 model Group {
@@ -1250,4 +1252,39 @@ model BackupRun {
   createdBy   User?        @relation("BackupRunCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([startedAt])
+}
+
+enum PermissionArea {
+  users
+  children
+  finance
+  tariffs
+  classes
+  register
+  timetable
+  meals
+  payroll
+  backups
+  settings
+}
+
+enum PermissionLevel {
+  view
+  edit
+}
+
+enum AccessScope {
+  all
+  kindergarten
+  school_class
+}
+
+model UserPermission {
+  id     String          @id @default(uuid())
+  userId String
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  area   PermissionArea
+  level  PermissionLevel
+
+  @@unique([userId, area])
 }
