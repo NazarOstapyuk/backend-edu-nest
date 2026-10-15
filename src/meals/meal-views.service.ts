@@ -1,7 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PermissionArea } from '@prisma/client';
 import { scopeKind } from '../access/access-calc';
-import { childScopeWhere } from '../access/scope';
+import { OUTSIDE_SCOPE } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { assertGroupAccess, parseDay } from '../classes/access';
@@ -65,14 +69,18 @@ export class MealViewsService {
 
   async adminList(query: MealOrdersQueryDto, user: AuthenticatedUser) {
     const date = parseDay(query.date);
+    const scope = scopeKind(user);
+    if (scope && query.kind && query.kind !== scope)
+      throw new ForbiddenException(OUTSIDE_SCOPE);
+    const kind = scope ?? query.kind;
     const groupFilter =
-      query.kind || query.groupId
-        ? { group: { kind: query.kind, id: query.groupId } }
+      kind || query.groupId
+        ? { group: { kind, id: query.groupId } }
         : undefined;
     const rows = await this.prisma.mealOrder.findMany({
       where: {
         date,
-        child: { ...groupFilter, ...childScopeWhere(scopeKind(user)) },
+        child: groupFilter,
       },
       select: adminSelect,
       orderBy: [{ child: { lastName: 'asc' } }, { createdAt: 'asc' }],

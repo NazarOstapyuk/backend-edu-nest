@@ -95,8 +95,18 @@ describe('MealViewsService', () => {
         firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
       ).toEqual({
         date: day('2026-10-14'),
-        child: { group: { kind: GroupKind.kindergarten } },
+        child: { group: { kind: GroupKind.kindergarten, id: 'g1' } },
       });
+    });
+
+    it('rejects a request for another kind than the scope', async () => {
+      await expect(
+        service.adminList(
+          { date: '2026-10-14', kind: GroupKind.school_class },
+          kgAdmin,
+        ),
+      ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+      expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
     });
 
     it('404s today for a group of another kind', async () => {

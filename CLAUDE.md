@@ -47,7 +47,7 @@ Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backu
 - JWT stored in **httpOnly cookies** (`accessToken`, `refreshToken`), not Authorization headers. `JwtStrategy` reads from `req.cookies.accessToken`; `cookie-parser` is required.
 - Both tokens are signed with the same `JWT_SECRET`. The refresh token is bcrypt-hashed and stored in `User.refreshToken`; `/auth/refresh` rotates it, `/auth/logout` nulls it.
 - Cookie `maxAge` values in `AuthService.setCookies` are hardcoded (15m / 30d) and must be kept in sync with `JWT_ACCESS_EXPIRES` / `JWT_REFRESH_EXPIRES`.
-- `JwtStrategy.validate` re-fetches the user on every request and rejects inactive users; `req.user` is `AuthenticatedUser` (`{ id, role, login, mustChangePassword }`), accessed via `@CurrentUser()`.
+- `JwtStrategy.validate` re-fetches the user on every request and rejects inactive users; `req.user` is `AuthenticatedUser` (`{ id, role, login, mustChangePassword, accessScope, permissions }`), accessed via `@CurrentUser()`.
 
 ### Authorization pattern
 
