@@ -66,8 +66,8 @@ describe('TariffsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
-      Promise.all(ops),
+    mockPrisma.$transaction.mockImplementation(
+      (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma),
     );
     const module = await Test.createTestingModule({
       providers: [
@@ -271,7 +271,7 @@ describe('TariffsService', () => {
     it('throws NotFoundException for an unknown tariff', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(null);
 
-      await expect(service.delete('missing')).rejects.toThrow(
+      await expect(service.delete('missing', 'u1')).rejects.toThrow(
         NotFoundException,
       );
     });

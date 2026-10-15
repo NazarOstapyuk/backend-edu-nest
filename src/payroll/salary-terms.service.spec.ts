@@ -61,6 +61,7 @@ const mockPrisma = {
   salaryTerms: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -571,6 +572,45 @@ describe('SalaryTermsService', () => {
           }) as unknown,
         }),
       );
+    });
+  });
+
+  describe('audit of neighbour versions', () => {
+    it('records the auto-closed previous version on create', async () => {
+      mockPrisma.salaryTerms.findMany.mockResolvedValue([
+        { id: 'old', validFrom: day('2026-09-01'), validTo: null },
+      ]);
+
+      await service.create(createDto(), admin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(mockPrisma, {
+        actorId: 'a1',
+        entityType: 'salary-terms',
+        entityId: 'old',
+        action: AuditAction.update,
+        before: { validTo: null },
+        after: { validTo: day('2026-10-31') },
+        fields: ['validTo'],
+      });
+    });
+
+    it('records the reopened previous version on remove', async () => {
+      mockPrisma.salaryTerms.findFirst.mockResolvedValue({
+        id: 'prev',
+        validTo: day('2098-12-31'),
+      });
+
+      await service.remove('st1', 'a1');
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(mockPrisma, {
+        actorId: 'a1',
+        entityType: 'salary-terms',
+        entityId: 'prev',
+        action: AuditAction.update,
+        before: { validTo: day('2098-12-31') },
+        after: { validTo: null },
+        fields: ['validTo'],
+      });
     });
   });
 });

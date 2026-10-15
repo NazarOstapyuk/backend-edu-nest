@@ -113,11 +113,22 @@ export class SalaryTermsService {
           (v.validTo === null || v.validTo.getTime() >= validFrom.getTime()),
       );
       if (clash) throw new BadRequestException('Salary terms overlap');
-      if (open)
+      if (open) {
+        const closedTo = addDays(validFrom, -1);
         await tx.salaryTerms.update({
           where: { id: open.id },
-          data: { validTo: addDays(validFrom, -1) },
+          data: { validTo: closedTo },
         });
+        await this.audit.recordChange(tx, {
+          actorId: user.id,
+          entityType: 'salary-terms',
+          entityId: open.id,
+          action: AuditAction.update,
+          before: { validTo: open.validTo },
+          after: { validTo: closedTo },
+          fields: ['validTo'],
+        });
+      }
       const created = await tx.salaryTerms.create({
         data: {
           teacherId: teacher.id,
@@ -200,6 +211,13 @@ export class SalaryTermsService {
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "SalaryTerms" WHERE id = ${id} FOR UPDATE`;
       const row = await this.findNotStarted(tx, id);
+      const previous = await tx.salaryTerms.findFirst({
+        where: {
+          teacherId: row.teacherId,
+          validTo: addDays(row.validFrom, -1),
+        },
+        select: { id: true, validTo: true },
+      });
       await tx.salaryTerms.updateMany({
         where: {
           teacherId: row.teacherId,
@@ -207,6 +225,16 @@ export class SalaryTermsService {
         },
         data: { validTo: row.validTo },
       });
+      if (previous)
+        await this.audit.recordChange(tx, {
+          actorId: userId,
+          entityType: 'salary-terms',
+          entityId: previous.id,
+          action: AuditAction.update,
+          before: { validTo: previous.validTo },
+          after: { validTo: row.validTo },
+          fields: ['validTo'],
+        });
       await tx.salaryTerms.delete({ where: { id } });
       await this.audit.recordChange(tx, {
         actorId: userId,

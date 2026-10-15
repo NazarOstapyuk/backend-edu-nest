@@ -218,18 +218,18 @@ export class TariffsService {
     if (enrollments + visits + packages + groups > 0)
       throw new BadRequestException('Cannot delete: tariff is in use');
 
-    await this.prisma.$transaction([
-      this.prisma.tariffPrice.deleteMany({ where: { tariffId: id } }),
-      this.prisma.tariff.delete({ where: { id } }),
-    ]);
-    await this.audit.recordChange(this.prisma, {
-      actorId: userId,
-      entityType: 'tariffs',
-      entityId: id,
-      action: AuditAction.delete,
-      before: tariffAudit(tariff),
-      after: null,
-      fields: TARIFF_FIELDS,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tariffPrice.deleteMany({ where: { tariffId: id } });
+      await tx.tariff.delete({ where: { id } });
+      await this.audit.recordChange(tx, {
+        actorId: userId,
+        entityType: 'tariffs',
+        entityId: id,
+        action: AuditAction.delete,
+        before: tariffAudit(tariff),
+        after: null,
+        fields: TARIFF_FIELDS,
+      });
     });
     return { message: 'Tariff deleted' };
   }
