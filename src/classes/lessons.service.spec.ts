@@ -6,6 +6,7 @@ import {
   MissedLessonRule,
   Prisma,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LessonsService } from './lessons.service';
@@ -19,12 +20,16 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const teacher = {
   id: 't1',
   role: Role.teacher,
   login: 'teacher',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const mockPrisma = {

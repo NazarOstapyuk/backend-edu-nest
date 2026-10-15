@@ -187,6 +187,42 @@ describe('AuthService', () => {
     });
   });
 
+  describe('getProfile', () => {
+    it('gives root every permission at edit level', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'r1',
+        role: 'root',
+        accessScope: 'all',
+        permissions: [],
+      });
+
+      const profile = await service.getProfile('r1');
+
+      expect(profile.permissions.payroll).toBe('edit');
+      expect(profile.permissions.settings).toBe('edit');
+    });
+
+    it('maps admin permission rows to an object', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'a1',
+        role: 'admin',
+        accessScope: 'kindergarten',
+        permissions: [
+          { area: 'finance', level: 'view' },
+          { area: 'children', level: 'edit' },
+        ],
+      });
+
+      const profile = await service.getProfile('a1');
+
+      expect(profile.permissions).toEqual({
+        finance: 'view',
+        children: 'edit',
+      });
+      expect(profile.accessScope).toBe('kindergarten');
+    });
+  });
+
   describe('updateContacts', () => {
     it('refuses to clear a parent phone', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({
@@ -205,6 +241,7 @@ describe('AuthService', () => {
         id: 'u1',
         role: 'parent',
         phone: '+380671234567',
+        permissions: [],
       });
       mockPrisma.user.update.mockResolvedValue({});
 

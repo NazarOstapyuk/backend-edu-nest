@@ -7,6 +7,7 @@ import {
   MenuStatus,
   Prisma,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../attendance/calendar.service';
@@ -20,6 +21,8 @@ const parent = {
   role: Role.parent,
   login: 'p',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const BEFORE = new Date('2026-10-14T06:00:00Z');
 

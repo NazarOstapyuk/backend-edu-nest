@@ -8,6 +8,7 @@ import {
   PayrollStatus,
   Prisma,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayrollBuilder } from './payroll-builder.service';
@@ -21,6 +22,8 @@ const teacherUser = {
   role: Role.teacher,
   login: 'olena',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const detailOf = (
@@ -252,6 +255,8 @@ describe('PayrollService', () => {
       role: Role.admin,
       login: 'admin',
       mustChangePassword: false,
+      accessScope: AccessScope.all,
+      permissions: {},
     };
     const dec = (value: string) => new Prisma.Decimal(value);
     const sheet = (over: Record<string, unknown> = {}) => ({

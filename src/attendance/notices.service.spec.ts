@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { NoticeStatus, Role } from '@prisma/client';
+import { AccessScope, NoticeStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoticesService } from './notices.service';
 
@@ -11,6 +11,8 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const notice = (over: Record<string, unknown> = {}) => ({

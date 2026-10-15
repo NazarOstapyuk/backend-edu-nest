@@ -5,6 +5,7 @@ import {
   CalendarScope,
   GroupKind,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from './calendar.service';
@@ -24,6 +25,8 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];

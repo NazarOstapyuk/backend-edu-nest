@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { LessonChangeType, Role } from '@prisma/client';
+import { AccessScope, LessonChangeType, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScheduleService } from './schedule.service';
 import { LessonChangesService } from './lesson-changes.service';
@@ -15,6 +15,8 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const periods = [
   { number: 1, startTime: '08:30', endTime: '09:15' },

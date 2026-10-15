@@ -7,6 +7,7 @@ import {
   MenuStatus,
   Prisma,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../attendance/calendar.service';
@@ -22,12 +23,16 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const parent = {
   id: 'p1',
   role: Role.parent,
   login: 'parent',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const child = (over: Record<string, unknown> = {}) => ({

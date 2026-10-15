@@ -5,7 +5,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PermissionArea, PermissionLevel, Role } from '@prisma/client';
+import { allPermissions, toPermissionMap } from '../access/access-calc';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateContactsDto } from './dto/update-contacts.dto';
 import { ConfigService } from '@nestjs/config';
@@ -91,6 +92,8 @@ export class AuthService {
     phone: true,
     email: true,
     mustChangePassword: true,
+    accessScope: true,
+    permissions: { select: { area: true, level: true } },
   } as const;
 
   async getProfile(userId: string) {
@@ -99,7 +102,23 @@ export class AuthService {
       select: this.profileSelect,
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    return this.toProfile(user);
+  }
+
+  private toProfile<
+    T extends {
+      role: Role;
+      permissions: { area: PermissionArea; level: PermissionLevel }[];
+    },
+  >(user: T) {
+    const { permissions, ...profile } = user;
+    return {
+      ...profile,
+      permissions:
+        user.role === Role.root
+          ? allPermissions(PermissionLevel.edit)
+          : toPermissionMap(permissions),
+    };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto, res: Response) {

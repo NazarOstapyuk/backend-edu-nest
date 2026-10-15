@@ -4,7 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { Role, WeekParity } from '@prisma/client';
+import { AccessScope, Role, WeekParity } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScheduleService } from './schedule.service';
 import { TimetablesService } from './timetables.service';
@@ -16,12 +16,16 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const teacher = {
   id: 't1',
   role: Role.teacher,
   login: 't',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const periods = [
   { number: 1, startTime: '08:30', endTime: '09:15' },

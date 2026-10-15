@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, SubscriptionStatus } from '@prisma/client';
+import { AccessScope, Role, SubscriptionStatus } from '@prisma/client';
 import { SubscriptionsService } from './subscriptions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -106,6 +106,8 @@ describe('SubscriptionsService', () => {
         role: Role.admin,
         login: 'admin',
         mustChangePassword: false,
+        accessScope: AccessScope.all,
+        permissions: {},
       };
       mockPrisma.subscription.findMany.mockResolvedValue(subs);
 
@@ -121,6 +123,8 @@ describe('SubscriptionsService', () => {
         role: Role.parent,
         login: 'parent',
         mustChangePassword: false,
+        accessScope: AccessScope.all,
+        permissions: {},
       };
       mockPrisma.child.findFirst.mockResolvedValue({ id: 'child-1' });
       mockPrisma.subscription.findMany.mockResolvedValue(subs);
@@ -139,6 +143,8 @@ describe('SubscriptionsService', () => {
         role: Role.parent,
         login: 'parent',
         mustChangePassword: false,
+        accessScope: AccessScope.all,
+        permissions: {},
       };
       mockPrisma.child.findFirst.mockResolvedValue(null);
 

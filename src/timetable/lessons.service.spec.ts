@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { LessonStatus, NushLevel, Role } from '@prisma/client';
+import { AccessScope, LessonStatus, NushLevel, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterService } from '../attendance/register.service';
 import { ScheduleService } from './schedule.service';
@@ -17,18 +17,24 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const teacher = {
   id: 't1',
   role: Role.teacher,
   login: 't1',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const substitute = {
   id: 't2',
   role: Role.teacher,
   login: 't2',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const slot = (over: Record<string, unknown> = {}) => ({
   period: 1,

@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { ClassFormat, Role, TariffUnit } from '@prisma/client';
+import { AccessScope, ClassFormat, Role, TariffUnit } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClassGroupsService } from './class-groups.service';
 
@@ -188,6 +188,8 @@ describe('ClassGroupsService', () => {
         role: Role.teacher,
         login: 't2',
         mustChangePassword: false,
+        accessScope: AccessScope.all,
+        permissions: {},
       }),
     ).rejects.toThrow('Not your class group');
   });

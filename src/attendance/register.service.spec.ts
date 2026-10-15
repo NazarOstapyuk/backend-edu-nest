@@ -4,7 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { DailyStatus, GroupKind, NoticeStatus, Role } from '@prisma/client';
+import {
+  AccessScope,
+  DailyStatus,
+  GroupKind,
+  NoticeStatus,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from './calendar.service';
 import { RegisterService } from './register.service';
@@ -17,12 +23,16 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const teacher = {
   id: 't1',
   role: Role.teacher,
   login: 'teacher',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const mockPrisma = {

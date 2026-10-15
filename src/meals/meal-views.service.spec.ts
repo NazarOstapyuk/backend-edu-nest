@@ -1,6 +1,6 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { GroupKind, Prisma, Role } from '@prisma/client';
+import { AccessScope, GroupKind, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MealViewsService } from './meal-views.service';
 
@@ -10,12 +10,16 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 const teacher = {
   id: 't1',
   role: Role.teacher,
   login: 't',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const row = (over: Record<string, unknown> = {}) => ({

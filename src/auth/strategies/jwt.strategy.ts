@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
+import { toPermissionMap } from '../../access/access-calc';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(payload: { sub: string; role: string }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      include: { permissions: { select: { area: true, level: true } } },
     });
     if (!user || !user.isActive) throw new UnauthorizedException();
     return {
@@ -32,6 +34,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role,
       login: user.login,
       mustChangePassword: user.mustChangePassword,
+      accessScope: user.accessScope,
+      permissions: toPermissionMap(user.permissions),
     };
   }
 }

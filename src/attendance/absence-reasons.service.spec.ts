@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { Role } from '@prisma/client';
+import { AccessScope, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AbsenceReasonsService } from './absence-reasons.service';
 
@@ -18,6 +18,8 @@ const user = (role: Role) => ({
   role,
   login: 'x',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 });
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
 

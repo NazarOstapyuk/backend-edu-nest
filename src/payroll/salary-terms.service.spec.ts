@@ -6,6 +6,7 @@ import {
   PayrollLessonType,
   Prisma,
   Role,
+  AccessScope,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SalaryTermsService } from './salary-terms.service';
@@ -19,6 +20,8 @@ const admin = {
   role: Role.admin,
   login: 'admin',
   mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: {},
 };
 
 const row = (over: Record<string, unknown> = {}) => ({
