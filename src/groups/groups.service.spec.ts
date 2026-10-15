@@ -1,12 +1,14 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { GroupKind } from '@prisma/client';
+import { AccessScope, GroupKind, PermissionLevel, Role } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { GroupsService } from './groups.service';
 
 const mockPrisma = {
   group: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -21,6 +23,15 @@ const mockPrisma = {
   bellSchedule: { findUnique: jest.fn() },
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
+};
+
+const fullAdmin: AuthenticatedUser = {
+  id: 'a0',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { children: PermissionLevel.edit },
 };
 
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];
@@ -45,7 +56,10 @@ describe('GroupsService', () => {
   it('stores the group kind', async () => {
     mockPrisma.group.findUnique.mockResolvedValue(null);
     mockPrisma.group.create.mockResolvedValue({ id: 'g1' });
-    await service.create({ name: '1-А', kind: GroupKind.school_class });
+    await service.create(
+      { name: '1-А', kind: GroupKind.school_class },
+      fullAdmin,
+    );
     expect(
       firstArg<{ data: { kind: GroupKind } }>(mockPrisma.group.create).data
         .kind,
@@ -60,7 +74,7 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(0);
     mockPrisma.subgroup.count.mockResolvedValue(0);
-    await expect(service.delete('g1')).rejects.toThrow(
+    await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
     expect(mockPrisma.group.delete).not.toHaveBeenCalled();
@@ -74,7 +88,7 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(1);
     mockPrisma.subgroup.count.mockResolvedValue(0);
-    await expect(service.delete('g1')).rejects.toThrow(
+    await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
     expect(mockPrisma.group.delete).not.toHaveBeenCalled();
@@ -88,7 +102,7 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(0);
     mockPrisma.subgroup.count.mockResolvedValue(0);
-    await expect(service.delete('g1')).resolves.toEqual({
+    await expect(service.delete('g1', fullAdmin)).resolves.toEqual({
       message: 'Group deleted',
     });
   });
@@ -104,7 +118,7 @@ describe('GroupsService', () => {
       periods: [{ number: 1 }],
     });
     await expect(
-      service.update('g1', { bellScheduleId: 'b1' }),
+      service.update('g1', { bellScheduleId: 'b1' }, fullAdmin),
     ).rejects.toThrow(new BadRequestException('Not a school class'));
     mockPrisma.group.findUnique.mockResolvedValue({
       id: 'g1',
@@ -113,11 +127,11 @@ describe('GroupsService', () => {
     });
     mockPrisma.timetableEntry.findMany.mockResolvedValue([{ period: 5 }]);
     await expect(
-      service.update('g1', { bellScheduleId: 'b1' }),
+      service.update('g1', { bellScheduleId: 'b1' }, fullAdmin),
     ).rejects.toThrow(new BadRequestException('Bell period is in use'));
     mockPrisma.bellSchedule.findUnique.mockResolvedValue(null);
     await expect(
-      service.update('g1', { bellScheduleId: 'b9' }),
+      service.update('g1', { bellScheduleId: 'b9' }, fullAdmin),
     ).rejects.toThrow(new NotFoundException('Bell schedule not found'));
   });
 
@@ -134,7 +148,7 @@ describe('GroupsService', () => {
         active: true,
       });
       mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
-      await service.update('g1', { mealPriceCategoryId: 'pc1' });
+      await service.update('g1', { mealPriceCategoryId: 'pc1' }, fullAdmin);
       expect(
         firstArg<{ data: { mealPriceCategoryId: string } }>(
           mockPrisma.group.update,
@@ -150,7 +164,7 @@ describe('GroupsService', () => {
         mealPriceCategoryId: 'pc1',
       });
       mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
-      await service.update('g1', { mealPriceCategoryId: null });
+      await service.update('g1', { mealPriceCategoryId: null }, fullAdmin);
       expect(mockPrisma.mealPriceCategory.findUnique).not.toHaveBeenCalled();
       expect(
         firstArg<{ data: { mealPriceCategoryId: null } }>(
@@ -168,7 +182,7 @@ describe('GroupsService', () => {
       });
       mockPrisma.mealPriceCategory.findUnique.mockResolvedValue(null);
       await expect(
-        service.update('g1', { mealPriceCategoryId: 'pc9' }),
+        service.update('g1', { mealPriceCategoryId: 'pc9' }, fullAdmin),
       ).rejects.toThrow(new NotFoundException('Meal price category not found'));
     });
 
@@ -184,7 +198,7 @@ describe('GroupsService', () => {
         active: false,
       });
       await expect(
-        service.update('g1', { mealPriceCategoryId: 'pc2' }),
+        service.update('g1', { mealPriceCategoryId: 'pc2' }, fullAdmin),
       ).rejects.toThrow(
         new BadRequestException('Meal price category is inactive'),
       );
@@ -203,7 +217,7 @@ describe('GroupsService', () => {
       });
       mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
       await expect(
-        service.update('g1', { mealPriceCategoryId: 'pc2' }),
+        service.update('g1', { mealPriceCategoryId: 'pc2' }, fullAdmin),
       ).resolves.toEqual({ id: 'g1' });
     });
 
@@ -211,8 +225,56 @@ describe('GroupsService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
       mockPrisma.mealPriceCategory.findUnique.mockResolvedValue(null);
       await expect(
-        service.create({ name: 'Нова', mealPriceCategoryId: 'pc9' }),
+        service.create({ name: 'Нова', mealPriceCategoryId: 'pc9' }, fullAdmin),
       ).rejects.toThrow(new NotFoundException('Meal price category not found'));
+    });
+  });
+
+  describe('scope', () => {
+    const kgAdmin: AuthenticatedUser = {
+      id: 'a1',
+      role: Role.admin,
+      login: 'kg',
+      mustChangePassword: false,
+      accessScope: AccessScope.kindergarten,
+      permissions: { children: PermissionLevel.edit },
+    };
+
+    it('lists only groups of the scope', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.findAll(kgAdmin);
+      expect(mockPrisma.group.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { kind: GroupKind.kindergarten } }),
+      );
+    });
+
+    it('refuses to create a group of another kind', async () => {
+      await expect(
+        service.create({ name: '1-А', kind: GroupKind.school_class }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
+    });
+
+    it('hides a group of another kind on update and delete', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        kind: GroupKind.school_class,
+      });
+      await expect(service.update('g1', {}, kgAdmin)).rejects.toThrow(
+        'Group not found',
+      );
+      await expect(service.delete('g1', kgAdmin)).rejects.toThrow(
+        'Group not found',
+      );
+    });
+
+    it('refuses changing the kind out of the scope', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        kind: GroupKind.kindergarten,
+      });
+      await expect(
+        service.update('g1', { kind: GroupKind.school_class }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
     });
   });
 });

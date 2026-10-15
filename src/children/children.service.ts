@@ -1,9 +1,17 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { GroupKind, Role } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import {
+  assertKindInScope,
+  childScopeWhere,
+  OUTSIDE_SCOPE,
+} from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
@@ -31,12 +39,27 @@ export class ChildrenService {
     }
   }
 
-  async create(dto: CreateChildDto) {
+  private async loadScopedChild(id: string, kind: GroupKind | null) {
+    const child = await this.prisma.child.findUnique({
+      where: { id },
+      include: { group: { select: { kind: true } } },
+    });
+    if (!child || (kind && child.group?.kind !== kind)) {
+      throw new NotFoundException('Child not found');
+    }
+    return child;
+  }
+
+  async create(dto: CreateChildDto, user: AuthenticatedUser) {
+    const kind = scopeKind(user);
     if (dto.groupId) {
       const group = await this.prisma.group.findUnique({
         where: { id: dto.groupId },
       });
       if (!group) throw new NotFoundException('Group not found');
+      assertKindInScope(kind, group.kind);
+    } else if (kind) {
+      throw new ForbiddenException(OUTSIDE_SCOPE);
     }
 
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
@@ -64,8 +87,9 @@ export class ChildrenService {
     });
   }
 
-  async findAll() {
+  async findAll(user: AuthenticatedUser) {
     return this.prisma.child.findMany({
+      where: childScopeWhere(scopeKind(user)),
       include: {
         group: true,
         parents: { omit: { password: true, refreshToken: true } },
@@ -77,15 +101,18 @@ export class ChildrenService {
     });
   }
 
-  async update(id: string, dto: UpdateChildDto) {
-    const child = await this.prisma.child.findUnique({ where: { id } });
-    if (!child) throw new NotFoundException('Child not found');
+  async update(id: string, dto: UpdateChildDto, user: AuthenticatedUser) {
+    const kind = scopeKind(user);
+    await this.loadScopedChild(id, kind);
 
     if (dto.groupId) {
       const group = await this.prisma.group.findUnique({
         where: { id: dto.groupId },
       });
       if (!group) throw new NotFoundException('Group not found');
+      assertKindInScope(kind, group.kind);
+    } else if (kind && dto.groupId === null) {
+      throw new ForbiddenException(OUTSIDE_SCOPE);
     }
 
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
@@ -114,9 +141,8 @@ export class ChildrenService {
     });
   }
 
-  async delete(id: string) {
-    const child = await this.prisma.child.findUnique({ where: { id } });
-    if (!child) throw new NotFoundException('Child not found');
+  async delete(id: string, user: AuthenticatedUser) {
+    await this.loadScopedChild(id, scopeKind(user));
     const counts = await Promise.all([
       this.prisma.charge.count({ where: { childId: id } }),
       this.prisma.payment.count({ where: { childId: id } }),

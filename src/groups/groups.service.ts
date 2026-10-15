@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GroupKind, Role } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertKindInScope, groupScopeWhere } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -70,7 +73,8 @@ export class GroupsService {
       throw new BadRequestException('Meal price category is inactive');
   }
 
-  async create(dto: CreateGroupDto) {
+  async create(dto: CreateGroupDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), dto.kind ?? GroupKind.kindergarten);
     const existing = await this.prisma.group.findUnique({
       where: { name: dto.name },
     });
@@ -101,8 +105,9 @@ export class GroupsService {
     });
   }
 
-  async findAll() {
+  async findAll(user: AuthenticatedUser) {
     return this.prisma.group.findMany({
+      where: groupScopeWhere(scopeKind(user)),
       include: {
         teachers: { omit: { password: true, refreshToken: true } },
         children: true,
@@ -110,9 +115,13 @@ export class GroupsService {
     });
   }
 
-  async update(id: string, dto: UpdateGroupDto) {
+  async update(id: string, dto: UpdateGroupDto, user: AuthenticatedUser) {
+    const kind = scopeKind(user);
     const group = await this.prisma.group.findUnique({ where: { id } });
-    if (!group) throw new NotFoundException('Group not found');
+    if (!group || (kind && group.kind !== kind)) {
+      throw new NotFoundException('Group not found');
+    }
+    assertKindInScope(kind, dto.kind ?? group.kind);
 
     if (dto.name && dto.name !== group.name) {
       const existing = await this.prisma.group.findUnique({
@@ -150,9 +159,12 @@ export class GroupsService {
     });
   }
 
-  async delete(id: string) {
+  async delete(id: string, user: AuthenticatedUser) {
+    const kind = scopeKind(user);
     const group = await this.prisma.group.findUnique({ where: { id } });
-    if (!group) throw new NotFoundException('Group not found');
+    if (!group || (kind && group.kind !== kind)) {
+      throw new NotFoundException('Group not found');
+    }
 
     const counts = await Promise.all([
       this.prisma.dailyAttendance.count({ where: { groupId: id } }),

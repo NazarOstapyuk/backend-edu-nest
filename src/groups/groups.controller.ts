@@ -11,7 +11,9 @@ import {
 import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permission } from '../common/decorators/permission.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupsService } from './groups.service';
@@ -24,24 +26,28 @@ export class GroupsController {
 
   @Permission(PermissionArea.children, PermissionLevel.edit)
   @Post()
-  create(@Body() dto: CreateGroupDto) {
-    return this.groupsService.create(dto);
+  create(@Body() dto: CreateGroupDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.groupsService.create(dto, user);
   }
 
   @Get()
-  findAll() {
-    return this.groupsService.findAll();
+  findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.groupsService.findAll(user);
   }
 
   @Permission(PermissionArea.children, PermissionLevel.edit)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateGroupDto) {
-    return this.groupsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateGroupDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.groupsService.update(id, dto, user);
   }
 
   @Permission(PermissionArea.children, PermissionLevel.edit)
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.groupsService.delete(id);
+  delete(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.groupsService.delete(id, user);
   }
 }

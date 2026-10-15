@@ -1,6 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Gender, Role } from '@prisma/client';
+import {
+  AccessScope,
+  Gender,
+  GroupKind,
+  PermissionLevel,
+  Role,
+} from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ChildrenService } from './children.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateChildDto } from './dto/create-child.dto';
@@ -26,6 +33,15 @@ const mockPrisma = {
   absenceNotice: { count: jest.fn() },
   subgroupMember: { count: jest.fn() },
   lessonMark: { count: jest.fn() },
+};
+
+const fullAdmin: AuthenticatedUser = {
+  id: 'a0',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: { children: PermissionLevel.edit },
 };
 
 describe('ChildrenService', () => {
@@ -65,7 +81,7 @@ describe('ChildrenService', () => {
       };
       mockPrisma.child.create.mockResolvedValue(created);
 
-      const result = await service.create(baseDto);
+      const result = await service.create(baseDto, fullAdmin);
 
       expect(result).toEqual(created);
       expect(mockPrisma.child.create).toHaveBeenCalledWith({
@@ -92,7 +108,7 @@ describe('ChildrenService', () => {
     it('passes middleName into the created child', async () => {
       mockPrisma.child.create.mockResolvedValue({ id: 'child-1' });
 
-      await service.create({ ...baseDto, middleName: 'Petrivna' });
+      await service.create({ ...baseDto, middleName: 'Petrivna' }, fullAdmin);
 
       const data = (
         mockPrisma.child.create.mock.calls[0] as [
@@ -106,7 +122,7 @@ describe('ChildrenService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create({ ...baseDto, groupId: 'missing-group' }),
+        service.create({ ...baseDto, groupId: 'missing-group' }, fullAdmin),
       ).rejects.toThrow(NotFoundException);
 
       expect(mockPrisma.child.create).not.toHaveBeenCalled();
@@ -116,10 +132,13 @@ describe('ChildrenService', () => {
       mockPrisma.user.findMany.mockResolvedValue([]);
 
       await expect(
-        service.create({
-          ...baseDto,
-          parentIds: ['00000000-0000-0000-0000-000000000001'],
-        }),
+        service.create(
+          {
+            ...baseDto,
+            parentIds: ['00000000-0000-0000-0000-000000000001'],
+          },
+          fullAdmin,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -129,10 +148,13 @@ describe('ChildrenService', () => {
       ]);
 
       await expect(
-        service.create({
-          ...baseDto,
-          parentIds: ['00000000-0000-0000-0000-000000000001'],
-        }),
+        service.create(
+          {
+            ...baseDto,
+            parentIds: ['00000000-0000-0000-0000-000000000001'],
+          },
+          fullAdmin,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -144,10 +166,10 @@ describe('ChildrenService', () => {
       ];
       mockPrisma.child.findMany.mockResolvedValue(children);
 
-      const result = await service.findAll();
-
+      const result = await service.findAll(fullAdmin);
       expect(result).toEqual(children);
       expect(mockPrisma.child.findMany).toHaveBeenCalledWith({
+        where: {},
         include: {
           group: true,
           parents: { omit: { password: true, refreshToken: true } },
@@ -180,9 +202,11 @@ describe('ChildrenService', () => {
       };
       mockPrisma.child.update.mockResolvedValue(updated);
 
-      const result = await service.update('child-1', {
-        firstName: 'Petro',
-      });
+      const result = await service.update(
+        'child-1',
+        { firstName: 'Petro' },
+        fullAdmin,
+      );
 
       expect(result).toEqual(updated);
       expect(mockPrisma.child.update).toHaveBeenCalledWith({
@@ -214,7 +238,7 @@ describe('ChildrenService', () => {
         parents: [],
       });
 
-      await service.update('child-1', { groupId: null });
+      await service.update('child-1', { groupId: null }, fullAdmin);
 
       expect(mockPrisma.child.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -233,7 +257,7 @@ describe('ChildrenService', () => {
       mockPrisma.lessonAttendance.count.mockResolvedValue(0);
       mockPrisma.package.count.mockResolvedValue(0);
 
-      await expect(service.delete('child-1')).rejects.toThrow(
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
@@ -242,7 +266,7 @@ describe('ChildrenService', () => {
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.update('missing', {})).rejects.toThrow(
+      await expect(service.update('missing', {}, fullAdmin)).rejects.toThrow(
         NotFoundException,
       );
 
@@ -254,9 +278,7 @@ describe('ChildrenService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.update('child-1', {
-          groupId: 'missing-group',
-        }),
+        service.update('child-1', { groupId: 'missing-group' }, fullAdmin),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -277,7 +299,7 @@ describe('ChildrenService', () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
-      const result = await service.delete('child-1');
+      const result = await service.delete('child-1', fullAdmin);
 
       expect(result).toEqual({ message: 'Child deleted' });
       expect(mockPrisma.child.delete).toHaveBeenCalledWith({
@@ -299,7 +321,7 @@ describe('ChildrenService', () => {
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
 
-      await expect(service.delete('child-1')).rejects.toThrow(
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
@@ -319,7 +341,7 @@ describe('ChildrenService', () => {
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
 
-      await expect(service.delete('child-1')).rejects.toThrow(
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
@@ -339,7 +361,7 @@ describe('ChildrenService', () => {
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(1);
 
-      await expect(service.delete('child-1')).rejects.toThrow(
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
@@ -359,7 +381,7 @@ describe('ChildrenService', () => {
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
 
-      await expect(service.delete('child-1')).rejects.toThrow(
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
@@ -368,11 +390,86 @@ describe('ChildrenService', () => {
     it('throws NotFoundException when child does not exist', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(null);
 
-      await expect(service.delete('missing')).rejects.toThrow(
+      await expect(service.delete('missing', fullAdmin)).rejects.toThrow(
         NotFoundException,
       );
 
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scope', () => {
+    const kgAdmin: AuthenticatedUser = {
+      id: 'a1',
+      role: Role.admin,
+      login: 'kg',
+      mustChangePassword: false,
+      accessScope: AccessScope.kindergarten,
+      permissions: { children: PermissionLevel.edit },
+    };
+    const validDto: CreateChildDto = {
+      firstName: 'Ivan',
+      lastName: 'Petrenko',
+      birthDate: '2020-01-15',
+      gender: Gender.male,
+    };
+
+    it('lists only children of the scope', async () => {
+      mockPrisma.child.findMany.mockResolvedValue([]);
+      await service.findAll(kgAdmin);
+      expect(mockPrisma.child.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { group: { kind: GroupKind.kindergarten } },
+        }),
+      );
+    });
+
+    it('refuses a child in a group of another kind', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        kind: GroupKind.school_class,
+      });
+      await expect(
+        service.create({ ...validDto, groupId: 'g1' }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
+    });
+
+    it('refuses a child without a group for a scoped user', async () => {
+      await expect(
+        service.create({ ...validDto, groupId: undefined }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
+    });
+
+    it('hides a child of another kind on update and delete', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'c1',
+        groupId: 'g2',
+        group: { kind: GroupKind.school_class },
+      });
+      await expect(service.update('c1', {}, kgAdmin)).rejects.toThrow(
+        'Child not found',
+      );
+      await expect(service.delete('c1', kgAdmin)).rejects.toThrow(
+        'Child not found',
+      );
+    });
+
+    it('refuses moving a child to another kind or out of groups', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'c1',
+        groupId: 'g1',
+        group: { kind: GroupKind.kindergarten },
+      });
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g2',
+        kind: GroupKind.school_class,
+      });
+      await expect(
+        service.update('c1', { groupId: 'g2' }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
+      await expect(
+        service.update('c1', { groupId: null }, kgAdmin),
+      ).rejects.toThrow('Outside access scope');
     });
   });
 });
