@@ -272,14 +272,42 @@ describe('ActivityReportsService', () => {
               gte: new Date('2026-09-20T00:00:00.000Z'),
               lte: new Date('2026-10-05T00:00:00.000Z'),
             },
-            sheet: {
-              month: {
-                in: [new Date('2026-09-01T00:00:00.000Z'), october],
-              },
-            },
           },
         }),
       );
+    });
+
+    it('adds earlier months whose salary was paid inside the period', async () => {
+      payroll.list.mockResolvedValue({
+        rows: [
+          payrollRow('t1', 'Анна', 'Іваненко', '100.00'),
+          payrollRow('t2', 'Олег', 'Бондар', '10.00'),
+        ],
+      });
+      prisma.payrollPayment.findMany.mockResolvedValue([
+        {
+          amount: new Prisma.Decimal('70.00'),
+          sheet: {
+            teacherId: 't1',
+            month: new Date('2026-09-01T00:00:00.000Z'),
+          },
+        },
+      ]);
+      const report = await service.payroll(
+        { from: '2026-10-01', to: '2026-10-31' },
+        user(),
+      );
+      expect(payroll.list).toHaveBeenCalledTimes(2);
+      expect(payroll.list).toHaveBeenNthCalledWith(1, '2026-09');
+      expect(payroll.list).toHaveBeenNthCalledWith(2, '2026-10');
+      const september = report.rows.filter((r) => r.month === '09.2026');
+      expect(september).toHaveLength(1);
+      expect(september[0]).toMatchObject({
+        teacher: 'Іваненко Анна',
+        paid: '70.00',
+      });
+      expect(report.rows.filter((r) => r.month === '10.2026')).toHaveLength(2);
+      expect(report.rows[0].month).toBe('09.2026');
     });
 
     it('filters by teacher', async () => {

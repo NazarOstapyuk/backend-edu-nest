@@ -31,8 +31,10 @@ const staff = (role: Role, permissions = {}) => ({
 
 describe('RolesGuard', () => {
   const meta: Record<string, unknown> = {};
+  const handlerMeta: Record<string, unknown> = {};
   const reflector = {
     getAllAndOverride: jest.fn((key: string) => meta[key]),
+    get: jest.fn((key: string) => handlerMeta[key]),
   } as unknown as Reflector;
   const guard = new RolesGuard(reflector);
 
@@ -40,6 +42,7 @@ describe('RolesGuard', () => {
     meta[ROLES_KEY] = undefined;
     meta[PERMISSION_KEY] = undefined;
     meta[PERMISSION_ANY_KEY] = undefined;
+    handlerMeta[PERMISSION_ANY_KEY] = undefined;
   });
 
   it('allows routes without decorators', () => {
@@ -105,7 +108,7 @@ describe('RolesGuard', () => {
 
   describe('permission any', () => {
     beforeEach(() => {
-      meta[PERMISSION_ANY_KEY] = {
+      handlerMeta[PERMISSION_ANY_KEY] = {
         areas: [PermissionArea.timetable, PermissionArea.classes],
         level: PermissionLevel.view,
       };
@@ -144,6 +147,24 @@ describe('RolesGuard', () => {
           context(staff(Role.admin, { timetable: PermissionLevel.view })),
         ),
       ).toBe(true);
+    });
+
+    it('ignores metadata that is only on the class', () => {
+      handlerMeta[PERMISSION_ANY_KEY] = undefined;
+      meta[PERMISSION_ANY_KEY] = {
+        areas: [PermissionArea.timetable],
+        level: PermissionLevel.view,
+      };
+      expect(guard.canActivate(context(staff(Role.parent)))).toBe(true);
+      meta[PERMISSION_KEY] = {
+        area: PermissionArea.finance,
+        level: PermissionLevel.edit,
+      };
+      expect(() =>
+        guard.canActivate(
+          context(staff(Role.admin, { timetable: PermissionLevel.view })),
+        ),
+      ).toThrow('Insufficient permissions');
     });
   });
 });

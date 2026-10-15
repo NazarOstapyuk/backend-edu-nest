@@ -21,7 +21,7 @@ export interface RequiredAnyPermission {
 export const PermissionAny = (
   areas: PermissionArea[],
   level: PermissionLevel,
-) =>
+): MethodDecorator =>
   SetMetadata(PERMISSION_ANY_KEY, {
     areas,
     level,

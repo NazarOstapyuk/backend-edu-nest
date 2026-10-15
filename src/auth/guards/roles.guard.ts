@@ -29,9 +29,10 @@ export class RolesGuard implements CanActivate {
     const permission = this.reflector.getAllAndOverride<
       RequiredPermission | undefined
     >(PERMISSION_KEY, targets);
-    const permissionAny = this.reflector.getAllAndOverride<
-      RequiredAnyPermission | undefined
-    >(PERMISSION_ANY_KEY, targets);
+    const permissionAny = this.reflector.get<RequiredAnyPermission | undefined>(
+      PERMISSION_ANY_KEY,
+      context.getHandler(),
+    );
     if (!roles && !permission && !permissionAny) return true;
     const request = context
       .switchToHttp()

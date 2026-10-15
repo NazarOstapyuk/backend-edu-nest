@@ -207,12 +207,37 @@ export class ActivityReportsService {
   ): Promise<Report> {
     const period = reportPeriod(query.from, query.to);
     await resolveFilter(this.prisma, user, query);
-    const months = monthsTouched(period.from, period.to);
+    const payments = await this.prisma.payrollPayment.findMany({
+      where: {
+        voidedAt: null,
+        date: { gte: period.from, lte: period.to },
+        ...(query.teacherId ? { sheet: { teacherId: query.teacherId } } : {}),
+      },
+      select: {
+        amount: true,
+        sheet: { select: { teacherId: true, month: true } },
+      },
+    });
+    const paid = new Map<string, Prisma.Decimal>();
+    const paidTeachers = new Map<string, Set<string>>();
+    for (const p of payments) {
+      const month = isoDay(p.sheet.month).slice(0, 7);
+      const key = `${p.sheet.teacherId}:${month}`;
+      paid.set(key, (paid.get(key) ?? new Prisma.Decimal(0)).add(p.amount));
+      paidTeachers.set(
+        month,
+        (paidTeachers.get(month) ?? new Set<string>()).add(p.sheet.teacherId),
+      );
+    }
+    const touched = monthsTouched(period.from, period.to);
+    const months = [...new Set([...touched, ...paidTeachers.keys()])].sort();
     const rows: PayrollMonthRow[] = [];
     for (const month of months) {
       const { rows: monthRows } = await this.payrollService.list(month);
+      const extra = !touched.includes(month);
       for (const row of monthRows) {
         if (query.teacherId && row.teacher.id !== query.teacherId) continue;
+        if (extra && !paidTeachers.get(month)?.has(row.teacher.id)) continue;
         rows.push({
           teacherId: row.teacher.id,
           teacher: fullName(row.teacher),
@@ -222,25 +247,6 @@ export class ActivityReportsService {
           balance: row.balance,
         });
       }
-    }
-    const payments = await this.prisma.payrollPayment.findMany({
-      where: {
-        voidedAt: null,
-        date: { gte: period.from, lte: period.to },
-        sheet: {
-          month: { in: months.map((m) => new Date(`${m}-01T00:00:00.000Z`)) },
-          ...(query.teacherId ? { teacherId: query.teacherId } : {}),
-        },
-      },
-      select: {
-        amount: true,
-        sheet: { select: { teacherId: true, month: true } },
-      },
-    });
-    const paid = new Map<string, Prisma.Decimal>();
-    for (const p of payments) {
-      const key = `${p.sheet.teacherId}:${isoDay(p.sheet.month).slice(0, 7)}`;
-      paid.set(key, (paid.get(key) ?? new Prisma.Decimal(0)).add(p.amount));
     }
     return payrollReport(period, rows, paid);
   }
