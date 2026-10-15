@@ -45,6 +45,10 @@ export class UsersService {
     }
 
     const password = await bcrypt.hash(dto.password, 10);
+    const scoped =
+      actor.role !== Role.root &&
+      actor.accessScope !== AccessScope.all &&
+      dto.role !== Role.parent;
     const user = await this.prisma.user.create({
       data: {
         login: dto.login,
@@ -56,6 +60,7 @@ export class UsersService {
         phone: dto.phone ?? null,
         email: dto.email ?? null,
         mustChangePassword: dto.role === Role.parent,
+        ...(scoped ? { accessScope: actor.accessScope } : {}),
       },
       include: { permissions: permissionSelect },
     });
@@ -112,6 +117,8 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
     if (user.role === Role.root)
       throw new ForbiddenException('Cannot delete root user');
+    if (actor.id === id)
+      throw new ForbiddenException('Cannot change own access');
     this.assertManageable(actor, user);
 
     const author = { OR: [{ createdById: id }, { voidedById: id }] };
@@ -193,6 +200,8 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
     if (actor.id === id && dto.role !== undefined && dto.role !== user.role)
       throw new ForbiddenException('Cannot change own access');
+    if (actor.id === id && dto.isActive === false)
+      throw new ForbiddenException('Cannot change own access');
     this.assertManageable(actor, user);
     if (
       user.role === Role.teacher &&
@@ -256,6 +265,13 @@ export class UsersService {
       data.permissions = { deleteMany: {} };
       data.accessScope = AccessScope.all;
     }
+    if (
+      user.role === Role.parent &&
+      (dto.role === Role.admin || dto.role === Role.teacher) &&
+      actor.role !== Role.root &&
+      actor.accessScope !== AccessScope.all
+    )
+      data.accessScope = actor.accessScope;
 
     const updated = await this.prisma.user.update({
       where: { id },
@@ -295,6 +311,22 @@ export class UsersService {
       throw new ForbiddenException('Cannot change own access');
     if (denial === 'too_much')
       throw new ForbiddenException('Cannot grant more than you have');
+    if (actor.role !== Role.root) {
+      const requested = {
+        role: target.role,
+        accessScope: dto.accessScope,
+        permissions: toPermissionMap(dto.permissions),
+      };
+      if (
+        !coversUser(actor, {
+          role: target.role,
+          accessScope: target.accessScope,
+          permissions: toPermissionMap(target.permissions),
+        }) ||
+        !coversUser(actor, requested)
+      )
+        throw new ForbiddenException('Cannot grant more than you have');
+    }
     await this.prisma.$transaction([
       this.prisma.userPermission.deleteMany({ where: { userId: id } }),
       this.prisma.userPermission.createMany({

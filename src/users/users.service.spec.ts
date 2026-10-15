@@ -365,6 +365,61 @@ describe('UsersService', () => {
       expect(mockPrisma.user.update).toHaveBeenCalled();
     });
 
+    it('refuses to deactivate oneself', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ id: 'actor', permissions: [] }),
+      );
+      await expect(
+        service.update('actor', { isActive: false }, adminActor),
+      ).rejects.toThrow('Cannot change own access');
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete oneself', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ id: 'actor', permissions: [] }),
+      );
+      await expect(service.delete('actor', adminActor)).rejects.toThrow(
+        'Cannot change own access',
+      );
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('gives staff created by a scoped actor the actor scope', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ id: 'n' });
+      const scoped = { ...adminActor, accessScope: AccessScope.kindergarten };
+      await service.create(
+        { login: 'n', password: 'pass123', role: Role.teacher },
+        scoped,
+      );
+      const scopedCall = mockPrisma.user.create.mock.calls[0] as [
+        { data: { accessScope?: AccessScope } },
+      ];
+      expect(scopedCall[0].data.accessScope).toBe(AccessScope.kindergarten);
+      mockPrisma.user.create.mockClear();
+      await service.create(
+        { login: 'n', password: 'pass123', role: Role.teacher },
+        adminActor,
+      );
+      const data = (
+        mockPrisma.user.create.mock.calls[0] as [{ data: object }]
+      )[0].data;
+      expect(data).not.toHaveProperty('accessScope');
+    });
+
+    it('gives a promoted parent the actor scope', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        target({ role: Role.parent, permissions: [], phone: '+380' }),
+      );
+      const scoped = { ...adminActor, accessScope: AccessScope.school_class };
+      await service.update('x1', { role: Role.teacher }, scoped);
+      const call = mockPrisma.user.update.mock.calls[0] as [
+        { data: { accessScope?: AccessScope } },
+      ];
+      expect(call[0].data.accessScope).toBe(AccessScope.school_class);
+    });
+
     it('refuses to delete a staff user the actor does not cover', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(target());
       await expect(service.delete('x1', adminActor)).rejects.toThrow(
@@ -709,6 +764,68 @@ describe('UsersService', () => {
         ),
       ).rejects.toThrow('Cannot grant more than you have');
       expect(mockPrisma.userPermission.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses changing access of a user the actor does not cover', async () => {
+      const narrowTarget = targetRow({
+        accessScope: AccessScope.kindergarten,
+        permissions: [
+          { area: PermissionArea.finance, level: PermissionLevel.edit },
+          { area: PermissionArea.payroll, level: PermissionLevel.edit },
+        ],
+      });
+      const deputy = {
+        ...actor,
+        permissions: {
+          users: PermissionLevel.edit,
+          finance: PermissionLevel.view,
+        },
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(narrowTarget);
+      await expect(
+        service.setAccess(
+          't1',
+          {
+            accessScope: AccessScope.all,
+            permissions: [
+              { area: PermissionArea.finance, level: PermissionLevel.edit },
+              { area: PermissionArea.payroll, level: PermissionLevel.edit },
+            ],
+          },
+          deputy,
+        ),
+      ).rejects.toThrow('Cannot grant more than you have');
+      await expect(
+        service.setAccess(
+          't1',
+          { accessScope: AccessScope.kindergarten, permissions: [] },
+          deputy,
+        ),
+      ).rejects.toThrow('Cannot grant more than you have');
+      expect(mockPrisma.userPermission.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('allows changing access of a covered user with a covered request', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(
+          targetRow({
+            permissions: [
+              { area: PermissionArea.finance, level: PermissionLevel.view },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(targetRow());
+      await service.setAccess(
+        't1',
+        {
+          accessScope: AccessScope.all,
+          permissions: [
+            { area: PermissionArea.finance, level: PermissionLevel.edit },
+          ],
+        },
+        actor,
+      );
+      expect(mockPrisma.userPermission.deleteMany).toHaveBeenCalled();
     });
 
     it('rejects duplicates and a missing user', async () => {
