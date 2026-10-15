@@ -20,3 +20,8 @@ export const setResponseId = (id: string): void => {
   const store = storage.getStore();
   if (store) store.responseId = id;
 };
+
+export const responseIdReader = (): (() => string | null) => {
+  const store = storage.getStore();
+  return () => store?.responseId ?? null;
+};
