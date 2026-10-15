@@ -8,6 +8,7 @@ import {
   NoticeStatus,
   PaymentMethod,
   PaymentStatus,
+  PayrollStatus,
   Prisma,
 } from '@prisma/client';
 import { childMoney } from '../parent-cabinet/cabinet-calc';
@@ -16,8 +17,11 @@ import {
   chargeDay,
   chargesReport,
   debtsReport,
+  lessonsReport,
   mealsReport,
+  monthsTouched,
   paymentsReport,
+  payrollReport,
 } from './reports-calc';
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -409,5 +413,164 @@ describe('mealsReport', () => {
       count: 3,
       amount: '121.05',
     });
+  });
+});
+
+describe('lessonsReport', () => {
+  const school = (date: string, period: number, teacher: string) => ({
+    date: d(date),
+    period,
+    teacher,
+    subject: 'Математика',
+    group: '1-А',
+    topic: period === 1 ? 'Числа' : null,
+  });
+  const classLesson = (date: string, teacher: string) => ({
+    date: d(date),
+    teacher,
+    direction: 'Англійська',
+    classGroup: 'Група 1',
+  });
+
+  it('aggregates class lessons by teacher', () => {
+    const r = lessonsReport(
+      period,
+      [],
+      [
+        classLesson('2026-10-01', 'Іваненко Анна'),
+        classLesson('2026-10-02', 'Іваненко Анна'),
+        classLesson('2026-10-02', 'Бондар Олег'),
+      ],
+    );
+    expect(r.rows).toEqual([
+      {
+        teacher: 'Бондар Олег',
+        type: 'Заняття',
+        subject: 'Англійська',
+        group: 'Група 1',
+        count: 1,
+      },
+      {
+        teacher: 'Іваненко Анна',
+        type: 'Заняття',
+        subject: 'Англійська',
+        group: 'Група 1',
+        count: 2,
+      },
+    ]);
+    expect(r.totals).toMatchObject({ count: 3 });
+    expect(r.title).toBe('Уроки');
+    expect(r.fileName).toBe('уроки');
+  });
+
+  it('labels school lessons and class lessons differently', () => {
+    const r = lessonsReport(
+      period,
+      [school('2026-10-01', 1, 'Іваненко Анна')],
+      [classLesson('2026-10-01', 'Іваненко Анна')],
+    );
+    expect(r.rows.map((row) => row.type)).toEqual(['Заняття', 'Урок']);
+  });
+
+  it('lists lessons sorted by date and period', () => {
+    const r = lessonsReport(
+      period,
+      [
+        school('2026-10-02', 1, 'Іваненко Анна'),
+        school('2026-10-01', 2, 'Іваненко Анна'),
+        school('2026-10-01', 1, 'Іваненко Анна'),
+      ],
+      [classLesson('2026-10-01', 'Бондар Олег')],
+    );
+    const sheet = r.sheets[0];
+    expect(sheet.name).toBe('Список');
+    expect(sheet.rows.map((row) => [row.date, row.period, row.type])).toEqual([
+      ['2026-10-01', 1, 'Урок'],
+      ['2026-10-01', 2, 'Урок'],
+      ['2026-10-01', null, 'Заняття'],
+      ['2026-10-02', 1, 'Урок'],
+    ]);
+    expect(sheet.rows[0]).toMatchObject({
+      subject: 'Математика',
+      group: '1-А',
+      teacher: 'Іваненко Анна',
+      topic: 'Числа',
+    });
+  });
+});
+
+describe('monthsTouched', () => {
+  it('lists every month from start to end', () => {
+    expect(monthsTouched(d('2026-09-15'), d('2026-11-02'))).toEqual([
+      '2026-09',
+      '2026-10',
+      '2026-11',
+    ]);
+    expect(monthsTouched(d('2026-10-01'), d('2026-10-31'))).toEqual([
+      '2026-10',
+    ]);
+  });
+});
+
+describe('payrollReport', () => {
+  const row = (
+    teacherId: string,
+    teacher: string,
+    month: string,
+    accrued: string,
+    balance: string,
+    status: PayrollStatus = PayrollStatus.draft,
+  ) => ({ teacherId, teacher, month, status, accrued, balance });
+
+  it('uses paid by key and defaults to zero', () => {
+    const r = payrollReport(
+      period,
+      [
+        row('t2', 'Бондар Олег', '2026-10', '100.10', '100.10'),
+        row('t1', 'Іваненко Анна', '2026-10', '200.20', '150.20'),
+        row(
+          't1',
+          'Іваненко Анна',
+          '2026-09',
+          '50.00',
+          '0.00',
+          PayrollStatus.approved,
+        ),
+      ],
+      new Map([['t1:2026-10', dec('50.00')]]),
+    );
+    expect(r.rows).toEqual([
+      {
+        teacher: 'Іваненко Анна',
+        month: '09.2026',
+        status: 'затверджена',
+        accrued: '50.00',
+        paid: '0.00',
+        balance: '0.00',
+      },
+      {
+        teacher: 'Бондар Олег',
+        month: '10.2026',
+        status: 'чернетка',
+        accrued: '100.10',
+        paid: '0.00',
+        balance: '100.10',
+      },
+      {
+        teacher: 'Іваненко Анна',
+        month: '10.2026',
+        status: 'чернетка',
+        accrued: '200.20',
+        paid: '50.00',
+        balance: '150.20',
+      },
+    ]);
+    expect(r.totals).toMatchObject({
+      accrued: '350.30',
+      paid: '50.00',
+      balance: '250.30',
+    });
+    expect(r.title).toBe('Зарплати');
+    expect(r.fileName).toBe('зарплати');
   });
 });

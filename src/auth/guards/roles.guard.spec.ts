@@ -6,7 +6,10 @@ import {
   PermissionLevel,
   Role,
 } from '@prisma/client';
-import { PERMISSION_KEY } from '../../common/decorators/permission.decorator';
+import {
+  PERMISSION_ANY_KEY,
+  PERMISSION_KEY,
+} from '../../common/decorators/permission.decorator';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from './roles.guard';
 
@@ -36,6 +39,7 @@ describe('RolesGuard', () => {
   beforeEach(() => {
     meta[ROLES_KEY] = undefined;
     meta[PERMISSION_KEY] = undefined;
+    meta[PERMISSION_ANY_KEY] = undefined;
   });
 
   it('allows routes without decorators', () => {
@@ -97,5 +101,49 @@ describe('RolesGuard', () => {
     expect(() => guard.canActivate(context(staff(Role.teacher)))).toThrow(
       'Insufficient permissions',
     );
+  });
+
+  describe('permission any', () => {
+    beforeEach(() => {
+      meta[PERMISSION_ANY_KEY] = {
+        areas: [PermissionArea.timetable, PermissionArea.classes],
+        level: PermissionLevel.view,
+      };
+    });
+
+    it('allows a user holding one of the areas', () => {
+      expect(
+        guard.canActivate(
+          context(staff(Role.teacher, { classes: PermissionLevel.view })),
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects a user with none of the areas', () => {
+      expect(() =>
+        guard.canActivate(
+          context(staff(Role.admin, { finance: PermissionLevel.edit })),
+        ),
+      ).toThrow('Insufficient permissions');
+    });
+
+    it('lets root through and rejects a parent', () => {
+      expect(guard.canActivate(context(staff(Role.root)))).toBe(true);
+      expect(() => guard.canActivate(context(staff(Role.parent)))).toThrow(
+        'Insufficient permissions',
+      );
+    });
+
+    it('is decided by itself when a single permission is also present', () => {
+      meta[PERMISSION_KEY] = {
+        area: PermissionArea.finance,
+        level: PermissionLevel.edit,
+      };
+      expect(
+        guard.canActivate(
+          context(staff(Role.admin, { timetable: PermissionLevel.view })),
+        ),
+      ).toBe(true);
+    });
   });
 });

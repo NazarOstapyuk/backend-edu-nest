@@ -8,7 +8,9 @@ import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { hasPermission } from '../../access/access-calc';
 import {
+  PERMISSION_ANY_KEY,
   PERMISSION_KEY,
+  type RequiredAnyPermission,
   type RequiredPermission,
 } from '../../common/decorators/permission.decorator';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
@@ -27,12 +29,24 @@ export class RolesGuard implements CanActivate {
     const permission = this.reflector.getAllAndOverride<
       RequiredPermission | undefined
     >(PERMISSION_KEY, targets);
-    if (!roles && !permission) return true;
+    const permissionAny = this.reflector.getAllAndOverride<
+      RequiredAnyPermission | undefined
+    >(PERMISSION_ANY_KEY, targets);
+    if (!roles && !permission && !permissionAny) return true;
     const request = context
       .switchToHttp()
       .getRequest<{ user?: AuthenticatedUser }>();
     const user = request.user;
     if (!user) return false;
+    if (permissionAny) {
+      if (
+        permissionAny.areas.some((area) =>
+          hasPermission(user, area, permissionAny.level),
+        )
+      )
+        return true;
+      throw new ForbiddenException('Insufficient permissions');
+    }
     if (roles?.includes(user.role)) return true;
     if (permission) {
       if (hasPermission(user, permission.area, permission.level)) return true;

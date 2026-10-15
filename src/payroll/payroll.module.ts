@@ -11,5 +11,6 @@ import { SalaryTermsService } from './salary-terms.service';
   imports: [AttendanceModule],
   controllers: [SalaryTermsController, PayrollController, MyPayrollController],
   providers: [SalaryTermsService, PayrollBuilder, PayrollService],
+  exports: [PayrollService],
 })
 export class PayrollModule {}

@@ -3,6 +3,7 @@ import {
   DailyStatus,
   FinanceCategory,
   PaymentMethod,
+  PayrollStatus,
   Prisma,
 } from '@prisma/client';
 import {
@@ -548,5 +549,191 @@ export function mealsReport(period: PeriodRef, orders: MealOrderRow[]): Report {
         bucketsBy(buckets, (b) => b.complex),
       ),
     ],
+  };
+}
+
+export interface SchoolLessonRow {
+  date: Date;
+  period: number;
+  teacher: string;
+  subject: string;
+  group: string;
+  topic: string | null;
+}
+
+export interface ClassLessonRow {
+  date: Date;
+  teacher: string;
+  direction: string;
+  classGroup: string;
+}
+
+export interface PayrollMonthRow {
+  teacherId: string;
+  teacher: string;
+  month: string;
+  status: PayrollStatus;
+  accrued: string;
+  balance: string;
+}
+
+const SCHOOL_LESSON = 'Урок';
+const CLASS_LESSON = 'Заняття';
+
+const PAYROLL_STATUS_LABELS: Record<PayrollStatus, string> = {
+  draft: 'чернетка',
+  approved: 'затверджена',
+};
+
+export function lessonsReport(
+  period: PeriodRef,
+  school: SchoolLessonRow[],
+  classes: ClassLessonRow[],
+): Report {
+  const items = [
+    ...school.map((l) => ({
+      date: l.date,
+      period: l.period,
+      type: SCHOOL_LESSON,
+      subject: l.subject,
+      group: l.group,
+      teacher: l.teacher,
+      topic: l.topic,
+    })),
+    ...classes.map((l) => ({
+      date: l.date,
+      period: null as number | null,
+      type: CLASS_LESSON,
+      subject: l.direction,
+      group: l.classGroup,
+      teacher: l.teacher,
+      topic: null as string | null,
+    })),
+  ];
+  const counts = new Map<string, ReportRow>();
+  for (const item of items) {
+    const key = JSON.stringify([
+      item.teacher,
+      item.type,
+      item.subject,
+      item.group,
+    ]);
+    const existing = counts.get(key);
+    if (existing) existing.count = Number(existing.count) + 1;
+    else
+      counts.set(key, {
+        teacher: item.teacher,
+        type: item.type,
+        subject: item.subject,
+        group: item.group,
+        count: 1,
+      });
+  }
+  const text = (row: ReportRow, key: string) => String(row[key] ?? '');
+  const lines = [...counts.values()].sort(
+    (a, b) =>
+      text(a, 'teacher').localeCompare(text(b, 'teacher')) ||
+      text(a, 'type').localeCompare(text(b, 'type')) ||
+      text(a, 'subject').localeCompare(text(b, 'subject')) ||
+      text(a, 'group').localeCompare(text(b, 'group')),
+  );
+  const list = [...items].sort(
+    (a, b) =>
+      a.date.getTime() - b.date.getTime() ||
+      (a.period ?? Infinity) - (b.period ?? Infinity) ||
+      a.teacher.localeCompare(b.teacher),
+  );
+  return {
+    title: 'Уроки',
+    fileName: 'уроки',
+    period: periodOf(period),
+    columns: [
+      { key: 'teacher', label: 'Вчитель', type: 'text' },
+      { key: 'type', label: 'Тип', type: 'text' },
+      { key: 'subject', label: 'Предмет / напрям', type: 'text' },
+      { key: 'group', label: 'Клас / група', type: 'text' },
+      { key: 'count', label: 'Проведено', type: 'number' },
+    ],
+    rows: lines,
+    totals: { teacher: TOTAL_LABEL, count: sumNumbers(lines, 'count') },
+    sheets: [
+      {
+        name: 'Список',
+        columns: [
+          { key: 'date', label: 'Дата', type: 'date' },
+          { key: 'period', label: 'Урок №', type: 'number' },
+          { key: 'type', label: 'Тип', type: 'text' },
+          { key: 'subject', label: 'Предмет / напрям', type: 'text' },
+          { key: 'group', label: 'Клас / група', type: 'text' },
+          { key: 'teacher', label: 'Вчитель', type: 'text' },
+          { key: 'topic', label: 'Тема', type: 'text' },
+        ],
+        rows: list.map((item) => ({
+          date: isoDay(item.date),
+          period: item.period,
+          type: item.type,
+          subject: item.subject,
+          group: item.group,
+          teacher: item.teacher,
+          topic: item.topic,
+        })),
+        totals: null,
+      },
+    ],
+  };
+}
+
+export const monthsTouched = (from: Date, to: Date): string[] => {
+  const months: string[] = [];
+  let year = from.getUTCFullYear();
+  let month = from.getUTCMonth();
+  const lastYear = to.getUTCFullYear();
+  const lastMonth = to.getUTCMonth();
+  while (year < lastYear || (year === lastYear && month <= lastMonth)) {
+    months.push(`${year}-${String(month + 1).padStart(2, '0')}`);
+    month += 1;
+    if (month === 12) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return months;
+};
+
+export function payrollReport(
+  period: PeriodRef,
+  rows: PayrollMonthRow[],
+  paidInPeriod: ReadonlyMap<string, Prisma.Decimal>,
+): Report {
+  const sorted = [...rows].sort(
+    (a, b) =>
+      a.month.localeCompare(b.month) || a.teacher.localeCompare(b.teacher),
+  );
+  const lines: ReportRow[] = sorted.map((r) => ({
+    teacher: r.teacher,
+    month: `${r.month.slice(5, 7)}.${r.month.slice(0, 4)}`,
+    status: PAYROLL_STATUS_LABELS[r.status],
+    accrued: formatMoney(r.accrued),
+    paid: formatMoney(paidInPeriod.get(`${r.teacherId}:${r.month}`) ?? 0),
+    balance: formatMoney(r.balance),
+  }));
+  return {
+    title: 'Зарплати',
+    fileName: 'зарплати',
+    period: periodOf(period),
+    columns: [
+      { key: 'teacher', label: 'Вчитель', type: 'text' },
+      { key: 'month', label: 'Місяць', type: 'text' },
+      { key: 'status', label: 'Статус', type: 'text' },
+      { key: 'accrued', label: 'Нараховано', type: 'money' },
+      { key: 'paid', label: 'Виплачено за період', type: 'money' },
+      { key: 'balance', label: 'Залишок', type: 'money' },
+    ],
+    rows: lines,
+    totals: {
+      teacher: TOTAL_LABEL,
+      ...moneyTotals(lines, ['accrued', 'paid', 'balance']),
+    },
+    sheets: [],
   };
 }
