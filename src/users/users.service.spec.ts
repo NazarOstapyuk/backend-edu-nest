@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
 const mockPrisma = {
   user: {
@@ -54,6 +55,8 @@ const mockPrisma = {
   payrollPayment: { count: jest.fn() },
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 const actorOf = (
   role: Role,
   permissions: Partial<Record<PermissionArea, PermissionLevel>> = {},
@@ -82,6 +85,7 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(UsersService);
@@ -666,8 +670,8 @@ describe('UsersService', () => {
     });
 
     beforeEach(() => {
-      mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
-        Promise.all(ops),
+      mockPrisma.$transaction.mockImplementation(
+        (fn: (tx: typeof mockPrisma) => Promise<unknown>) => fn(mockPrisma),
       );
       mockPrisma.userPermission.deleteMany.mockResolvedValue({ count: 0 });
       mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
@@ -851,6 +855,191 @@ describe('UsersService', () => {
           actor,
         ),
       ).rejects.toThrow('User not found');
+    });
+  });
+  describe('audit', () => {
+    const row = {
+      id: 'u1',
+      login: 'ann',
+      role: Role.admin,
+      firstName: 'Ann',
+      lastName: 'Lee',
+      middleName: null,
+      phone: null,
+      email: null,
+      isActive: true,
+      accessScope: AccessScope.all,
+      permissions: [
+        { area: PermissionArea.finance, level: PermissionLevel.view },
+      ],
+    };
+
+    it('records a created user without a password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({ ...row, password: 'hash' });
+
+      await service.create(
+        {
+          login: 'ann',
+          password: 'secret99',
+          role: Role.admin,
+          firstName: 'Ann',
+          lastName: 'Lee',
+        },
+        adminActor,
+      );
+
+      const [, input] = mockAudit.recordChange.mock.calls[0] as [
+        unknown,
+        { before: unknown; after: { login: string; password: unknown } },
+      ];
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'actor',
+          entityType: 'users',
+          entityId: 'u1',
+          action: 'create',
+        }),
+      );
+      expect(input.before).toBeNull();
+      expect(input.after.login).toBe('ann');
+      expect(input.after.password).toBeNull();
+      expect(JSON.stringify(mockAudit.recordChange.mock.calls)).not.toContain(
+        'secret99',
+      );
+    });
+
+    it('records an update and marks a password reset without leaking it', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(row);
+      mockPrisma.user.update.mockResolvedValue({
+        ...row,
+        firstName: 'Anna',
+        password: 'newhash',
+      });
+
+      await service.update(
+        'u1',
+        { firstName: 'Anna', password: 'newsecret1' },
+        adminActor,
+      );
+
+      const [, input] = mockAudit.recordChange.mock.calls[0] as [
+        unknown,
+        {
+          action: string;
+          before: {
+            firstName: string;
+            password: unknown;
+            permissions: string[];
+          };
+          after: { firstName: string; password: unknown };
+        },
+      ];
+      expect(input.action).toBe('update');
+      expect(input.before.firstName).toBe('Ann');
+      expect(input.before.password).toBeNull();
+      expect(input.before.permissions).toEqual(['finance:view']);
+      expect(input.after.firstName).toBe('Anna');
+      expect(input.after.password).toBe('змінено');
+      const dump = JSON.stringify(mockAudit.recordChange.mock.calls);
+      expect(dump).not.toContain('newsecret1');
+      expect(dump).not.toContain('newhash');
+    });
+
+    it('records a deletion without the password field', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(row);
+      for (const model of [
+        'charge',
+        'payment',
+        'allocation',
+        'tariffPrice',
+        'enrollment',
+        'enrollmentAdjustment',
+        'adaptationVisit',
+        'classGroupMember',
+        'package',
+        'packageExtension',
+        'lesson',
+        'lessonAttendance',
+        'sessionUsage',
+        'classGroup',
+        'dailyAttendance',
+        'calendarDay',
+        'absenceNotice',
+        'timetable',
+        'timetableEntry',
+        'lessonChange',
+        'schoolLesson',
+        'lessonMark',
+        'mealOrder',
+        'backupRun',
+        'salaryTerms',
+        'payrollSheet',
+        'payrollAdjustment',
+        'payrollPayment',
+      ] as const) {
+        mockPrisma[model].count.mockResolvedValue(0);
+      }
+      mockPrisma.user.delete.mockResolvedValue(row);
+
+      await service.delete('u1', adminActor);
+
+      const [, input] = mockAudit.recordChange.mock.calls[0] as [
+        unknown,
+        {
+          action: string;
+          after: unknown;
+          before: { login: string };
+          fields: string[];
+        },
+      ];
+      expect(input.action).toBe('delete');
+      expect(input.after).toBeNull();
+      expect(input.before.login).toBe('ann');
+      expect(input.fields).not.toContain('password');
+    });
+
+    it('records an access change inside the transaction', async () => {
+      mockPrisma.userPermission.deleteMany.mockResolvedValue({ count: 0 });
+      mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({ ...row, permissions: [] })
+        .mockResolvedValueOnce(row);
+      const actor = {
+        ...adminActor,
+        id: 'g1',
+        permissions: {
+          users: PermissionLevel.edit,
+          finance: PermissionLevel.edit,
+        },
+      };
+
+      await service.setAccess(
+        'u1',
+        {
+          accessScope: AccessScope.all,
+          permissions: [
+            { area: PermissionArea.finance, level: PermissionLevel.view },
+          ],
+        },
+        actor,
+      );
+
+      const [db, input] = mockAudit.recordChange.mock.calls[0] as [
+        unknown,
+        {
+          fields: string[];
+          before: { permissions: string[] };
+          after: { permissions: string[] };
+        },
+      ];
+      expect(db).toBe(mockPrisma);
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(input.fields).toEqual(['accessScope', 'permissions']);
+      expect(input.before.permissions).toEqual([]);
+      expect(input.after.permissions).toEqual(['finance:view']);
     });
   });
 });

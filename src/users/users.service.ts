@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   AccessScope,
+  AuditAction,
   PermissionArea,
   PermissionLevel,
   Role,
@@ -19,6 +20,7 @@ import {
   toPermissionMap,
 } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
@@ -26,9 +28,55 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 const permissionSelect = { select: { area: true, level: true } } as const;
 
+const USER_FIELDS = [
+  'login',
+  'role',
+  'firstName',
+  'lastName',
+  'middleName',
+  'phone',
+  'email',
+  'isActive',
+  'accessScope',
+  'permissions',
+  'password',
+] as const;
+const USER_FIELDS_NO_PASSWORD = USER_FIELDS.filter((f) => f !== 'password');
+
+const userAudit = (
+  user: {
+    login: string;
+    role: Role;
+    firstName: string;
+    lastName: string;
+    middleName: string | null;
+    phone: string | null;
+    email: string | null;
+    isActive: boolean;
+    accessScope: AccessScope;
+    permissions?: { area: PermissionArea; level: PermissionLevel }[];
+  },
+  passwordChanged = false,
+) => ({
+  login: user.login,
+  role: user.role,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  middleName: user.middleName,
+  phone: user.phone,
+  email: user.email,
+  isActive: user.isActive,
+  accessScope: user.accessScope,
+  permissions: (user.permissions ?? []).map((p) => `${p.area}:${p.level}`),
+  password: passwordChanged ? 'змінено' : null,
+});
+
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async create(dto: CreateUserDto, actor: AuthenticatedUser) {
     if (dto.role === Role.root && actor.role !== Role.root) {
@@ -63,6 +111,15 @@ export class UsersService {
         ...(scoped ? { accessScope: actor.accessScope } : {}),
       },
       include: { permissions: permissionSelect },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: actor.id,
+      entityType: 'users',
+      entityId: user.id,
+      action: AuditAction.create,
+      before: null,
+      after: userAudit(user),
+      fields: USER_FIELDS,
     });
 
     const { password: _p, refreshToken: _r, ...result } = user;
@@ -185,6 +242,15 @@ export class UsersService {
     }
 
     await this.prisma.user.delete({ where: { id } });
+    await this.audit.recordChange(this.prisma, {
+      actorId: actor.id,
+      entityType: 'users',
+      entityId: id,
+      action: AuditAction.delete,
+      before: userAudit(user),
+      after: null,
+      fields: USER_FIELDS_NO_PASSWORD,
+    });
     return { message: 'User deleted' };
   }
 
@@ -278,6 +344,15 @@ export class UsersService {
       data,
       include: { permissions: permissionSelect },
     });
+    await this.audit.recordChange(this.prisma, {
+      actorId: actor.id,
+      entityType: 'users',
+      entityId: id,
+      action: AuditAction.update,
+      before: userAudit(user),
+      after: userAudit(updated, Boolean(dto.password)),
+      fields: USER_FIELDS,
+    });
     const { password: _p, refreshToken: _r, ...result } = updated;
     return result;
   }
@@ -327,24 +402,36 @@ export class UsersService {
       )
         throw new ForbiddenException('Cannot grant more than you have');
     }
-    await this.prisma.$transaction([
-      this.prisma.userPermission.deleteMany({ where: { userId: id } }),
-      this.prisma.userPermission.createMany({
+    return this.prisma.$transaction(async (tx) => {
+      await tx.userPermission.deleteMany({ where: { userId: id } });
+      await tx.userPermission.createMany({
         data: dto.permissions.map((p) => ({
           userId: id,
           area: p.area,
           level: p.level,
         })),
-      }),
-      this.prisma.user.update({
+      });
+      await tx.user.update({
         where: { id },
         data: { accessScope: dto.accessScope },
-      }),
-    ]);
-    return this.prisma.user.findUnique({
-      where: { id },
-      include: { permissions: permissionSelect },
-      omit: { password: true, refreshToken: true },
+      });
+      const updated = await tx.user.findUnique({
+        where: { id },
+        include: { permissions: permissionSelect },
+        omit: { password: true, refreshToken: true },
+      });
+      if (updated) {
+        await this.audit.recordChange(tx, {
+          actorId: actor.id,
+          entityType: 'users',
+          entityId: id,
+          action: AuditAction.update,
+          before: userAudit(target),
+          after: userAudit(updated),
+          fields: ['accessScope', 'permissions'],
+        });
+      }
+      return updated;
     });
   }
 }

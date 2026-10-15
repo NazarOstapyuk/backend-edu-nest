@@ -4,6 +4,7 @@ import { AccessScope, GroupKind, PermissionLevel, Role } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { GroupsService } from './groups.service';
+import { AuditService } from '../audit/audit.service';
 
 const mockPrisma = {
   group: {
@@ -24,6 +25,8 @@ const mockPrisma = {
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
 };
+
+const mockAudit = { recordChange: jest.fn() };
 
 const fullAdmin: AuthenticatedUser = {
   id: 'a0',
@@ -48,6 +51,7 @@ describe('GroupsService', () => {
           provide: PrismaService,
           useValue: mockPrisma,
         },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = moduleRef.get(GroupsService);
@@ -275,6 +279,97 @@ describe('GroupsService', () => {
       await expect(
         service.update('g1', { kind: GroupKind.school_class }, kgAdmin),
       ).rejects.toThrow('Outside access scope');
+    });
+  });
+  describe('audit', () => {
+    const row = {
+      id: 'g1',
+      name: '1-А',
+      kind: GroupKind.school_class,
+      bellScheduleId: null,
+      mealPriceCategoryId: null,
+      teachers: [{ id: 't1' }],
+    };
+
+    it('records a created group', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(null);
+      mockPrisma.group.create.mockResolvedValue(row);
+
+      await service.create(
+        { name: '1-А', kind: GroupKind.school_class },
+        fullAdmin,
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a0',
+          entityType: 'groups',
+          entityId: 'g1',
+          action: 'create',
+          before: null,
+          after: expect.objectContaining({
+            name: '1-А',
+            teacherIds: ['t1'],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records an update with before and after', async () => {
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(null);
+      mockPrisma.group.update.mockResolvedValue({
+        ...row,
+        name: '1-Б',
+        teachers: [],
+      });
+
+      await service.update('g1', { name: '1-Б' }, fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityId: 'g1',
+          action: 'update',
+          before: expect.objectContaining({
+            name: '1-А',
+            teacherIds: ['t1'],
+          }) as unknown,
+          after: expect.objectContaining({
+            name: '1-Б',
+            teacherIds: [],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records a deletion', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(row);
+      for (const model of [
+        'dailyAttendance',
+        'calendarDay',
+        'timetable',
+        'lessonChange',
+        'schoolLesson',
+        'subgroup',
+      ] as const) {
+        mockPrisma[model].count.mockResolvedValue(0);
+      }
+      mockPrisma.group.delete.mockResolvedValue(row);
+
+      await service.delete('g1', fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityId: 'g1',
+          action: 'delete',
+          before: expect.objectContaining({ name: '1-А' }) as unknown,
+          after: null,
+        }),
+      );
     });
   });
 });

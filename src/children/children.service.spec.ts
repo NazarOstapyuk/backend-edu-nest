@@ -10,6 +10,7 @@ import {
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { ChildrenService } from './children.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateChildDto } from './dto/create-child.dto';
 
 const mockPrisma = {
@@ -35,6 +36,8 @@ const mockPrisma = {
   lessonMark: { count: jest.fn() },
 };
 
+const mockAudit = { recordChange: jest.fn() };
+
 const fullAdmin: AuthenticatedUser = {
   id: 'a0',
   role: Role.admin,
@@ -53,6 +56,7 @@ describe('ChildrenService', () => {
       providers: [
         ChildrenService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(ChildrenService);
@@ -470,6 +474,115 @@ describe('ChildrenService', () => {
       await expect(
         service.update('c1', { groupId: null }, kgAdmin),
       ).rejects.toThrow('Outside access scope');
+    });
+  });
+  describe('audit', () => {
+    const row = {
+      id: 'c1',
+      firstName: 'Ivan',
+      lastName: 'Petrenko',
+      middleName: null,
+      birthDate: new Date('2020-01-15'),
+      gender: Gender.male,
+      groupId: 'g1',
+      group: { kind: GroupKind.kindergarten },
+      parents: [{ id: 'p1' }],
+    };
+
+    it('records a created child', async () => {
+      mockPrisma.child.create.mockResolvedValue(row);
+      mockPrisma.group.findUnique.mockResolvedValue({
+        kind: GroupKind.kindergarten,
+      });
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 'p1', role: Role.parent },
+      ]);
+
+      await service.create(
+        {
+          firstName: 'Ivan',
+          lastName: 'Petrenko',
+          birthDate: '2020-01-15',
+          gender: Gender.male,
+          groupId: 'g1',
+          parentIds: ['p1'],
+        },
+        fullAdmin,
+      );
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actorId: 'a0',
+          entityType: 'children',
+          entityId: 'c1',
+          action: 'create',
+          before: null,
+          after: expect.objectContaining({
+            firstName: 'Ivan',
+            parentIds: ['p1'],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records an update with before and after', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue(row);
+      mockPrisma.child.update.mockResolvedValue({
+        ...row,
+        firstName: 'Petro',
+        parents: [],
+      });
+
+      await service.update('c1', { firstName: 'Petro' }, fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityId: 'c1',
+          action: 'update',
+          before: expect.objectContaining({
+            firstName: 'Ivan',
+            parentIds: ['p1'],
+          }) as unknown,
+          after: expect.objectContaining({
+            firstName: 'Petro',
+            parentIds: [],
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('records a deletion', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue(row);
+      for (const model of [
+        'charge',
+        'payment',
+        'enrollment',
+        'adaptationVisit',
+        'classGroupMember',
+        'lessonAttendance',
+        'package',
+        'dailyAttendance',
+        'absenceNotice',
+        'subgroupMember',
+        'lessonMark',
+      ] as const) {
+        mockPrisma[model].count.mockResolvedValue(0);
+      }
+      mockPrisma.child.delete.mockResolvedValue(row);
+
+      await service.delete('c1', fullAdmin);
+
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityId: 'c1',
+          action: 'delete',
+          before: expect.objectContaining({ groupId: 'g1' }) as unknown,
+          after: null,
+        }),
+      );
     });
   });
 });

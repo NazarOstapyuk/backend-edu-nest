@@ -4,17 +4,43 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { GroupKind, Role } from '@prisma/client';
+import { AuditAction, GroupKind, Role } from '@prisma/client';
 import { scopeKind } from '../access/access-calc';
 import { assertKindInScope, groupScopeWhere } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 
+const GROUP_FIELDS = [
+  'name',
+  'kind',
+  'teacherIds',
+  'bellScheduleId',
+  'mealPriceCategoryId',
+] as const;
+
+const groupAudit = (group: {
+  name: string;
+  kind: GroupKind;
+  bellScheduleId: string | null;
+  mealPriceCategoryId: string | null;
+  teachers?: { id: string }[];
+}) => ({
+  name: group.name,
+  kind: group.kind,
+  teacherIds: (group.teachers ?? []).map((t) => t.id),
+  bellScheduleId: group.bellScheduleId,
+  mealPriceCategoryId: group.mealPriceCategoryId,
+});
+
 @Injectable()
 export class GroupsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   private async validateTeachers(ids: string[]) {
     const users = await this.prisma.user.findMany({
@@ -88,7 +114,7 @@ export class GroupsService {
     );
     await this.assertMealCategory(dto.mealPriceCategoryId, null);
 
-    return this.prisma.group.create({
+    const created = await this.prisma.group.create({
       data: {
         name: dto.name,
         kind: dto.kind,
@@ -103,6 +129,16 @@ export class GroupsService {
         children: true,
       },
     });
+    await this.audit.recordChange(this.prisma, {
+      actorId: user.id,
+      entityType: 'groups',
+      entityId: created.id,
+      action: AuditAction.create,
+      before: null,
+      after: groupAudit(created),
+      fields: GROUP_FIELDS,
+    });
+    return created;
   }
 
   async findAll(user: AuthenticatedUser) {
@@ -117,7 +153,10 @@ export class GroupsService {
 
   async update(id: string, dto: UpdateGroupDto, user: AuthenticatedUser) {
     const kind = scopeKind(user);
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findUnique({
+      where: { id },
+      include: { teachers: { select: { id: true } } },
+    });
     if (!group || (kind && group.kind !== kind)) {
       throw new NotFoundException('Group not found');
     }
@@ -141,7 +180,7 @@ export class GroupsService {
       group.mealPriceCategoryId,
     );
 
-    return this.prisma.group.update({
+    const updated = await this.prisma.group.update({
       where: { id },
       data: {
         name: dto.name,
@@ -157,11 +196,24 @@ export class GroupsService {
         children: true,
       },
     });
+    await this.audit.recordChange(this.prisma, {
+      actorId: user.id,
+      entityType: 'groups',
+      entityId: id,
+      action: AuditAction.update,
+      before: groupAudit(group),
+      after: groupAudit(updated),
+      fields: GROUP_FIELDS,
+    });
+    return updated;
   }
 
   async delete(id: string, user: AuthenticatedUser) {
     const kind = scopeKind(user);
-    const group = await this.prisma.group.findUnique({ where: { id } });
+    const group = await this.prisma.group.findUnique({
+      where: { id },
+      include: { teachers: { select: { id: true } } },
+    });
     if (!group || (kind && group.kind !== kind)) {
       throw new NotFoundException('Group not found');
     }
@@ -181,6 +233,15 @@ export class GroupsService {
     }
 
     await this.prisma.group.delete({ where: { id } });
+    await this.audit.recordChange(this.prisma, {
+      actorId: user.id,
+      entityType: 'groups',
+      entityId: id,
+      action: AuditAction.delete,
+      before: groupAudit(group),
+      after: null,
+      fields: GROUP_FIELDS,
+    });
     return { message: 'Group deleted' };
   }
 }
