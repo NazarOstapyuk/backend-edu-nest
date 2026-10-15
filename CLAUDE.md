@@ -51,7 +51,7 @@ Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backu
 
 ### Authorization pattern
 
-Controllers use `@UseGuards(JwtAuthGuard, RolesGuard)` with `@Roles(...)` and/or `@Permission(area, level)` (class or method level, method overrides class). `RolesGuard` allows a request when no decorator is set, when the user's role is listed in `@Roles`, or when the route has `@Permission` and `hasPermission` passes (root always; `edit` satisfies `view`), else 403 (`Insufficient permissions` for permission routes). Staff routes use `@Permission` only; teacher-shared routes use `@Roles(Role.teacher)` + `@Permission`; parent routes use `@Roles(Role.parent)`. Never put `Role.admin` or `Role.root` in `@Roles` on new routes.
+Controllers use `@UseGuards(JwtAuthGuard, RolesGuard)` with `@Roles(...)` and/or `@Permission(area, level)` (class or method level, method overrides class). `RolesGuard` allows a request when no decorator is set, when the user's role is listed in `@Roles`, or when the route has `@Permission` and `hasPermission` passes (root always; `edit` satisfies `view`), else 403 (`Insufficient permissions` for permission routes). Staff routes use `@Permission` only; teacher-shared routes use `@Roles(Role.teacher)` + `@Permission`; parent routes use `@Roles(Role.parent)`. Never put `Role.admin` or `Role.root` in `@Roles` on new routes. `@PermissionAny(areas, level)` is handler-only (read from the handler, not the class) and decides the route alone: passes when the user holds any listed area at that level (root always).
 
 Spec: `docs/superpowers/specs/2026-10-15-access-control-design.md`. `UserPermission` rows (area × `view`/`edit`) and `User.accessScope` (`all`/`kindergarten`/`school_class`) are loaded into `AuthenticatedUser` by `JwtStrategy`. Pure rules live in `src/access/access-calc.ts` (`hasPermission`, `scopeKind`, `grantDenial`, `coversUser`); scope helpers in `src/access/scope.ts`. Areas: users, children, finance, tariffs, classes, register, timetable, meals, payroll, backups, settings, audit. The scope applies to children/groups, finance, tariffs, register, meals via the child's group kind: lists are filtered, single records outside answer 404 with their usual message, creating/moving into another kind → 403 `Outside access scope`; children without a group only with scope `all`. `PATCH /users/:id/access` replaces a user's access; a granter (non-root) needs `users: edit` and can grant/remove only areas they hold at that level, within their scope, never for themselves (`Cannot change own access`, `Cannot grant more than you have`, `Root access cannot be changed`, `Access applies to staff only`, `Duplicate permission`). A teacher with a permission acts as a manager in that area.
 
@@ -178,6 +178,15 @@ Spec: `docs/superpowers/specs/2026-10-15-audit-log-design.md`. Code in `src/audi
 - `AuthService` writes `AuthEvent`s (`login_success`, `login_failed` + reason, `logout`, `password_changed`, `refresh_failed`) with IP and user agent.
 - Event/auth writes never throw; change writes run inside the caller's transaction. Records are never edited; `AuditRetentionScheduler` deletes those older than 365 days at 04:00 Kyiv.
 - `GET /audit/events|events/:id|changes|auth` need permission area `audit` (view). Periods are Kyiv days (`kyivDayStart`).
+
+### Domain: reports
+
+Spec: `docs/superpowers/specs/2026-10-16-reports-design.md`. Code in `src/reports/` (read only):
+
+- `GET /reports/payments|charges|debts` (finance), `attendance` (register), `lessons` (timetable for school lessons and/or classes for class-group lessons, `@PermissionAny`), `meals` (meals), `payroll` (payroll), all `view`. Query: `from`, `to` (Kyiv days, ≤ 366 days, `Period too long`), `kind`, `groupId`, `childId`/`teacherId`, `format=json|xlsx`. Debts have no period (state today).
+- Services load rows; pure builders in `reports-calc.ts` return one `Report` (`columns`, `rows`, `totals`, `sheets`) reusing `finance-calc`, `cabinet-calc`, `register-calc` and `PayrollService.list`, so numbers match the cards. Keep report logic there and test it without mocks.
+- `xlsx-writer.ts` (`exceljs`) renders any `Report`: money as numbers `0.00`, dates `dd.mm.yyyy`, bold totals, extra sheets. Filters go through `resolveFilter` (scope: `Outside access scope`, `Group not found`).
+- Attendance counts only working days (marks on non-working days only show in the timesheet sheet). Payroll rows = months touched by the period plus months of sheets paid inside the period; "Виплачено за період" = non-voided payments dated in the period.
 
 ## Module conventions
 
