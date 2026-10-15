@@ -21,6 +21,7 @@ import { PayrollModule } from './payroll/payroll.module';
 import { BackupsModule } from './backups/backups.module';
 import { UsersModule } from './users/users.module';
 import { AuditModule } from './audit/audit.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { AuditModule } from './audit/audit.module';
     MealsModule,
     PayrollModule,
     BackupsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
