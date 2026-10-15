@@ -15,7 +15,7 @@ export class UpdateAccessDto {
   accessScope: AccessScope;
 
   @IsArray()
-  @ArrayMaxSize(11)
+  @ArrayMaxSize(12)
   @ValidateNested({ each: true })
   @Type(() => PermissionItemDto)
   permissions: PermissionItemDto[];

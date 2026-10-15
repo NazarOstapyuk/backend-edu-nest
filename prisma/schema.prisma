@@ -92,6 +92,9 @@ model User {
   payrollPayVoided    PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
   backupRunsCreated   BackupRun[]            @relation("BackupRunCreatedBy")
   permissions         UserPermission[]
+  auditEvents         AuditEvent[]           @relation("AuditEventActor")
+  auditChanges        AuditChange[]          @relation("AuditChangeActor")
+  authEvents          AuthEvent[]            @relation("AuthEventUser")
 }
 
 model Group {
@@ -1266,6 +1269,7 @@ enum PermissionArea {
   payroll
   backups
   settings
+  audit
 }
 
 enum PermissionLevel {
@@ -1287,4 +1291,73 @@ model UserPermission {
   level  PermissionLevel
 
   @@unique([userId, area])
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  void
+}
+
+enum AuthEventType {
+  login_success
+  login_failed
+  logout
+  password_changed
+  refresh_failed
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  at         DateTime @default(now())
+  requestId  String
+  actorId    String?
+  actor      User?    @relation("AuditEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole  Role?
+  method     String
+  route      String
+  entityType String?
+  entityId   String?
+  statusCode Int
+  ip         String?
+  userAgent  String?
+  body       Json?
+
+  @@index([at])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([requestId])
+}
+
+model AuditChange {
+  id         String      @id @default(uuid())
+  at         DateTime    @default(now())
+  requestId  String
+  actorId    String?
+  actor      User?       @relation("AuditChangeActor", fields: [actorId], references: [id], onDelete: SetNull)
+  entityType String
+  entityId   String
+  action     AuditAction
+  changes    Json
+
+  @@index([entityType, entityId])
+  @@index([requestId])
+  @@index([at])
+}
+
+model AuthEvent {
+  id        String        @id @default(uuid())
+  at        DateTime      @default(now())
+  userId    String?
+  user      User?         @relation("AuthEventUser", fields: [userId], references: [id], onDelete: SetNull)
+  login     String
+  type      AuthEventType
+  reason    String?
+  ip        String?
+  userAgent String?
+
+  @@index([at])
+  @@index([login])
+  @@index([userId])
 }
