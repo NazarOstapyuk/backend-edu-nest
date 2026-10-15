@@ -169,6 +169,24 @@ describe('debtsReport', () => {
     expect(r.rows[0].oldest).toBe('2026-09-01');
   });
 
+  it('shows the prepayment next to the debt and totals it', () => {
+    const child = {
+      child: 'А Олег',
+      group: 'Сонечко',
+      parents: '',
+      charges: [charge('t1', FinanceCategory.tuition, '1000.00', '2026-09-30')],
+      payments: [payment(FinanceCategory.meals, '300.00')],
+    };
+    const r = debtsReport([child], today);
+    expect(r.rows[0].prepayment).toBe(
+      childMoney(child.charges, child.payments, today).prepayment,
+    );
+    expect(r.rows[0].prepayment).toBe('300.00');
+    expect(r.totals).toMatchObject({ prepayment: '300.00' });
+    const keys = r.columns.map((c) => c.key);
+    expect(keys.indexOf('prepayment')).toBe(keys.indexOf('overdue') + 1);
+  });
+
   it('skips children without debt and totals the rest', () => {
     const r = debtsReport(
       [
@@ -204,6 +222,7 @@ describe('attendanceReport', () => {
     status: NoticeStatus.approved,
   });
   const excused = new Set(['sick']);
+  const later = d('2026-10-16');
   const child = (
     extra: Partial<Parameters<typeof attendanceReport>[1][0]> = {},
   ) => ({
@@ -219,7 +238,7 @@ describe('attendanceReport', () => {
   });
 
   it('counts working days and builds the timesheet codes', () => {
-    const r = attendanceReport(week, [child()], [], excused);
+    const r = attendanceReport(week, [child()], [], excused, later);
     expect(r.title).toBe('Відвідування');
     expect(r.fileName).toBe('відвідування');
     expect(r.rows[0]).toMatchObject({
@@ -266,6 +285,7 @@ describe('attendanceReport', () => {
       ],
       [],
       excused,
+      later,
     );
     const sheet = r.sheets[0];
     expect(sheet.rows[0]['d_2026-10-05']).toBe('Р');
@@ -285,7 +305,7 @@ describe('attendanceReport', () => {
         voidedAt: null,
       },
     ];
-    const r = attendanceReport(week, [child()], entries, excused);
+    const r = attendanceReport(week, [child()], entries, excused, later);
     expect(r.rows[0]).toMatchObject({ working: 4, excused: 0 });
     expect(r.sheets[0].rows[0]['d_2026-10-07']).toBe('В');
     const bare = attendanceReport(
@@ -293,6 +313,7 @@ describe('attendanceReport', () => {
       [child({ marks: [], notices: [] })],
       entries,
       excused,
+      later,
     );
     expect(bare.sheets[0].rows[0]['d_2026-10-07']).toBe('');
   });
@@ -311,9 +332,25 @@ describe('attendanceReport', () => {
       ],
       [],
       excused,
+      later,
     );
     expect(r.sheets[0].rows[0]['d_2026-10-10']).toBe('П');
     expect(r.rows[0]).toMatchObject({ working: 5, present: 1, percent: 0.2 });
+  });
+
+  it('counts only days up to today and leaves future cells empty', () => {
+    const r = attendanceReport(
+      week,
+      [child({ marks: [], notices: [] })],
+      [],
+      excused,
+      d('2026-10-07'),
+    );
+    expect(r.rows[0]).toMatchObject({ working: 3, unmarked: 3 });
+    const row = r.sheets[0].rows[0];
+    expect(row['d_2026-10-07']).toBe('·');
+    expect(row['d_2026-10-08']).toBe('');
+    expect(row['d_2026-10-09']).toBe('');
   });
 
   it('gives a null percent without working days', () => {
@@ -322,6 +359,7 @@ describe('attendanceReport', () => {
       [child({ marks: [], notices: [] })],
       [],
       excused,
+      later,
     );
     expect(r.rows[0]).toMatchObject({ working: 0, percent: null });
     expect(r.totals).toMatchObject({ working: 0, percent: null });
@@ -341,6 +379,7 @@ describe('attendanceReport', () => {
       ],
       [],
       excused,
+      later,
     );
     expect(r.rows.map((x) => x.child)).toEqual(['А', 'В', 'Б']);
     const third = attendanceReport(
@@ -353,6 +392,7 @@ describe('attendanceReport', () => {
       ],
       [],
       excused,
+      later,
     );
     expect(third.rows[0].percent).toBe(0.3333);
   });

@@ -11,7 +11,7 @@ import { CalendarService } from '../attendance/calendar.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PayrollService } from '../payroll/payroll.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isoDay } from '../tariffs/dates';
+import { isoDay, kyivToday } from '../tariffs/dates';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { childFilterWhere, reportPeriod, resolveFilter } from './report-query';
 import { Report } from './report.types';
@@ -100,6 +100,7 @@ export class ActivityReportsService {
       ),
       entries,
       new Set(reasons.map((r) => r.id)),
+      kyivToday(),
     );
   }
 

@@ -282,9 +282,15 @@ export function debtsReport(children: DebtChild[], today: Date): Report {
     ),
     due: summary.due,
     overdue: summary.overdue,
+    prepayment: summary.prepayment,
     oldest: oldest === null ? null : isoDay(new Date(oldest)),
   }));
-  const moneyKeys = [...categories.map((c) => `debt_${c}`), 'due', 'overdue'];
+  const moneyKeys = [
+    ...categories.map((c) => `debt_${c}`),
+    'due',
+    'overdue',
+    'prepayment',
+  ];
   return {
     title: 'Борги',
     fileName: 'борги',
@@ -302,6 +308,7 @@ export function debtsReport(children: DebtChild[], today: Date): Report {
       ),
       { key: 'due', label: 'Борг', type: 'money' },
       { key: 'overdue', label: 'Прострочено', type: 'money' },
+      { key: 'prepayment', label: 'Передоплата', type: 'money' },
       { key: 'oldest', label: 'Найстаріше неоплачене', type: 'date' },
     ],
     rows: lines,
@@ -355,6 +362,7 @@ export function attendanceReport(
   children: AttendanceChild[],
   entries: CalendarEntryLike[],
   excusedReasonIds: ReadonlySet<string>,
+  today: Date,
 ): Report {
   const days = dayRange(period.from, period.to);
   const computed = [...children]
@@ -368,7 +376,9 @@ export function attendanceReport(
         const { working } = dayInfo(day, item.group, entries);
         return resolveDay(day, working, item.marks, item.notices);
       });
-      const counted = resolved.filter((r) => r.working);
+      const counted = resolved.filter(
+        (r, i) => r.working && days[i].getTime() <= today.getTime(),
+      );
       const absent = counted.filter(
         (r) => r.state === 'absent' || r.state === 'expected_absent',
       );
@@ -439,7 +449,9 @@ export function attendanceReport(
           ...Object.fromEntries(
             days.map((day, i) => [
               `d_${isoDay(day)}`,
-              dayCode(c.resolved[i], excusedReasonIds),
+              day.getTime() > today.getTime()
+                ? ''
+                : dayCode(c.resolved[i], excusedReasonIds),
             ]),
           ),
         })),
