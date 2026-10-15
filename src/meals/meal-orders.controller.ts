@@ -29,8 +29,11 @@ export class MealOrdersController {
   ) {}
 
   @Get()
-  list(@Query() query: MealOrdersQueryDto) {
-    return this.views.adminList(query);
+  list(
+    @Query() query: MealOrdersQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.views.adminList(query, user);
   }
 
   @Roles(Role.teacher)

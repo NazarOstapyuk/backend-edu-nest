@@ -35,6 +35,8 @@ const parent = {
   permissions: {},
 };
 
+const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
+
 const child = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
   group: {
@@ -46,7 +48,7 @@ const child = (over: Record<string, unknown> = {}) => ({
 });
 
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
   mealComplex: { findMany: jest.fn() },
   mealComplexPrice: { findMany: jest.fn() },
   menuDay: { findMany: jest.fn() },
@@ -150,6 +152,43 @@ describe('MealOrdersService', () => {
     mockPrisma.charge.create.mockResolvedValue({ id: 'ch1' });
     mockPrisma.mealOrder.create.mockResolvedValue({ id: 'o1' });
     mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+  });
+
+  describe('scope', () => {
+    it('404s creating an order for a child outside the scope before any lock', async () => {
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create('c1', [order()], kgAdmin, BEFORE),
+      ).rejects.toThrow(new NotFoundException('Child not found'));
+      expect(
+        firstArg<{ where: object }>(mockPrisma.child.findFirst).where,
+      ).toEqual({
+        id: 'c1',
+        group: { kind: GroupKind.kindergarten },
+      });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('creates for a child inside the scope', async () => {
+      mockPrisma.child.findFirst.mockResolvedValue({ id: 'c1' });
+      await service.create('c1', [order()], kgAdmin, BEFORE);
+      expect(mockPrisma.charge.create).toHaveBeenCalled();
+    });
+
+    it('404s cancelling an order of a child outside the scope', async () => {
+      mockPrisma.mealOrder.findUnique.mockResolvedValue({
+        id: 'o1',
+        childId: 'c1',
+        date: day('2026-10-14'),
+        chargeId: 'ch1',
+        cancelledAt: null,
+      });
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      await expect(service.cancel('o1', kgAdmin, 'x', BEFORE)).rejects.toThrow(
+        new NotFoundException('Order not found'),
+      );
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
   });
 
   describe('create', () => {

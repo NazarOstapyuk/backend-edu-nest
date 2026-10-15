@@ -1,17 +1,34 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
+  AccessScope,
   CalendarDayType,
   CalendarScope,
   GroupKind,
   MenuStatus,
+  PermissionLevel,
+  Role,
 } from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../attendance/calendar.service';
 import { MenusService, parsePeriod } from './menus.service';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const K = GroupKind.kindergarten;
+const admin = {
+  id: 'a1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: allPermissions(PermissionLevel.edit),
+};
+const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
 
 const dish = (id: string, active = true) => ({
   id,
@@ -81,6 +98,49 @@ describe('MenusService', () => {
     mockPrisma.menuDay.findMany.mockResolvedValue([]);
   });
 
+  describe('scope', () => {
+    const outside = new ForbiddenException('Outside access scope');
+    const school = GroupKind.school_class;
+    const period = { from: '2026-10-12', to: '2026-10-16' };
+
+    it('rejects a scoped manager on another kind for every operation', async () => {
+      await expect(
+        service.list({ kind: school, ...period }, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(
+        service.saveDay('2026-10-14', school, { dishIds: [] }, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(
+        service.deleteDay('2026-10-14', school, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(
+        service.publish({ kind: school, ...period }, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(
+        service.unpublish({ kind: school, ...period }, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(
+        service.copy(
+          {
+            kind: school,
+            fromStart: '2026-10-12',
+            fromEnd: '2026-10-16',
+            toStart: '2026-11-02',
+          },
+          kgAdmin,
+        ),
+      ).rejects.toThrow(outside);
+      expect(mockPrisma.menuDay.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lets a scoped manager work on their own kind', async () => {
+      await expect(
+        service.list({ kind: K, ...period }, kgAdmin),
+      ).resolves.toHaveLength(5);
+    });
+  });
+
   describe('workingFor', () => {
     it('ignores group-level entries and uses kind-level ones', () => {
       const entries = [
@@ -131,11 +191,10 @@ describe('MenusService', () => {
       mockPrisma.mealOrder.groupBy.mockResolvedValue([
         { menuDayId: 'm1', _count: { _all: 3 } },
       ]);
-      const result = await service.list({
-        kind: K,
-        from: '2026-10-13',
-        to: '2026-10-14',
-      });
+      const result = await service.list(
+        { kind: K, from: '2026-10-13', to: '2026-10-14' },
+        admin,
+      );
       expect(result).toEqual([
         { date: '2026-10-13', working: true, title: null, menu: null },
         {
@@ -165,7 +224,12 @@ describe('MenusService', () => {
 
     it('creates a draft day with the dishes', async () => {
       mockPrisma.menuDay.findUnique.mockResolvedValue(null);
-      await service.saveDay('2026-10-14', K, { dishIds: ['soup', 'rice'] });
+      await service.saveDay(
+        '2026-10-14',
+        K,
+        { dishIds: ['soup', 'rice'] },
+        admin,
+      );
       expect(mockPrisma.menuDayItem.createMany).toHaveBeenCalledWith({
         data: [
           { menuDayId: 'm1', dishId: 'soup' },
@@ -176,7 +240,7 @@ describe('MenusService', () => {
 
     it('rejects a non-working day', async () => {
       await expect(
-        service.saveDay('2026-10-17', K, { dishIds: ['soup'] }),
+        service.saveDay('2026-10-17', K, { dishIds: ['soup'] }, admin),
       ).rejects.toThrow(new BadRequestException('Day is not a working day'));
     });
 
@@ -185,7 +249,7 @@ describe('MenusService', () => {
         { id: 'soup', active: true },
       ]);
       await expect(
-        service.saveDay('2026-10-14', K, { dishIds: ['soup', 'x'] }),
+        service.saveDay('2026-10-14', K, { dishIds: ['soup', 'x'] }, admin),
       ).rejects.toThrow(new NotFoundException('Dish not found'));
     });
 
@@ -195,14 +259,14 @@ describe('MenusService', () => {
       ]);
       mockPrisma.menuDay.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
+        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }, admin),
       ).rejects.toThrow(new BadRequestException('Dish is inactive'));
       mockPrisma.menuDay.findUnique.mockResolvedValueOnce({ id: 'm1' });
       mockPrisma.menuDayItem.findMany.mockResolvedValueOnce([
         { dishId: 'soup' },
       ]);
       await expect(
-        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
+        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }, admin),
       ).resolves.toBeDefined();
     });
 
@@ -214,7 +278,7 @@ describe('MenusService', () => {
       ]);
       mockPrisma.mealOrderItem.count.mockResolvedValue(1);
       await expect(
-        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }),
+        service.saveDay('2026-10-14', K, { dishIds: ['soup'] }, admin),
       ).rejects.toThrow(new BadRequestException('Dish is ordered'));
       expect(mockPrisma.$queryRaw).toHaveBeenCalled();
       expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
@@ -235,7 +299,7 @@ describe('MenusService', () => {
         { dishId: 'rice' },
       ]);
       mockPrisma.mealOrderItem.count.mockResolvedValue(0);
-      await service.saveDay('2026-10-14', K, { dishIds: ['soup'] });
+      await service.saveDay('2026-10-14', K, { dishIds: ['soup'] }, admin);
       expect(mockPrisma.menuDayItem.deleteMany).toHaveBeenCalledWith({
         where: { menuDayId: 'm1' },
       });
@@ -246,7 +310,10 @@ describe('MenusService', () => {
     it('publishes drafts with dishes', async () => {
       mockPrisma.menuDay.updateMany.mockResolvedValue({ count: 4 });
       await expect(
-        service.publish({ kind: K, from: '2026-10-12', to: '2026-10-16' }),
+        service.publish(
+          { kind: K, from: '2026-10-12', to: '2026-10-16' },
+          admin,
+        ),
       ).resolves.toEqual({ count: 4 });
       expect(
         firstArg<{ where: object }>(mockPrisma.menuDay.updateMany).where,
@@ -262,7 +329,10 @@ describe('MenusService', () => {
       mockPrisma.menuDay.findMany.mockResolvedValue([{ id: 'm1' }]);
       mockPrisma.mealOrder.count.mockResolvedValue(2);
       await expect(
-        service.unpublish({ kind: K, from: '2026-10-12', to: '2026-10-16' }),
+        service.unpublish(
+          { kind: K, from: '2026-10-12', to: '2026-10-16' },
+          admin,
+        ),
       ).rejects.toThrow(new BadRequestException('Menu has orders'));
       expect(mockPrisma.menuDay.updateMany).not.toHaveBeenCalled();
     });
@@ -272,7 +342,10 @@ describe('MenusService', () => {
       mockPrisma.mealOrder.count.mockResolvedValue(0);
       mockPrisma.menuDay.updateMany.mockResolvedValue({ count: 1 });
       await expect(
-        service.unpublish({ kind: K, from: '2026-10-12', to: '2026-10-16' }),
+        service.unpublish(
+          { kind: K, from: '2026-10-12', to: '2026-10-16' },
+          admin,
+        ),
       ).resolves.toEqual({ count: 1 });
     });
   });
@@ -388,12 +461,15 @@ describe('MenusService', () => {
         ])
         .mockResolvedValueOnce([]);
       const fill = jest.spyOn(service, 'fill');
-      await service.copy({
-        kind: K,
-        fromStart: '2026-10-12',
-        fromEnd: '2026-10-16',
-        toStart: '2026-11-02',
-      });
+      await service.copy(
+        {
+          kind: K,
+          fromStart: '2026-10-12',
+          fromEnd: '2026-10-16',
+          toStart: '2026-11-02',
+        },
+        admin,
+      );
       expect(fill).toHaveBeenCalledWith(
         K,
         [{ date: day('2026-11-02'), dishIds: ['a'] }],
@@ -412,7 +488,7 @@ describe('MenusService', () => {
     it('deletes a draft without orders after locking the day', async () => {
       found(MenuStatus.draft);
       mockPrisma.mealOrder.count.mockResolvedValue(0);
-      await expect(service.deleteDay('2026-10-14', K)).resolves.toEqual({
+      await expect(service.deleteDay('2026-10-14', K, admin)).resolves.toEqual({
         message: 'Menu day deleted',
       });
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
@@ -429,7 +505,7 @@ describe('MenusService', () => {
 
     it('rejects a day published while waiting for the lock', async () => {
       found(MenuStatus.published);
-      await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
+      await expect(service.deleteDay('2026-10-14', K, admin)).rejects.toThrow(
         new BadRequestException('Menu is published'),
       );
       expect(mockPrisma.menuDay.delete).not.toHaveBeenCalled();
@@ -438,7 +514,7 @@ describe('MenusService', () => {
     it('rejects days with orders, cancelled included', async () => {
       found(MenuStatus.draft);
       mockPrisma.mealOrder.count.mockResolvedValueOnce(1);
-      await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
+      await expect(service.deleteDay('2026-10-14', K, admin)).rejects.toThrow(
         new BadRequestException('Menu has orders'),
       );
       expect(mockPrisma.mealOrder.count).toHaveBeenCalledWith({
@@ -448,7 +524,7 @@ describe('MenusService', () => {
 
     it('rejects a missing day', async () => {
       mockPrisma.menuDay.findUnique.mockResolvedValueOnce(null);
-      await expect(service.deleteDay('2026-10-14', K)).rejects.toThrow(
+      await expect(service.deleteDay('2026-10-14', K, admin)).rejects.toThrow(
         new NotFoundException('Menu day not found'),
       );
     });

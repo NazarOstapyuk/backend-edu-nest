@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertKindInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { dayRange } from '../attendance/register-calc';
 import { isoWeekday } from '../timetable/schedule-calc';
@@ -129,7 +132,8 @@ export class MenuTemplatesService {
     return this.get(id);
   }
 
-  async apply(id: string, dto: ApplyTemplateDto) {
+  async apply(id: string, dto: ApplyTemplateDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), dto.kind);
     const template = await this.get(id);
     if (!template.active)
       throw new BadRequestException('Menu template is inactive');

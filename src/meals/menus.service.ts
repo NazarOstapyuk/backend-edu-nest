@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CalendarScope, GroupKind, MenuStatus, Prisma } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertKindInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../attendance/calendar.service';
 import {
@@ -67,7 +70,8 @@ export class MenusService {
     return (day: Date) => dayInfo(day, { id: '', kind }, scoped);
   }
 
-  async list(query: MenuPeriodDto) {
+  async list(query: MenuPeriodDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), query.kind);
     const { from, to } = parsePeriod(query.from, query.to, 62);
     return this.views(query.kind, from, to);
   }
@@ -112,7 +116,13 @@ export class MenusService {
     });
   }
 
-  async saveDay(dateValue: string, kind: GroupKind, dto: SaveMenuDayDto) {
+  async saveDay(
+    dateValue: string,
+    kind: GroupKind,
+    dto: SaveMenuDayDto,
+    user: AuthenticatedUser,
+  ) {
+    assertKindInScope(scopeKind(user), kind);
     const date = parseDay(dateValue);
     const entries = await this.calendar.entriesBetween(date, date);
     if (!this.workingFor(kind, entries)(date).working)
@@ -165,7 +175,8 @@ export class MenusService {
     return view;
   }
 
-  async publish(dto: MenuPeriodDto) {
+  async publish(dto: MenuPeriodDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), dto.kind);
     const { from, to } = parsePeriod(dto.from, dto.to, 92);
     const { count } = await this.prisma.menuDay.updateMany({
       where: {
@@ -179,7 +190,8 @@ export class MenusService {
     return { count };
   }
 
-  async unpublish(dto: MenuPeriodDto) {
+  async unpublish(dto: MenuPeriodDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), dto.kind);
     const { from, to } = parsePeriod(dto.from, dto.to, 92);
     return this.prisma.$transaction(async (tx) => {
       const days = await tx.menuDay.findMany({
@@ -283,7 +295,8 @@ export class MenusService {
     return result;
   }
 
-  async copy(dto: CopyMenuDto) {
+  async copy(dto: CopyMenuDto, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), dto.kind);
     const { from, to } = parsePeriod(dto.fromStart, dto.fromEnd, 92);
     const toStart = parseDay(dto.toStart);
     const source = await this.prisma.menuDay.findMany({
@@ -303,7 +316,8 @@ export class MenusService {
     return this.fill(dto.kind, plan, dto.overwrite ?? false);
   }
 
-  async deleteDay(dateValue: string, kind: GroupKind) {
+  async deleteDay(dateValue: string, kind: GroupKind, user: AuthenticatedUser) {
+    assertKindInScope(scopeKind(user), kind);
     const date = parseDay(dateValue);
     await this.prisma.$transaction(async (tx) => {
       const day = await tx.menuDay.findUnique({

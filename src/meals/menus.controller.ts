@@ -13,6 +13,8 @@ import {
 import { GroupKind, PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Permission } from '../common/decorators/permission.decorator';
 import { MenusService } from './menus.service';
 import { CopyMenuDto, MenuPeriodDto, SaveMenuDayDto } from './dto/menu.dto';
@@ -24,26 +26,29 @@ export class MenusController {
   constructor(private menus: MenusService) {}
 
   @Get()
-  list(@Query() query: MenuPeriodDto) {
-    return this.menus.list(query);
+  list(@Query() query: MenuPeriodDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.menus.list(query, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('publish')
-  publish(@Body() dto: MenuPeriodDto) {
-    return this.menus.publish(dto);
+  publish(@Body() dto: MenuPeriodDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.menus.publish(dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('unpublish')
-  unpublish(@Body() dto: MenuPeriodDto) {
-    return this.menus.unpublish(dto);
+  unpublish(
+    @Body() dto: MenuPeriodDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.menus.unpublish(dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('copy')
-  copy(@Body() dto: CopyMenuDto) {
-    return this.menus.copy(dto);
+  copy(@Body() dto: CopyMenuDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.menus.copy(dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
@@ -52,8 +57,9 @@ export class MenusController {
     @Param('date') date: string,
     @Param('kind', new ParseEnumPipe(GroupKind)) kind: GroupKind,
     @Body() dto: SaveMenuDayDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.menus.saveDay(date, kind, dto);
+    return this.menus.saveDay(date, kind, dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
@@ -61,7 +67,8 @@ export class MenusController {
   remove(
     @Param('date') date: string,
     @Param('kind', new ParseEnumPipe(GroupKind)) kind: GroupKind,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.menus.deleteDay(date, kind);
+    return this.menus.deleteDay(date, kind, user);
   }
 }

@@ -85,14 +85,44 @@ describe('MealViewsService', () => {
     service = moduleRef.get(MealViewsService);
   });
 
+  describe('scope', () => {
+    const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
+
+    it('limits the admin list to children of the scoped kind', async () => {
+      mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+      await service.adminList({ date: '2026-10-14', groupId: 'g1' }, kgAdmin);
+      expect(
+        firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
+      ).toEqual({
+        date: day('2026-10-14'),
+        child: { group: { kind: GroupKind.kindergarten } },
+      });
+    });
+
+    it('404s today for a group of another kind', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g2',
+        kind: GroupKind.school_class,
+        teachers: [],
+      });
+      await expect(
+        service.today('g2', kgAdmin, day('2026-10-14')),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+      expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('adminList', () => {
     it('filters by date, kind and group', async () => {
       mockPrisma.mealOrder.findMany.mockResolvedValue([]);
-      await service.adminList({
-        date: '2026-10-14',
-        kind: GroupKind.kindergarten,
-        groupId: 'g1',
-      });
+      await service.adminList(
+        {
+          date: '2026-10-14',
+          kind: GroupKind.kindergarten,
+          groupId: 'g1',
+        },
+        admin,
+      );
       expect(
         firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
       ).toEqual({
@@ -112,7 +142,7 @@ describe('MealViewsService', () => {
           cancelledBy: { id: 'a1', firstName: 'Адмін', lastName: 'Головний' },
         }),
       ]);
-      const result = await service.adminList({ date: '2026-10-14' });
+      const result = await service.adminList({ date: '2026-10-14' }, admin);
       expect(result.orders).toHaveLength(2);
       expect(result.orders[0]).toMatchObject({
         id: 'o1',

@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PermissionArea } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { childScopeWhere } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { assertGroupAccess, parseDay } from '../classes/access';
@@ -61,14 +63,17 @@ export function summarize(orders: OrderView[]) {
 export class MealViewsService {
   constructor(private prisma: PrismaService) {}
 
-  async adminList(query: MealOrdersQueryDto) {
+  async adminList(query: MealOrdersQueryDto, user: AuthenticatedUser) {
     const date = parseDay(query.date);
     const groupFilter =
       query.kind || query.groupId
         ? { group: { kind: query.kind, id: query.groupId } }
         : undefined;
     const rows = await this.prisma.mealOrder.findMany({
-      where: { date, child: groupFilter },
+      where: {
+        date,
+        child: { ...groupFilter, ...childScopeWhere(scopeKind(user)) },
+      },
       select: adminSelect,
       orderBy: [{ child: { lastName: 'asc' } }, { createdAt: 'asc' }],
     });
@@ -93,9 +98,12 @@ export class MealViewsService {
   ) {
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
-      select: { id: true, teachers: { select: { id: true } } },
+      select: { id: true, kind: true, teachers: { select: { id: true } } },
     });
     if (!group) throw new NotFoundException('Group not found');
+    const kind = scopeKind(user);
+    if (kind && group.kind !== kind)
+      throw new NotFoundException('Group not found');
     assertGroupAccess(group, user, PermissionArea.meals);
     const rows = await this.prisma.mealOrder.findMany({
       where: { date: today, cancelledAt: null, child: { groupId } },

@@ -1,16 +1,26 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { GroupKind } from '@prisma/client';
+import { AccessScope, GroupKind, PermissionLevel, Role } from '@prisma/client';
+import { allPermissions } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { MenusService } from './menus.service';
 import { MenuTemplatesService } from './menu-templates.service';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const K = GroupKind.kindergarten;
+const admin = {
+  id: 'a1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  permissions: allPermissions(PermissionLevel.edit),
+};
 
 const template = (over: Record<string, unknown> = {}) => ({
   id: 't1',
@@ -159,13 +169,17 @@ describe('MenuTemplatesService', () => {
           ],
         }),
       );
-      await service.apply('t1', {
-        kind: K,
-        from: '2026-10-12',
-        to: '2026-10-27',
-        startWeek: 1,
-        overwrite: true,
-      });
+      await service.apply(
+        't1',
+        {
+          kind: K,
+          from: '2026-10-12',
+          to: '2026-10-27',
+          startWeek: 1,
+          overwrite: true,
+        },
+        admin,
+      );
       expect(mockMenus.fill).toHaveBeenCalledWith(
         K,
         [
@@ -177,29 +191,43 @@ describe('MenuTemplatesService', () => {
       );
     });
 
+    it('rejects applying to another kind than the scope', async () => {
+      await expect(
+        service.apply(
+          't1',
+          {
+            kind: GroupKind.school_class,
+            from: '2026-10-12',
+            to: '2026-10-16',
+            startWeek: 1,
+          },
+          { ...admin, accessScope: AccessScope.kindergarten },
+        ),
+      ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+      expect(mockMenus.fill).not.toHaveBeenCalled();
+    });
+
     it('rejects an inactive template', async () => {
       mockPrisma.menuTemplate.findUnique.mockResolvedValue(
         template({ active: false }),
       );
       await expect(
-        service.apply('t1', {
-          kind: K,
-          from: '2026-10-12',
-          to: '2026-10-16',
-          startWeek: 1,
-        }),
+        service.apply(
+          't1',
+          { kind: K, from: '2026-10-12', to: '2026-10-16', startWeek: 1 },
+          admin,
+        ),
       ).rejects.toThrow(new BadRequestException('Menu template is inactive'));
       expect(mockMenus.fill).not.toHaveBeenCalled();
     });
 
     it('rejects a start week beyond the cycle', async () => {
       await expect(
-        service.apply('t1', {
-          kind: K,
-          from: '2026-10-12',
-          to: '2026-10-16',
-          startWeek: 3,
-        }),
+        service.apply(
+          't1',
+          { kind: K, from: '2026-10-12', to: '2026-10-16', startWeek: 3 },
+          admin,
+        ),
       ).rejects.toThrow(new BadRequestException('Template week out of range'));
     });
   });

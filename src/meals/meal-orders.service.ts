@@ -10,6 +10,8 @@ import {
   Prisma,
   Role,
 } from '@prisma/client';
+import { scopeKind } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { CalendarService } from '../attendance/calendar.service';
@@ -60,6 +62,7 @@ export class MealOrdersService {
       .sort((a, b) => a.day.getTime() - b.day.getTime());
     if (new Set(parsed.map((d) => d.day.getTime())).size !== parsed.length)
       throw new BadRequestException('Duplicate date in order');
+    await assertChildInScope(this.prisma, scopeKind(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
       select: {
@@ -205,6 +208,12 @@ export class MealOrdersService {
     });
     if (!order || (childId && order.childId !== childId))
       throw new NotFoundException('Order not found');
+    await assertChildInScope(
+      this.prisma,
+      scopeKind(user),
+      order.childId,
+      'Order not found',
+    );
     if (order.cancelledAt) throw new BadRequestException('Order is cancelled');
     const deadline = await this.settings.getDeadline();
     const before = isBeforeDeadline(order.date, deadline, now);

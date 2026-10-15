@@ -11,6 +11,8 @@ import {
 import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Permission } from '../common/decorators/permission.decorator';
 import { MenuTemplatesService } from './menu-templates.service';
 import {
@@ -51,7 +53,11 @@ export class MenuTemplatesController {
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post(':id/apply')
-  apply(@Param('id') id: string, @Body() dto: ApplyTemplateDto) {
-    return this.templates.apply(id, dto);
+  apply(
+    @Param('id') id: string,
+    @Body() dto: ApplyTemplateDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.templates.apply(id, dto, user);
   }
 }
