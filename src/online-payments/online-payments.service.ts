@@ -489,6 +489,7 @@ export class OnlinePaymentsService {
         },
       });
 
+      await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${request.childId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "Charge" WHERE "childId" = ${request.childId} ORDER BY id FOR UPDATE`;
       const charges = await tx.charge.findMany({
         where: {

@@ -334,6 +334,28 @@ describe('OnlinePaymentsService', () => {
       expect(mockPrisma.paymentInvoice.update).not.toHaveBeenCalled();
     });
 
+    it('locks the invoice, then the child, then its charges before reading charges', async () => {
+      mockPrisma.paymentInvoice.findUnique.mockResolvedValue(invoice());
+      mockPrisma.charge.findMany.mockResolvedValue([charge()]);
+
+      await service.applyInvoiceStatus('inv-1', success());
+
+      expect([0, 1, 2].map((i) => sqlOf(mockPrisma.$queryRaw, i))).toEqual([
+        'SELECT id FROM "PaymentInvoice" WHERE "invoiceId" = ? FOR UPDATE',
+        'SELECT id FROM "Child" WHERE id = ? FOR UPDATE',
+        'SELECT id FROM "Charge" WHERE "childId" = ? ORDER BY id FOR UPDATE',
+      ]);
+      expect((mockPrisma.$queryRaw.mock.calls[1] as unknown[])[1]).toBe(
+        'child-1',
+      );
+      expect((mockPrisma.$queryRaw.mock.calls[2] as unknown[])[1]).toBe(
+        'child-1',
+      );
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+        mockPrisma.charge.findMany.mock.invocationCallOrder[0],
+      );
+    });
+
     it('allocates 500.00 over meals charges of 200.00 and 100.00, leaving a prepayment', async () => {
       mockPrisma.paymentInvoice.findUnique.mockResolvedValue(invoice());
       mockPrisma.charge.findMany.mockResolvedValue([
