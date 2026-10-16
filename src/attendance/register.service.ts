@@ -41,7 +41,7 @@ const childSelect = {
 
 const time = (day: Date) => day.getTime();
 
-const canManageRegister = (
+export const canManageRegister = (
   user: AuthenticatedUser,
   level: PermissionLevel = PermissionLevel.view,
 ) => hasPermission(user, PermissionArea.register, level);

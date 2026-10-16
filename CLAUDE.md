@@ -189,6 +189,15 @@ Spec: `docs/superpowers/specs/2026-10-16-reports-design.md`. Code in `src/report
 - `xlsx-writer.ts` (`exceljs`) renders any `Report`: money as numbers `0.00`, dates `dd.mm.yyyy`, bold totals, extra sheets. Filters go through `resolveFilter` (scope: `Outside access scope`, `Group not found`).
 - Attendance counts only working days (marks on non-working days only show in the timesheet sheet). Payroll rows = months touched by the period plus months of sheets paid inside the period; "Виплачено за період" = non-voided payments dated in the period.
 
+### Domain: dashboard
+
+Spec: `docs/superpowers/specs/2026-10-16-today-dashboard-design.md`. Code in `src/dashboard/` (read only):
+
+- `GET /dashboard/today` returns `{ date, ...sections }`; a key is present only when the user may see it. `register` (groups with unmarked children on a working day; `register` view = all groups in scope, a teacher otherwise own groups), `notices` (`register` view), `debts` (`finance`; children with overdue > 0 via `childMoney`), `meals` (`meals` view, or a teacher: own groups), `payments` (`finance`; confirmed payments of the Kyiv day, per method), `onlinePending` (`finance`, online payments enabled, invoices pending longer than 15 minutes; omitted at 0), `payroll` (`payroll`; teachers with terms in the previous calendar month and no approved sheet), `backups` (`backups`; only when not configured or stale). Everything is narrowed by the access scope.
+- The route is guarded by `JwtAuthGuard` only: no `@Roles`/`@Permission` fits several areas plus the teacher role, so `DashboardService` decides (parents get 403 `Insufficient permissions`). Deliberate exception to "always declare roles".
+- Pure counting rules live in `dashboard-calc.ts`; keep them there and test without mocks. `canManageRegister` is exported from `register.service.ts` and reused.
+
+
 ### Domain: online payments
 
 Spec: `docs/superpowers/specs/2026-10-16-online-payments-design.md`. Code in `src/online-payments/`:

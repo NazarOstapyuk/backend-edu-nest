@@ -27,5 +27,6 @@ import { TestProvider } from './test-provider';
     TestProvider,
     { provide: PAYMENT_PROVIDER, useExisting: TestProvider },
   ],
+  exports: [OnlinePaymentsService],
 })
 export class OnlinePaymentsModule {}

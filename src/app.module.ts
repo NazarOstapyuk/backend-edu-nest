@@ -23,6 +23,7 @@ import { UsersModule } from './users/users.module';
 import { AuditModule } from './audit/audit.module';
 import { ReportsModule } from './reports/reports.module';
 import { OnlinePaymentsModule } from './online-payments/online-payments.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { OnlinePaymentsModule } from './online-payments/online-payments.module';
     BackupsModule,
     ReportsModule,
     OnlinePaymentsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

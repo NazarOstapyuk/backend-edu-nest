@@ -8,5 +8,6 @@ import { ProcessRunner } from './process-runner';
 @Module({
   controllers: [BackupsController],
   providers: [BackupsService, BackupsScheduler, ProcessRunner, BackupStorage],
+  exports: [BackupsService],
 })
 export class BackupsModule {}
