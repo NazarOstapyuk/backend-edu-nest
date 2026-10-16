@@ -22,6 +22,7 @@ import { BackupsModule } from './backups/backups.module';
 import { UsersModule } from './users/users.module';
 import { AuditModule } from './audit/audit.module';
 import { ReportsModule } from './reports/reports.module';
+import { OnlinePaymentsModule } from './online-payments/online-payments.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { ReportsModule } from './reports/reports.module';
     PayrollModule,
     BackupsModule,
     ReportsModule,
+    OnlinePaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
