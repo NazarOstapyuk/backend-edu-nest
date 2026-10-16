@@ -351,9 +351,15 @@ describe('OnlinePaymentsService', () => {
       expect((mockPrisma.$queryRaw.mock.calls[2] as unknown[])[1]).toBe(
         'child-1',
       );
-      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
-        mockPrisma.charge.findMany.mock.invocationCallOrder[0],
-      );
+      const [invoiceLock, childLock, chargeLock] =
+        mockPrisma.$queryRaw.mock.invocationCallOrder;
+      const [paymentInsert] =
+        mockPrisma.payment.create.mock.invocationCallOrder;
+      const [chargeRead] = mockPrisma.charge.findMany.mock.invocationCallOrder;
+      expect(invoiceLock).toBeLessThan(childLock);
+      expect(childLock).toBeLessThan(paymentInsert);
+      expect(paymentInsert).toBeLessThan(chargeLock);
+      expect(chargeLock).toBeLessThan(chargeRead);
     });
 
     it('allocates 500.00 over meals charges of 200.00 and 100.00, leaving a prepayment', async () => {

@@ -472,6 +472,7 @@ export class OnlinePaymentsService {
       }
 
       const { request } = invoice;
+      await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${request.childId} FOR UPDATE`;
       const amount = fromKopecks(invoice.amountKop);
       const paidAt = status.paidAt ?? now;
       const payment = await tx.payment.create({
@@ -489,7 +490,6 @@ export class OnlinePaymentsService {
         },
       });
 
-      await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${request.childId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "Charge" WHERE "childId" = ${request.childId} ORDER BY id FOR UPDATE`;
       const charges = await tx.charge.findMany({
         where: {
