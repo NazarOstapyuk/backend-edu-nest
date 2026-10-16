@@ -39,4 +39,13 @@ describe('finance DTO text fields', () => {
     ).toContain('reference');
     expect(await errorProps(CreatePaymentDto, validPayment)).toEqual([]);
   });
+
+  it('CreatePaymentDto accepts card and rejects online', async () => {
+    expect(
+      await errorProps(CreatePaymentDto, { ...validPayment, method: 'card' }),
+    ).toEqual([]);
+    expect(
+      await errorProps(CreatePaymentDto, { ...validPayment, method: 'online' }),
+    ).toContain('method');
+  });
 });

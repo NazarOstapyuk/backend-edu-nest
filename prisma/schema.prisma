@@ -25,76 +25,78 @@ enum SubscriptionStatus {
 }
 
 model User {
-  id                  String                 @id @default(uuid())
-  login               String                 @unique
-  password            String
-  role                Role
-  firstName           String
-  lastName            String
-  middleName          String?
-  phone               String?
-  email               String?
-  mustChangePassword  Boolean                @default(false)
-  refreshToken        String?
-  isActive            Boolean                @default(true)
-  accessScope         AccessScope            @default(all)
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-  groups              Group[]                @relation("GroupTeachers")
-  children            Child[]                @relation("ChildParents")
-  chargesCreated      Charge[]               @relation("ChargeCreatedBy")
-  chargesVoided       Charge[]               @relation("ChargeVoidedBy")
-  paymentsCreated     Payment[]              @relation("PaymentCreatedBy")
-  paymentsVoided      Payment[]              @relation("PaymentVoidedBy")
-  allocationsCreated  Allocation[]           @relation("AllocationCreatedBy")
-  allocationsVoided   Allocation[]           @relation("AllocationVoidedBy")
-  tariffPricesCreated TariffPrice[]          @relation("TariffPriceCreatedBy")
-  enrollmentsCreated  Enrollment[]           @relation("EnrollmentCreatedBy")
-  adjustmentsCreated  EnrollmentAdjustment[] @relation("AdjustmentCreatedBy")
-  adjustmentsVoided   EnrollmentAdjustment[] @relation("AdjustmentVoidedBy")
-  adaptationsCreated  AdaptationVisit[]      @relation("AdaptationCreatedBy")
-  adaptationsVoided   AdaptationVisit[]      @relation("AdaptationVoidedBy")
-  classGroupsTeaching ClassGroup[]           @relation("ClassGroupTeachers")
-  membersCreated      ClassGroupMember[]     @relation("MemberCreatedBy")
-  packagesCreated     Package[]              @relation("PackageCreatedBy")
-  packagesVoided      Package[]              @relation("PackageVoidedBy")
-  packagesReconciled  Package[]              @relation("PackageReconciledBy")
-  extensionsCreated   PackageExtension[]     @relation("ExtensionCreatedBy")
-  lessonsConducted    Lesson[]               @relation("LessonConductedBy")
-  attendancesMarked   LessonAttendance[]     @relation("AttendanceMarkedBy")
-  attendancesVoided   LessonAttendance[]     @relation("AttendanceVoidedBy")
-  usagesVoided        SessionUsage[]         @relation("UsageVoidedBy")
-  dailyMarked         DailyAttendance[]      @relation("DailyMarkedBy")
-  dailyVoided         DailyAttendance[]      @relation("DailyVoidedBy")
-  calendarCreated     CalendarDay[]          @relation("CalendarCreatedBy")
-  calendarVoided      CalendarDay[]          @relation("CalendarVoidedBy")
-  noticesCreated      AbsenceNotice[]        @relation("NoticeCreatedBy")
-  noticesDecided      AbsenceNotice[]        @relation("NoticeDecidedBy")
-  timetablesCreated   Timetable[]            @relation("TimetableCreatedBy")
-  entriesTaught       TimetableEntry[]       @relation("EntryTeacher")
-  changesTaught       LessonChange[]         @relation("ChangeTeacher")
-  changesCreated      LessonChange[]         @relation("ChangeCreatedBy")
-  changesVoided       LessonChange[]         @relation("ChangeVoidedBy")
-  schoolLessonsTaught SchoolLesson[]         @relation("SchoolLessonTeacher")
-  schoolLessonsLed    SchoolLesson[]         @relation("SchoolLessonConductedBy")
-  lessonMarksMarked   LessonMark[]           @relation("LessonMarkMarkedBy")
-  lessonMarksVoided   LessonMark[]           @relation("LessonMarkVoidedBy")
-  mealOrdersCreated   MealOrder[]            @relation("MealOrderCreatedBy")
-  mealOrdersCancelled MealOrder[]            @relation("MealOrderCancelledBy")
-  salaryTerms         SalaryTerms[]          @relation("SalaryTermsTeacher")
-  salaryTermsCreated  SalaryTerms[]          @relation("SalaryTermsCreatedBy")
-  payrollSheets       PayrollSheet[]         @relation("PayrollSheetTeacher")
-  payrollApproved     PayrollSheet[]         @relation("PayrollSheetApprovedBy")
-  payrollReopened     PayrollSheet[]         @relation("PayrollSheetReopenedBy")
-  payrollAdjCreated   PayrollAdjustment[]    @relation("PayrollAdjustmentCreatedBy")
-  payrollAdjVoided    PayrollAdjustment[]    @relation("PayrollAdjustmentVoidedBy")
-  payrollPayCreated   PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
-  payrollPayVoided    PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
-  backupRunsCreated   BackupRun[]            @relation("BackupRunCreatedBy")
-  permissions         UserPermission[]
-  auditEvents         AuditEvent[]           @relation("AuditEventActor")
-  auditChanges        AuditChange[]          @relation("AuditChangeActor")
-  authEvents          AuthEvent[]            @relation("AuthEventUser")
+  id                       String                 @id @default(uuid())
+  login                    String                 @unique
+  password                 String
+  role                     Role
+  firstName                String
+  lastName                 String
+  middleName               String?
+  phone                    String?
+  email                    String?
+  mustChangePassword       Boolean                @default(false)
+  refreshToken             String?
+  isActive                 Boolean                @default(true)
+  accessScope              AccessScope            @default(all)
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  groups                   Group[]                @relation("GroupTeachers")
+  children                 Child[]                @relation("ChildParents")
+  chargesCreated           Charge[]               @relation("ChargeCreatedBy")
+  chargesVoided            Charge[]               @relation("ChargeVoidedBy")
+  paymentsCreated          Payment[]              @relation("PaymentCreatedBy")
+  paymentsVoided           Payment[]              @relation("PaymentVoidedBy")
+  allocationsCreated       Allocation[]           @relation("AllocationCreatedBy")
+  allocationsVoided        Allocation[]           @relation("AllocationVoidedBy")
+  tariffPricesCreated      TariffPrice[]          @relation("TariffPriceCreatedBy")
+  enrollmentsCreated       Enrollment[]           @relation("EnrollmentCreatedBy")
+  adjustmentsCreated       EnrollmentAdjustment[] @relation("AdjustmentCreatedBy")
+  adjustmentsVoided        EnrollmentAdjustment[] @relation("AdjustmentVoidedBy")
+  adaptationsCreated       AdaptationVisit[]      @relation("AdaptationCreatedBy")
+  adaptationsVoided        AdaptationVisit[]      @relation("AdaptationVoidedBy")
+  classGroupsTeaching      ClassGroup[]           @relation("ClassGroupTeachers")
+  membersCreated           ClassGroupMember[]     @relation("MemberCreatedBy")
+  packagesCreated          Package[]              @relation("PackageCreatedBy")
+  packagesVoided           Package[]              @relation("PackageVoidedBy")
+  packagesReconciled       Package[]              @relation("PackageReconciledBy")
+  extensionsCreated        PackageExtension[]     @relation("ExtensionCreatedBy")
+  lessonsConducted         Lesson[]               @relation("LessonConductedBy")
+  attendancesMarked        LessonAttendance[]     @relation("AttendanceMarkedBy")
+  attendancesVoided        LessonAttendance[]     @relation("AttendanceVoidedBy")
+  usagesVoided             SessionUsage[]         @relation("UsageVoidedBy")
+  dailyMarked              DailyAttendance[]      @relation("DailyMarkedBy")
+  dailyVoided              DailyAttendance[]      @relation("DailyVoidedBy")
+  calendarCreated          CalendarDay[]          @relation("CalendarCreatedBy")
+  calendarVoided           CalendarDay[]          @relation("CalendarVoidedBy")
+  noticesCreated           AbsenceNotice[]        @relation("NoticeCreatedBy")
+  noticesDecided           AbsenceNotice[]        @relation("NoticeDecidedBy")
+  timetablesCreated        Timetable[]            @relation("TimetableCreatedBy")
+  entriesTaught            TimetableEntry[]       @relation("EntryTeacher")
+  changesTaught            LessonChange[]         @relation("ChangeTeacher")
+  changesCreated           LessonChange[]         @relation("ChangeCreatedBy")
+  changesVoided            LessonChange[]         @relation("ChangeVoidedBy")
+  schoolLessonsTaught      SchoolLesson[]         @relation("SchoolLessonTeacher")
+  schoolLessonsLed         SchoolLesson[]         @relation("SchoolLessonConductedBy")
+  lessonMarksMarked        LessonMark[]           @relation("LessonMarkMarkedBy")
+  lessonMarksVoided        LessonMark[]           @relation("LessonMarkVoidedBy")
+  mealOrdersCreated        MealOrder[]            @relation("MealOrderCreatedBy")
+  mealOrdersCancelled      MealOrder[]            @relation("MealOrderCancelledBy")
+  paymentRequestsCreated   PaymentRequest[]       @relation("PaymentRequestCreatedBy")
+  paymentRequestsCancelled PaymentRequest[]       @relation("PaymentRequestCancelledBy")
+  salaryTerms              SalaryTerms[]          @relation("SalaryTermsTeacher")
+  salaryTermsCreated       SalaryTerms[]          @relation("SalaryTermsCreatedBy")
+  payrollSheets            PayrollSheet[]         @relation("PayrollSheetTeacher")
+  payrollApproved          PayrollSheet[]         @relation("PayrollSheetApprovedBy")
+  payrollReopened          PayrollSheet[]         @relation("PayrollSheetReopenedBy")
+  payrollAdjCreated        PayrollAdjustment[]    @relation("PayrollAdjustmentCreatedBy")
+  payrollAdjVoided         PayrollAdjustment[]    @relation("PayrollAdjustmentVoidedBy")
+  payrollPayCreated        PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
+  payrollPayVoided         PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
+  backupRunsCreated        BackupRun[]            @relation("BackupRunCreatedBy")
+  permissions              UserPermission[]
+  auditEvents              AuditEvent[]           @relation("AuditEventActor")
+  auditChanges             AuditChange[]          @relation("AuditChangeActor")
+  authEvents               AuthEvent[]            @relation("AuthEventUser")
 }
 
 model Group {
@@ -142,6 +144,7 @@ model Child {
   subgroupMemberships SubgroupMember[]
   lessonMarks         LessonMark[]
   mealOrders          MealOrder[]
+  paymentRequests     PaymentRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -211,6 +214,7 @@ enum ChargeSource {
 enum PaymentMethod {
   cash
   bank_transfer
+  card
   online
 }
 
@@ -275,6 +279,7 @@ model Payment {
   voidReason String?
 
   allocations Allocation[]
+  invoice     PaymentInvoice?
 
   @@index([childId])
 }
@@ -1360,4 +1365,72 @@ model AuthEvent {
   @@index([at])
   @@index([login])
   @@index([userId])
+}
+
+enum PaymentRequestSource {
+  cabinet
+  link
+}
+
+enum PaymentRequestStatus {
+  open
+  paid
+  cancelled
+  expired
+}
+
+enum PaymentProviderKind {
+  test
+  monobank
+}
+
+enum InvoiceStatus {
+  pending
+  success
+  failure
+  expired
+}
+
+model PaymentRequest {
+  id            String               @id @default(uuid())
+  childId       String
+  child         Child                @relation(fields: [childId], references: [id], onDelete: Restrict)
+  category      FinanceCategory
+  amount        Decimal              @db.Decimal(10, 2)
+  source        PaymentRequestSource
+  status        PaymentRequestStatus @default(open)
+  linkTokenHash String?              @unique
+  comment       String?
+  expiresAt     DateTime?
+  createdById   String?
+  createdBy     User?                @relation("PaymentRequestCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime             @default(now())
+  paidAt        DateTime?
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelledBy   User?                @relation("PaymentRequestCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  invoices      PaymentInvoice[]
+
+  @@index([childId])
+  @@index([status])
+}
+
+model PaymentInvoice {
+  id            String              @id @default(uuid())
+  requestId     String
+  request       PaymentRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  provider      PaymentProviderKind
+  invoiceId     String              @unique
+  pageUrl       String
+  amountKop     Int
+  status        InvoiceStatus       @default(pending)
+  failureReason String?
+  paidAt        DateTime?
+  checkedAt     DateTime?
+  paymentId     String?             @unique
+  payment       Payment?            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  createdAt     DateTime            @default(now())
+
+  @@index([requestId])
+  @@index([status])
 }

@@ -34,6 +34,7 @@ const mockPrisma = {
   absenceNotice: { count: jest.fn() },
   subgroupMember: { count: jest.fn() },
   lessonMark: { count: jest.fn() },
+  paymentRequest: { count: jest.fn() },
 };
 
 const mockAudit = { recordChange: jest.fn() };
@@ -300,6 +301,7 @@ describe('ChildrenService', () => {
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
+      mockPrisma.paymentRequest.count.mockResolvedValue(0);
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
@@ -384,6 +386,31 @@ describe('ChildrenService', () => {
       mockPrisma.absenceNotice.count.mockResolvedValue(0);
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
+
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
+        'Cannot delete: child has financial records',
+      );
+      expect(mockPrisma.child.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a child with payment requests', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      for (const model of [
+        'charge',
+        'payment',
+        'enrollment',
+        'adaptationVisit',
+        'classGroupMember',
+        'lessonAttendance',
+        'package',
+        'dailyAttendance',
+        'absenceNotice',
+        'subgroupMember',
+        'lessonMark',
+      ] as const) {
+        mockPrisma[model].count.mockResolvedValue(0);
+      }
+      mockPrisma.paymentRequest.count.mockResolvedValue(1);
 
       await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
@@ -567,6 +594,7 @@ describe('ChildrenService', () => {
         'absenceNotice',
         'subgroupMember',
         'lessonMark',
+        'paymentRequest',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }

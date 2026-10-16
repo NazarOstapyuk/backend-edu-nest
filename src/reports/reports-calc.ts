@@ -75,6 +75,7 @@ export const CATEGORY_LABELS: Record<FinanceCategory, string> = {
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'Готівка',
   bank_transfer: 'Переказ',
+  card: 'Картка',
   online: 'Онлайн',
 };
 

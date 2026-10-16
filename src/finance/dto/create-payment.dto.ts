@@ -20,7 +20,7 @@ export class CreatePaymentDto {
   @Matches(AMOUNT_PATTERN)
   amount: string;
 
-  @IsIn([PaymentMethod.cash, PaymentMethod.bank_transfer])
+  @IsIn([PaymentMethod.cash, PaymentMethod.bank_transfer, PaymentMethod.card])
   method: PaymentMethod;
 
   @IsString()
