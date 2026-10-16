@@ -28,12 +28,12 @@ describe('TestProvider', () => {
       amountKop: 100,
       reference: 'r',
       destination: 'd',
-      redirectUrl: 'http://x',
+      redirectUrl: 'http://localhost:5173/family/c1?invoice=r',
       webhookUrl: null,
     });
     expect(result.invoiceId).toMatch(/^test_[0-9a-f-]{36}$/);
     expect(result.pageUrl).toBe(
-      `http://localhost:5173/pay/test/${result.invoiceId}`,
+      `http://localhost:5173/pay/test/${result.invoiceId}?return=http%3A%2F%2Flocalhost%3A5173%2Ffamily%2Fc1%3Finvoice%3Dr`,
     );
   });
 

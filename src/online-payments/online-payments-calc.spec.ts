@@ -5,9 +5,11 @@ import {
   hashLinkKey,
   invoiceExpired,
   isFinal,
+  isSettled,
   linkExpiresAt,
   linkState,
   newLinkKey,
+  onlineKopecks,
   payerName,
   toKopecks,
 } from './online-payments-calc';
@@ -31,6 +33,21 @@ describe('kopecks', () => {
     expect(() => toKopecks(D('0.00'))).toThrow(BadRequestException);
     expect(() => toKopecks(D('0.00'))).toThrow('Amount must be greater than 0');
     expect(() => toKopecks(D('-1'))).toThrow(BadRequestException);
+  });
+
+  it('accepts online amounts from 1.00 to 1000000.00', () => {
+    expect(onlineKopecks(D('1.00'))).toBe(100);
+    expect(onlineKopecks(D('1000000.00'))).toBe(100000000);
+  });
+
+  it('rejects online amounts outside 1.00 to 1000000.00', () => {
+    for (const value of ['0.99', '1000000.01']) {
+      expect(() => onlineKopecks(D(value))).toThrow(BadRequestException);
+      expect(() => onlineKopecks(D(value))).toThrow('Amount is out of range');
+    }
+    expect(() => onlineKopecks(D('0.00'))).toThrow(
+      'Amount must be greater than 0',
+    );
   });
 });
 
@@ -97,5 +114,28 @@ describe('isFinal', () => {
     expect(isFinal(InvoiceStatus.failure)).toBe(true);
     expect(isFinal(InvoiceStatus.expired)).toBe(true);
     expect(isFinal(InvoiceStatus.pending)).toBe(false);
+  });
+});
+
+describe('isSettled', () => {
+  it('is true for success and an amount mismatch failure only', () => {
+    expect(
+      isSettled({ status: InvoiceStatus.success, failureReason: null }),
+    ).toBe(true);
+    expect(
+      isSettled({
+        status: InvoiceStatus.failure,
+        failureReason: 'amount mismatch',
+      }),
+    ).toBe(true);
+    expect(
+      isSettled({ status: InvoiceStatus.failure, failureReason: 'declined' }),
+    ).toBe(false);
+    expect(
+      isSettled({ status: InvoiceStatus.expired, failureReason: null }),
+    ).toBe(false);
+    expect(
+      isSettled({ status: InvoiceStatus.pending, failureReason: null }),
+    ).toBe(false);
   });
 });

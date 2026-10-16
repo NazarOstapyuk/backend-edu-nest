@@ -14,6 +14,18 @@ export const toKopecks = (amount: Prisma.Decimal): number => {
   return Number(amount.mul(100).toFixed(0));
 };
 
+export const MIN_ONLINE_KOP = 100;
+export const MAX_ONLINE_KOP = 100000000;
+export const AMOUNT_MISMATCH = 'amount mismatch';
+
+export const onlineKopecks = (amount: Prisma.Decimal): number => {
+  const kop = toKopecks(amount);
+  if (kop < MIN_ONLINE_KOP || kop > MAX_ONLINE_KOP) {
+    throw new BadRequestException('Amount is out of range');
+  }
+  return kop;
+};
+
 export const fromKopecks = (kop: number): Prisma.Decimal =>
   new Prisma.Decimal(kop).div(100);
 
@@ -59,3 +71,11 @@ export const isFinal = (status: InvoiceStatus): boolean =>
   status === InvoiceStatus.success ||
   status === InvoiceStatus.failure ||
   status === InvoiceStatus.expired;
+
+export const isSettled = (invoice: {
+  status: InvoiceStatus;
+  failureReason: string | null;
+}): boolean =>
+  invoice.status === InvoiceStatus.success ||
+  (invoice.status === InvoiceStatus.failure &&
+    invoice.failureReason === AMOUNT_MISMATCH);

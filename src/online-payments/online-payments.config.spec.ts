@@ -18,6 +18,21 @@ describe('readOnlinePaymentsConfig', () => {
     expect(config.enabled).toBe(false);
   });
 
+  it('ignores the test provider in production', () => {
+    const config = readOnlinePaymentsConfig({
+      PAYMENT_PROVIDER: 'test',
+      NODE_ENV: 'production',
+    });
+    expect(config.provider).toBeNull();
+    expect(config.enabled).toBe(false);
+    expect(
+      readOnlinePaymentsConfig({
+        PAYMENT_PROVIDER: 'test',
+        NODE_ENV: 'development',
+      }).enabled,
+    ).toBe(true);
+  });
+
   it('disables empty or unknown providers', () => {
     for (const value of [undefined, '', '  ', 'liqpay']) {
       const config = readOnlinePaymentsConfig({ PAYMENT_PROVIDER: value });

@@ -16,8 +16,9 @@ export const readOnlinePaymentsConfig = (
   env: Record<string, string | undefined>,
 ): OnlinePaymentsConfig => {
   const raw = (env.PAYMENT_PROVIDER ?? '').trim();
+  const production = (env.NODE_ENV ?? '').trim() === 'production';
   const provider =
-    raw === 'test'
+    raw === 'test' && !production
       ? PaymentProviderKind.test
       : raw === 'monobank'
         ? PaymentProviderKind.monobank

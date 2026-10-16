@@ -1,10 +1,16 @@
 import { Logger } from '@nestjs/common';
-import type { OnlinePaymentsConfig } from './online-payments.config';
+import { Test } from '@nestjs/testing';
+import {
+  ONLINE_PAYMENTS_CONFIG,
+  type OnlinePaymentsConfig,
+} from './online-payments.config';
 import { OnlinePaymentsScheduler } from './online-payments.scheduler';
 import { OnlinePaymentsService } from './online-payments.service';
 
-const setup = (enabled: boolean) => {
-  const service = {
+const setup = async (enabled: boolean) => {
+  const service: jest.Mocked<
+    Pick<OnlinePaymentsService, 'syncPending' | 'expireRequests'>
+  > = {
     syncPending: jest.fn().mockResolvedValue(0),
     expireRequests: jest.fn().mockResolvedValue(0),
   };
@@ -15,18 +21,21 @@ const setup = (enabled: boolean) => {
     publicAppUrl: 'http://localhost:5173',
     institution: 'EduNest',
   };
-  const scheduler = new OnlinePaymentsScheduler(
-    service as unknown as OnlinePaymentsService,
-    config,
-  );
-  return { service, scheduler };
+  const module = await Test.createTestingModule({
+    providers: [
+      OnlinePaymentsScheduler,
+      { provide: OnlinePaymentsService, useValue: service },
+      { provide: ONLINE_PAYMENTS_CONFIG, useValue: config },
+    ],
+  }).compile();
+  return { service, scheduler: module.get(OnlinePaymentsScheduler) };
 };
 
 describe('OnlinePaymentsScheduler', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('does nothing when disabled', async () => {
-    const { service, scheduler } = setup(false);
+    const { service, scheduler } = await setup(false);
     await scheduler.sync();
     await scheduler.expire();
     expect(service.syncPending).not.toHaveBeenCalled();
@@ -34,7 +43,7 @@ describe('OnlinePaymentsScheduler', () => {
   });
 
   it('syncs and expires when enabled', async () => {
-    const { service, scheduler } = setup(true);
+    const { service, scheduler } = await setup(true);
     await scheduler.sync();
     await scheduler.expire();
     expect(service.syncPending).toHaveBeenCalledTimes(1);
@@ -42,7 +51,7 @@ describe('OnlinePaymentsScheduler', () => {
   });
 
   it('logs errors instead of throwing', async () => {
-    const { service, scheduler } = setup(true);
+    const { service, scheduler } = await setup(true);
     const error = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);

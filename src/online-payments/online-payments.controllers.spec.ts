@@ -1,5 +1,6 @@
 import { RawBodyRequest } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
 import {
   FinanceCategory,
   PermissionArea,
@@ -20,7 +21,23 @@ import { StaffOnlinePaymentsController } from './staff-online-payments.controlle
 
 const user = { id: 'u1' } as AuthenticatedUser;
 
-const makeService = () => ({
+type ServiceMock = jest.Mocked<
+  Pick<
+    OnlinePaymentsService,
+    | 'config'
+    | 'payFromCabinet'
+    | 'parentInvoice'
+    | 'createLink'
+    | 'listRequests'
+    | 'cancel'
+    | 'publicLink'
+    | 'payLink'
+    | 'handleWebhook'
+    | 'testResult'
+  >
+>;
+
+const makeService = (): ServiceMock => ({
   config: jest.fn().mockReturnValue({ enabled: false }),
   payFromCabinet: jest.fn().mockResolvedValue('pay'),
   parentInvoice: jest.fn().mockResolvedValue('inv'),
@@ -33,15 +50,29 @@ const makeService = () => ({
   testResult: jest.fn().mockResolvedValue('test'),
 });
 
-const asService = (service: ReturnType<typeof makeService>) =>
-  service as unknown as OnlinePaymentsService;
+const setup = async () => {
+  const service = makeService();
+  const module = await Test.createTestingModule({
+    controllers: [
+      ParentOnlinePaymentsController,
+      StaffOnlinePaymentsController,
+      PublicOnlinePaymentsController,
+    ],
+    providers: [{ provide: OnlinePaymentsService, useValue: service }],
+  }).compile();
+  return {
+    service,
+    parent: module.get(ParentOnlinePaymentsController),
+    staff: module.get(StaffOnlinePaymentsController),
+    publicApi: module.get(PublicOnlinePaymentsController),
+  };
+};
 
 describe('online payment controllers', () => {
   const reflector = new Reflector();
 
   it('parent routes delegate', async () => {
-    const service = makeService();
-    const controller = new ParentOnlinePaymentsController(asService(service));
+    const { service, parent: controller } = await setup();
     const dto = { category: FinanceCategory.meals, amount: '10.00' };
     expect(await controller.pay(user, 'c1', dto)).toBe('pay');
     expect(service.payFromCabinet).toHaveBeenCalledWith('u1', 'c1', dto);
@@ -50,8 +81,7 @@ describe('online payment controllers', () => {
   });
 
   it('staff routes delegate', async () => {
-    const service = makeService();
-    const controller = new StaffOnlinePaymentsController(asService(service));
+    const { service, staff: controller } = await setup();
     const dto = { category: FinanceCategory.meals, amount: '10.00' };
     expect(await controller.createLink(user, 'c1', dto)).toBe('link');
     expect(service.createLink).toHaveBeenCalledWith(user, 'c1', dto);
@@ -62,8 +92,7 @@ describe('online payment controllers', () => {
   });
 
   it('public routes delegate', async () => {
-    const service = makeService();
-    const controller = new PublicOnlinePaymentsController(asService(service));
+    const { service, publicApi: controller } = await setup();
     expect(await controller.link('k')).toBe('public');
     expect(service.publicLink).toHaveBeenCalledWith('k');
     expect(await controller.payLink('k')).toBe('paylink');
@@ -76,8 +105,7 @@ describe('online payment controllers', () => {
   });
 
   it('webhook passes raw body and headers', async () => {
-    const service = makeService();
-    const controller = new PublicOnlinePaymentsController(asService(service));
+    const { service, publicApi: controller } = await setup();
     const rawBody = Buffer.from('{"a":1}');
     const req = {
       rawBody,
@@ -90,8 +118,7 @@ describe('online payment controllers', () => {
   });
 
   it('webhook without raw body passes an empty buffer', async () => {
-    const service = makeService();
-    const controller = new PublicOnlinePaymentsController(asService(service));
+    const { service, publicApi: controller } = await setup();
     const req = { headers: {} } as RawBodyRequest<Request>;
     await controller.webhook('test', req);
     expect(service.handleWebhook).toHaveBeenCalledWith(

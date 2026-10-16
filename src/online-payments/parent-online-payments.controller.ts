@@ -31,11 +31,11 @@ export class ParentOnlinePaymentsController {
     return this.payments.payFromCabinet(user.id, id, dto);
   }
 
-  @Get('online-payments/:invoiceId')
+  @Get('online-payments/:id')
   invoice(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('invoiceId', ParseUUIDPipe) invoiceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.payments.parentInvoice(user.id, invoiceId);
+    return this.payments.parentInvoice(user.id, id);
   }
 }

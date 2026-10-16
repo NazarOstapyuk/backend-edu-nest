@@ -28,11 +28,10 @@ export class TestProvider implements PaymentProvider {
   createInvoice(
     input: CreateInvoiceInput,
   ): Promise<{ invoiceId: string; pageUrl: string }> {
-    void input;
     const invoiceId = `test_${randomUUID()}`;
     return Promise.resolve({
       invoiceId,
-      pageUrl: `${this.config.publicAppUrl}/pay/test/${invoiceId}`,
+      pageUrl: `${this.config.publicAppUrl}/pay/test/${invoiceId}?return=${encodeURIComponent(input.redirectUrl)}`,
     });
   }
 

@@ -554,13 +554,116 @@ describe('OnlinePaymentsService', () => {
       });
     });
 
-    it('never changes a failed invoice', async () => {
+    it('credits a late success on a locally expired invoice once', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const row = invoice({ status: InvoiceStatus.expired });
+      mockPrisma.paymentInvoice.findUnique.mockImplementation(() =>
+        Promise.resolve({ ...row }),
+      );
+      mockPrisma.paymentInvoice.update.mockImplementation(
+        ({ data }: { data: Data }) => {
+          Object.assign(row, data);
+          return Promise.resolve(row);
+        },
+      );
+
+      await service.applyInvoiceStatus('inv-1', success());
+      await service.applyInvoiceStatus('inv-1', success());
+
+      expect(mockPrisma.payment.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.paymentInvoice.update).toHaveBeenCalledTimes(1);
+      expect(dataOf(mockPrisma.paymentInvoice.update)).toEqual({
+        status: InvoiceStatus.success,
+        paidAt: new Date('2026-10-16T09:00:00.000Z'),
+        checkedAt: anyDate,
+        paymentId: 'pay-1',
+        failureReason: null,
+      });
+      expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith({
+        where: { id: 'req-1' },
+        data: {
+          status: PaymentRequestStatus.paid,
+          paidAt: new Date('2026-10-16T09:00:00.000Z'),
+        },
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('inv-1');
+      warn.mockRestore();
+    });
+
+    it('credits a late success on a declined invoice, keeping the lock order', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
       mockPrisma.paymentInvoice.findUnique.mockResolvedValue(
-        invoice({ status: InvoiceStatus.failure }),
+        invoice({
+          status: InvoiceStatus.failure,
+          failureReason: 'Відхилено в тестовому банку',
+        }),
+      );
+      mockPrisma.charge.findMany.mockResolvedValue([charge()]);
+
+      await service.applyInvoiceStatus('inv-1', success());
+
+      expect(mockPrisma.payment.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.allocation.create).toHaveBeenCalledTimes(1);
+      expect(dataOf(mockPrisma.paymentInvoice.update).status).toBe(
+        InvoiceStatus.success,
+      );
+      const sql = [0, 1, 2].map((call) => sqlOf(mockPrisma.$queryRaw, call));
+      expect(sql[0]).toContain('"PaymentInvoice"');
+      expect(sql[1]).toContain('"Child"');
+      expect(sql[2]).toContain('"Charge"');
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+        mockPrisma.payment.create.mock.invocationCallOrder[0],
+      );
+      expect(
+        mockPrisma.payment.create.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockPrisma.$queryRaw.mock.invocationCallOrder[2]);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+        mockPrisma.charge.findMany.mock.invocationCallOrder[0],
+      );
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
+
+    it('keeps an amount mismatch failure when a success arrives later', async () => {
+      mockPrisma.paymentInvoice.findUnique.mockResolvedValue(
+        invoice({
+          status: InvoiceStatus.failure,
+          failureReason: 'amount mismatch',
+        }),
       );
       await service.applyInvoiceStatus('inv-1', success());
       expect(mockPrisma.payment.create).not.toHaveBeenCalled();
       expect(mockPrisma.paymentInvoice.update).not.toHaveBeenCalled();
+      expect(mockPrisma.paymentRequest.update).not.toHaveBeenCalled();
+    });
+
+    it('ignores a non-success status on a final invoice', async () => {
+      for (const stored of [
+        invoice({ status: InvoiceStatus.expired }),
+        invoice({ status: InvoiceStatus.failure, failureReason: 'declined' }),
+        invoice({ status: InvoiceStatus.success, paymentId: 'pay-1' }),
+      ]) {
+        mockPrisma.paymentInvoice.findUnique.mockResolvedValue(stored);
+        for (const next of [
+          InvoiceStatus.pending,
+          InvoiceStatus.failure,
+          InvoiceStatus.expired,
+        ]) {
+          await service.applyInvoiceStatus('inv-1', {
+            status: next,
+            amountKop: 50000,
+            paidAt: null,
+            failureReason: 'other',
+          });
+        }
+      }
+      expect(mockPrisma.paymentInvoice.update).not.toHaveBeenCalled();
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
     });
   });
 
@@ -657,6 +760,34 @@ describe('OnlinePaymentsService', () => {
         }),
       ).rejects.toThrow('Amount must be greater than 0');
       expect(mockProvider.createInvoice).not.toHaveBeenCalled();
+    });
+
+    it('rejects amounts outside 1.00 to 1000000.00', async () => {
+      for (const amount of ['0.99', '1000000.01']) {
+        await expect(
+          service.payFromCabinet('parent-1', 'child-1', {
+            category: FinanceCategory.meals,
+            amount,
+          }),
+        ).rejects.toThrow(new BadRequestException('Amount is out of range'));
+      }
+      expect(mockProvider.createInvoice).not.toHaveBeenCalled();
+      expect(mockPrisma.paymentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts the range bounds 1.00 and 1000000.00', async () => {
+      for (const amount of ['1.00', '1000000.00']) {
+        await service.payFromCabinet('parent-1', 'child-1', {
+          category: FinanceCategory.meals,
+          amount,
+        });
+      }
+      expect(
+        arg<CreateInvoiceInput>(mockProvider.createInvoice, 0).amountKop,
+      ).toBe(100);
+      expect(
+        arg<CreateInvoiceInput>(mockProvider.createInvoice, 1).amountKop,
+      ).toBe(100000000);
     });
   });
 
@@ -768,6 +899,37 @@ describe('OnlinePaymentsService', () => {
         ),
       ).rejects.toThrow(new NotFoundException('Child not found'));
       expect(mockPrisma.paymentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects amounts outside 1.00 to 1000000.00', async () => {
+      for (const amount of ['0.99', '1000000.01']) {
+        await expect(
+          service.createLink(admin, 'child-1', {
+            category: FinanceCategory.meals,
+            amount,
+          }),
+        ).rejects.toThrow(new BadRequestException('Amount is out of range'));
+      }
+      expect(mockPrisma.paymentRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts the range bounds 1.00 and 1000000.00', async () => {
+      for (const amount of ['1.00', '1000000.00']) {
+        await service.createLink(admin, 'child-1', {
+          category: FinanceCategory.meals,
+          amount,
+        });
+      }
+      expect(
+        (
+          dataOf(mockPrisma.paymentRequest.create, 0).amount as Prisma.Decimal
+        ).toFixed(2),
+      ).toBe('1.00');
+      expect(
+        (
+          dataOf(mockPrisma.paymentRequest.create, 1).amount as Prisma.Decimal
+        ).toFixed(2),
+      ).toBe('1000000.00');
     });
   });
 

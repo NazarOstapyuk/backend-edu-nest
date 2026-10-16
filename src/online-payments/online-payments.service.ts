@@ -28,14 +28,17 @@ import { applyAllocations } from '../finance/allocations';
 import { formatMoney, money, suggestAllocation } from '../finance/finance-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AMOUNT_MISMATCH,
   fromKopecks,
   hashLinkKey,
   invoiceExpired,
   isFinal,
+  isSettled,
   type LinkState,
   linkExpiresAt,
   linkState,
   newLinkKey,
+  onlineKopecks,
   payerName,
   toKopecks,
 } from './online-payments-calc';
@@ -120,7 +123,7 @@ export class OnlinePaymentsService {
   ): Promise<{ pageUrl: string }> {
     this.assertEnabled();
     const amount = money(dto.amount);
-    const amountKop = toKopecks(amount);
+    const amountKop = onlineKopecks(amount);
     await assertOwnChild(this.prisma, parentId, childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
@@ -162,7 +165,7 @@ export class OnlinePaymentsService {
 
   async parentInvoice(
     parentId: string,
-    invoiceId: string,
+    id: string,
   ): Promise<{
     status: InvoiceStatus;
     amount: string;
@@ -172,7 +175,7 @@ export class OnlinePaymentsService {
     const find = () =>
       this.prisma.paymentInvoice.findFirst({
         where: {
-          id: invoiceId,
+          id,
           request: { child: { parents: { some: { id: parentId } } } },
         },
         include: { request: true },
@@ -212,7 +215,7 @@ export class OnlinePaymentsService {
   ): Promise<{ id: string; url: string; expiresAt: string }> {
     this.assertEnabled();
     const amount = money(dto.amount);
-    toKopecks(amount);
+    onlineKopecks(amount);
     await assertChildInScope(this.prisma, scopeKind(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
@@ -433,7 +436,9 @@ export class OnlinePaymentsService {
         where: { invoiceId },
         include: { request: true },
       });
-      if (!invoice || isFinal(invoice.status)) return;
+      if (!invoice || isSettled(invoice)) return;
+      const late = isFinal(invoice.status);
+      if (late && status.status !== InvoiceStatus.success) return;
 
       const now = new Date();
       if (status.status === InvoiceStatus.pending) {
@@ -464,13 +469,18 @@ export class OnlinePaymentsService {
           where: { id: invoice.id },
           data: {
             status: InvoiceStatus.failure,
-            failureReason: 'amount mismatch',
+            failureReason: AMOUNT_MISMATCH,
             checkedAt: now,
           },
         });
         return;
       }
 
+      if (late) {
+        this.logger.warn(
+          `Invoice ${invoice.invoiceId} was ${invoice.status} locally, crediting a late provider success`,
+        );
+      }
       const { request } = invoice;
       await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${request.childId} FOR UPDATE`;
       const amount = fromKopecks(invoice.amountKop);
