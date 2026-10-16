@@ -35,6 +35,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 
 `.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies).
 Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backups), `BACKUP_PG_CONTAINER` (default `edu_postgres`, empty = local `pg_dump`).
+Optional online payments: `PAYMENT_PROVIDER` (`test` | `monobank`; empty disables), `PAYMENT_WEBHOOK_URL` (public base for webhooks; empty = polling only), `PUBLIC_APP_URL` (frontend base, default `http://localhost:5173`), `INSTITUTION_NAME` (default `EduNest`).
 
 ## Architecture
 
@@ -187,6 +188,15 @@ Spec: `docs/superpowers/specs/2026-10-16-reports-design.md`. Code in `src/report
 - Services load rows; pure builders in `reports-calc.ts` return one `Report` (`columns`, `rows`, `totals`, `sheets`) reusing `finance-calc`, `cabinet-calc`, `register-calc` and `PayrollService.list`, so numbers match the cards. Keep report logic there and test it without mocks.
 - `xlsx-writer.ts` (`exceljs`) renders any `Report`: money as numbers `0.00`, dates `dd.mm.yyyy`, bold totals, extra sheets. Filters go through `resolveFilter` (scope: `Outside access scope`, `Group not found`).
 - Attendance counts only working days (marks on non-working days only show in the timesheet sheet). Payroll rows = months touched by the period plus months of sheets paid inside the period; "Виплачено за період" = non-voided payments dated in the period.
+
+### Domain: online payments
+
+Spec: `docs/superpowers/specs/2026-10-16-online-payments-design.md`. Code in `src/online-payments/`:
+
+- `PaymentRequest` (child, category, amount; `cabinet` or 7-day `link` with only the SHA-256 of its key stored) has `PaymentInvoice` attempts at a `PaymentProvider` (`TestProvider` now; a monobank adapter later replaces the `PAYMENT_PROVIDER` factory). Pure rules (kopecks, expiry, payer name, link keys) live in `online-payments-calc.ts`.
+- Status arrives by webhook (signature verified, then `getStatus`; the body is never trusted) or by polling every 2 minutes; both call `applyInvoiceStatus`, which is idempotent. Lock order: invoice row, then child row, then the payment insert, then the child's charges (Child-first like meals/notices). Polling also re-queries invoices older than 24 h and expires them only when the provider does not report success. Success creates a confirmed `Payment` (`method online`, `externalId = invoiceId`, `createdById null`) auto-allocated to the category's oldest charges (allocations by root); an amount mismatch credits nothing.
+- Routes: parents `POST /me/children/:id/online-payments`, `GET /me/online-payments/:invoiceId`; staff `POST /children/:childId/payment-links`, `GET /children/:childId/payment-requests`, `POST /payment-requests/:id/cancel` (finance); public `GET /pay/:token`, `POST /pay/:token/invoice`, `POST /online-payments/webhook/:provider`, `POST /online-payments/test/:invoiceId` (test provider only), `GET /online-payments/config`. `main.ts` enables `rawBody` for webhooks.
+- Manual payments accept `cash`, `bank_transfer`, `card`.
 
 ## Module conventions
 
