@@ -170,6 +170,59 @@ describe('DashboardService', () => {
     });
   });
 
+  it('filters register marks and approved notices to today', async () => {
+    await service.today(makeUser({ permissions: { register: 'view' } }));
+    expect(prisma.group.findMany).toHaveBeenCalledWith(
+      containing({
+        select: containing({
+          children: {
+            select: {
+              dailyAttendances: containing({
+                where: {
+                  date: new Date('2026-10-16T00:00:00.000Z'),
+                  voidedAt: null,
+                },
+              }),
+              absenceNotices: containing({
+                where: {
+                  status: NoticeStatus.approved,
+                  startDate: { lte: new Date('2026-10-16T00:00:00.000Z') },
+                  endDate: { gte: new Date('2026-10-16T00:00:00.000Z') },
+                },
+              }),
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('narrows a kindergarten-scoped plain teacher to own groups in scope', async () => {
+    await service.today(
+      makeUser({ role: Role.teacher, accessScope: AccessScope.kindergarten }),
+    );
+    expect(prisma.group.findMany).toHaveBeenCalledWith(
+      containing({
+        where: {
+          teachers: { some: { id: 'u1' } },
+          kind: GroupKind.kindergarten,
+        },
+      }),
+    );
+    expect(prisma.mealOrder.findMany).toHaveBeenCalledWith(
+      containing({
+        where: containing({
+          child: {
+            AND: [
+              kindergarten,
+              { group: { teachers: { some: { id: 'u1' } } } },
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
   it('bounds payments to the Kyiv day', async () => {
     await service.today(makeUser({ permissions: { finance: 'view' } }));
     expect(prisma.payment.findMany).toHaveBeenCalledWith(

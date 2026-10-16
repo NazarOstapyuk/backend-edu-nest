@@ -197,7 +197,6 @@ Spec: `docs/superpowers/specs/2026-10-16-today-dashboard-design.md`. Code in `sr
 - The route is guarded by `JwtAuthGuard` only: no `@Roles`/`@Permission` fits several areas plus the teacher role, so `DashboardService` decides (parents get 403 `Insufficient permissions`). Deliberate exception to "always declare roles".
 - Pure counting rules live in `dashboard-calc.ts`; keep them there and test without mocks. `canManageRegister` is exported from `register.service.ts` and reused.
 
-
 ### Domain: online payments
 
 Spec: `docs/superpowers/specs/2026-10-16-online-payments-design.md`. Code in `src/online-payments/`:
