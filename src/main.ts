@@ -8,7 +8,11 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
-  app.set('trust proxy', 'loopback');
+  const trustProxy = process.env.TRUST_PROXY?.trim();
+  app.set(
+    'trust proxy',
+    trustProxy === 'true' ? true : trustProxy || 'loopback',
+  );
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.trim() || 'http://localhost:5173',
     credentials: true,
