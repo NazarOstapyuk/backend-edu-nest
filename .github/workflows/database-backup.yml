@@ -1,0 +1,60 @@
+name: Database backup
+
+on:
+  schedule:
+    - cron: '15 0 * * *'
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Copy kind (manual = before a deploy)
+        type: choice
+        options:
+          - manual
+          - scheduled
+        default: manual
+
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      RCLONE_CONFIG_DATA: ${{ secrets.RCLONE_CONFIG }}
+      REMOTE: ${{ vars.BACKUP_REMOTE || 'gdrive:edu-backups' }}
+      KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.kind || 'scheduled' }}
+      PG_BIN: /usr/lib/postgresql/16/bin
+    steps:
+      - name: Check secrets
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "Secret BACKUP_DATABASE_URL is not set"; exit 1; }
+          [ -n "$RCLONE_CONFIG_DATA" ] || { echo "Secret RCLONE_CONFIG is not set"; exit 1; }
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16 rclone
+
+      - name: Dump
+        run: |
+          suffix=""
+          [ "$KIND" = "manual" ] && suffix="_manual"
+          file="edu_db_$(TZ=Europe/Kyiv date +%Y-%m-%d_%H%M%S)${suffix}.dump"
+          "$PG_BIN/pg_dump" "$DATABASE_URL" -Fc --exclude-table-data='"BackupRun"' -f "$file"
+          "$PG_BIN/pg_restore" --list "$file" > /dev/null
+          ls -l "$file"
+          echo "FILE=$file" >> "$GITHUB_ENV"
+
+      - name: Upload
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$RCLONE_CONFIG_DATA" > ~/.config/rclone/rclone.conf
+          rclone copy "$FILE" "$REMOTE"
+          if [ "$KIND" = "scheduled" ] && [ "$(TZ=Europe/Kyiv date +%d)" = "01" ]; then
+            rclone copy "$FILE" "$REMOTE/monthly"
+          fi
+          rclone delete "$REMOTE" --max-depth 1 --min-age 60d --include 'edu_db_*.dump'
+          rclone lsl "$REMOTE" --max-depth 1 | sort -k 2,3 | tail -5
