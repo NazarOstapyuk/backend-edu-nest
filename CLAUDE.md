@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-NestJS 11 + Prisma 7 (PostgreSQL) backend for an education center: users with roles, groups, children, subscription types, subscriptions (session packs) and attendance tracking. Frontend is expected at `http://localhost:5173` (CORS with credentials is hardcoded in `src/main.ts`).
+NestJS 11 + Prisma 7 (PostgreSQL) backend for an education center: users with roles, groups, children, subscription types, subscriptions (session packs) and attendance tracking. Frontend is expected at `http://localhost:5173` (CORS with credentials in `src/main.ts`, origin from `CORS_ORIGIN`). Production deployment (Oracle Cloud VM, Caddy, systemd): `docs/deploy.md`, files in `deploy/`.
 
 ## Commands
 
@@ -15,6 +15,7 @@ npm run build                   # nest build -> dist/
 npm run lint                    # eslint WITH --fix: rewrites files, check git diff after
 npm run format                  # prettier (singleQuote, trailingComma all)
 npm run backup:restore -- <file>   # restore a database copy (backend stopped), see docs/backups.md
+deploy/deploy.sh                # on the server: safety copy, pull, migrate deploy, build, restart (docs/deploy.md)
 
 npm test                        # unit tests (*.spec.ts under src/)
 npx jest src/users/users.service.spec.ts   # single file
@@ -33,7 +34,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 
 ## Environment
 
-`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies).
+`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies), `CORS_ORIGIN` (default `http://localhost:5173`). `docker-compose.prod.yml` also needs `POSTGRES_PASSWORD`.
 Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backups), `BACKUP_PG_CONTAINER` (default `edu_postgres`, empty = local `pg_dump`).
 Optional online payments: `PAYMENT_PROVIDER` (`test` | `monobank`; empty disables), `PAYMENT_WEBHOOK_URL` (public base for webhooks; empty = polling only), `PUBLIC_APP_URL` (frontend base, default `http://localhost:5173`), `INSTITUTION_NAME` (default `EduNest`).
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=EduNest backend
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/backend-edu-nest
+ExecStart=/usr/bin/node dist/src/main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

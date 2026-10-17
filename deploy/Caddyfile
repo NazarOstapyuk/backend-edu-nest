@@ -1,0 +1,13 @@
+edunest.duckdns.org {
+	encode gzip
+
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	handle {
+		root * /var/www/edunest
+		try_files {path} /index.html
+		file_server
+	}
+}
