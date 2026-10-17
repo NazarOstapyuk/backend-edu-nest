@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-NestJS 11 + Prisma 7 (PostgreSQL) backend for an education center: users with roles, groups, children, subscription types, subscriptions (session packs) and attendance tracking. Frontend is expected at `http://localhost:5173` (CORS with credentials in `src/main.ts`, origin from `CORS_ORIGIN`). Production deployment (Oracle Cloud VM, Caddy, systemd): `docs/deploy.md`, files in `deploy/`.
+NestJS 11 + Prisma 7 (PostgreSQL) backend for an education center: users with roles, groups, children, subscription types, subscriptions (session packs) and attendance tracking. Frontend is expected at `http://localhost:5173` (CORS with credentials in `src/main.ts`, origin from `CORS_ORIGIN`). Production deployment: free services (Render + Neon + Netlify, nightly backups via `.github/workflows/database-backup.yml`) in `docs/deploy-render.md`; a VM (Oracle Cloud, Caddy, systemd) in `docs/deploy.md`, files in `deploy/`.
 
 ## Commands
 
@@ -34,7 +34,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 
 ## Environment
 
-`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies), `CORS_ORIGIN` (default `http://localhost:5173`). `docker-compose.prod.yml` also needs `POSTGRES_PASSWORD`.
+`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies), `CORS_ORIGIN` (default `http://localhost:5173`), `TRUST_PROXY` (Express `trust proxy`: `true` behind Render/Netlify, default `loopback`). `docker-compose.prod.yml` also needs `POSTGRES_PASSWORD`.
 Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backups), `BACKUP_PG_CONTAINER` (default `edu_postgres`, empty = local `pg_dump`).
 Optional online payments: `PAYMENT_PROVIDER` (`test` | `monobank`; empty disables), `PAYMENT_WEBHOOK_URL` (public base for webhooks; empty = polling only), `PUBLIC_APP_URL` (frontend base, default `http://localhost:5173`), `INSTITUTION_NAME` (default `EduNest`).
 
