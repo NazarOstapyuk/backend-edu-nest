@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { AccessScope, AuditAction, Role } from '@prisma/client';
+import { AccessScope, AuditAction, Prisma, Role } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -51,6 +51,20 @@ export class InstitutionsService {
     });
   }
 
+  private async writeUnique<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        throw new ConflictException('Institution name already taken');
+      }
+      throw e;
+    }
+  }
+
   async create(dto: CreateInstitutionDto, user: AuthenticatedUser) {
     this.assertFullScope(user);
     const existing = await this.prisma.institution.findUnique({
@@ -59,59 +73,68 @@ export class InstitutionsService {
     if (existing) {
       throw new ConflictException('Institution name already taken');
     }
-    const created = await this.prisma.institution.create({
-      data: { name: dto.name, type: dto.type },
-      select: SELECT,
-    });
-    await this.audit.recordChange(this.prisma, {
-      actorId: user.id,
-      entityType: 'institutions',
-      entityId: created.id,
-      action: AuditAction.create,
-      before: null,
-      after: created,
-      fields: INSTITUTION_FIELDS,
-    });
-    return created;
+    return this.writeUnique(() =>
+      this.prisma.$transaction(async (tx) => {
+        const created = await tx.institution.create({
+          data: { name: dto.name, type: dto.type },
+          select: SELECT,
+        });
+        await this.audit.recordChange(tx, {
+          actorId: user.id,
+          entityType: 'institutions',
+          entityId: created.id,
+          action: AuditAction.create,
+          before: null,
+          after: created,
+          fields: INSTITUTION_FIELDS,
+        });
+        return created;
+      }),
+    );
   }
 
   async update(id: string, dto: UpdateInstitutionDto, user: AuthenticatedUser) {
     this.assertFullScope(user);
-    const current = await findInstitution(this.prisma, id);
-    if (dto.name && dto.name !== current.name) {
-      const existing = await this.prisma.institution.findUnique({
-        where: { name: dto.name },
-      });
-      if (existing) {
-        throw new ConflictException('Institution name already taken');
-      }
-    }
-    if (dto.type && dto.type !== current.type) {
-      const groups = await this.prisma.group.count({
-        where: { institutionId: id },
-      });
-      if (groups > 0) {
-        throw new BadRequestException('Institution type cannot change');
-      }
-    }
-    const updated = await this.prisma.institution.update({
-      where: { id },
-      data: { name: dto.name, type: dto.type, isActive: dto.isActive },
-      select: SELECT,
-    });
-    await this.audit.recordChange(this.prisma, {
-      actorId: user.id,
-      entityType: 'institutions',
-      entityId: id,
-      action: AuditAction.update,
-      before: {
-        name: current.name,
-        type: current.type,
-        isActive: current.isActive,
-      },
-      after: updated,
-      fields: INSTITUTION_FIELDS,
-    });
-    return updated;
+    return this.writeUnique(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${id} FOR UPDATE`;
+        const current = await findInstitution(tx, id);
+        if (dto.name && dto.name !== current.name) {
+          const existing = await tx.institution.findUnique({
+            where: { name: dto.name },
+          });
+          if (existing) {
+            throw new ConflictException('Institution name already taken');
+          }
+        }
+        if (dto.type && dto.type !== current.type) {
+          const groups = await tx.group.count({
+            where: { institutionId: id },
+          });
+          if (groups > 0) {
+            throw new BadRequestException('Institution type cannot change');
+          }
+        }
+        const updated = await tx.institution.update({
+          where: { id },
+          data: { name: dto.name, type: dto.type, isActive: dto.isActive },
+          select: SELECT,
+        });
+        await this.audit.recordChange(tx, {
+          actorId: user.id,
+          entityType: 'institutions',
+          entityId: id,
+          action: AuditAction.update,
+          before: {
+            name: current.name,
+            type: current.type,
+            isActive: current.isActive,
+          },
+          after: updated,
+          fields: INSTITUTION_FIELDS,
+        });
+        return updated;
+      }),
+    );
   }
 }

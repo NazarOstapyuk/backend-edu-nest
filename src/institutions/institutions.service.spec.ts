@@ -9,6 +9,7 @@ import {
   AccessScope,
   InstitutionType,
   PermissionLevel,
+  Prisma,
   Role,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
@@ -25,6 +26,8 @@ const mockPrisma = {
   },
   userInstitution: { findMany: jest.fn() },
   group: { count: jest.fn() },
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn(),
 };
 const mockAudit = { recordChange: jest.fn() };
 
@@ -52,6 +55,9 @@ describe('InstitutionsService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    mockPrisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+      fn(mockPrisma),
+    );
     const module = await Test.createTestingModule({
       providers: [
         InstitutionsService,
@@ -157,5 +163,61 @@ describe('InstitutionsService', () => {
     await expect(
       service.update('x', { isActive: false }, root),
     ).rejects.toThrow(new NotFoundException('Institution not found'));
+  });
+
+  it('create maps a unique violation to Institution name already taken', async () => {
+    mockPrisma.institution.findUnique.mockResolvedValue(null);
+    mockPrisma.institution.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'x',
+      }),
+    );
+    await expect(
+      service.create(
+        { name: 'Нова', type: InstitutionType.kindergarten },
+        root,
+      ),
+    ).rejects.toThrow(new ConflictException('Institution name already taken'));
+  });
+
+  it('update maps a unique violation to Institution name already taken', async () => {
+    mockPrisma.institution.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce(null);
+    mockPrisma.institution.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('dup', {
+        code: 'P2002',
+        clientVersion: 'x',
+      }),
+    );
+    await expect(service.update('i1', { name: 'Інша' }, root)).rejects.toThrow(
+      new ConflictException('Institution name already taken'),
+    );
+  });
+
+  it('update rejects a name used by another institution', async () => {
+    mockPrisma.institution.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce({ ...existing, id: 'i2' });
+    await expect(service.update('i1', { name: 'Школа' }, root)).rejects.toThrow(
+      new ConflictException('Institution name already taken'),
+    );
+  });
+
+  it('update rejects a scoped admin with Outside access scope', async () => {
+    await expect(
+      service.update('i1', { isActive: false }, scoped),
+    ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+  });
+
+  it('update locks the institution row before counting groups', async () => {
+    mockPrisma.institution.findUnique.mockResolvedValue(existing);
+    mockPrisma.group.count.mockResolvedValue(0);
+    mockPrisma.institution.update.mockResolvedValue(existing);
+    await service.update('i1', { type: InstitutionType.school_class }, root);
+    expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.group.count.mock.invocationCallOrder[0],
+    );
   });
 });
