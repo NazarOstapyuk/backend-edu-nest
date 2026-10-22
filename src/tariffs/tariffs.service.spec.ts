@@ -474,7 +474,7 @@ describe('TariffsService', () => {
 
   describe('audit', () => {
     it('records the created tariff with its prices', async () => {
-      mockPrisma.tariff.findUnique.mockResolvedValue(null);
+      mockPrisma.tariff.findFirst.mockResolvedValue(null);
       mockPrisma.tariff.create.mockResolvedValue(
         tariff({ prices: [tariff().prices[1]] }),
       );
