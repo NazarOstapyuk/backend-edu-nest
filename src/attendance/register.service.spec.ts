@@ -183,6 +183,32 @@ describe('RegisterService', () => {
       );
     });
 
+    it('register groups list for a teacher with header returns only own groups of that institution', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.groupsFor({ ...teacher, scopeInstitutionIds: ['inst-k'] });
+      expect(
+        firstArg<{ where: object }>(mockPrisma.group.findMany).where,
+      ).toEqual({
+        teachers: { some: { id: 't1' } },
+        institutionId: { in: ['inst-k'] },
+      });
+    });
+
+    it('register day for an own group outside the header answers Group not found', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        ...group,
+        institutionId: 'inst-s',
+      });
+      await expect(
+        service.day(
+          'g1',
+          '2026-10-14',
+          { ...teacher, scopeInstitutionIds: ['inst-k'] },
+          TODAY,
+        ),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+    });
+
     it('lists only own groups for a teacher', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groupsFor(teacher);

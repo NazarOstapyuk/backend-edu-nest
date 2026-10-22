@@ -81,6 +81,7 @@ const dayRow = (
 ) => ({ childId, days: [{ date: TODAY, state, reasonId }] });
 
 const mockPrisma = {
+  group: { findMany: jest.fn(), findFirst: jest.fn() },
   child: { findMany: jest.fn() },
   subgroupMember: { findMany: jest.fn() },
   schoolLesson: {
@@ -176,6 +177,36 @@ describe('LessonsService', () => {
         ['1-Б', 3, 'replace'],
       ],
     );
+  });
+
+  it('lists my lessons only for groups of the header institution', async () => {
+    mockPrisma.group.findMany.mockResolvedValue([{ id: 'g1' }]);
+    mockSchedule.build.mockResolvedValue([]);
+    mockSchedule.describe.mockResolvedValue(() => ({}));
+    mockPrisma.schoolLesson.findMany.mockResolvedValue([]);
+    await service.myLessons(
+      { ...teacher, scopeInstitutionIds: ['inst-k'] },
+      '2026-10-14',
+    );
+    expect(
+      firstArg<{ where: object }>(mockPrisma.group.findMany).where,
+    ).toEqual({ institutionId: { in: ['inst-k'] } });
+    expect(mockSchedule.build).toHaveBeenCalledWith(TODAY, TODAY, ['g1']);
+  });
+
+  it('answers Lesson not found for an own group outside the header', async () => {
+    mockPrisma.group.findFirst.mockResolvedValue(null);
+    await expect(
+      service.view(
+        'g1',
+        '2026-10-14',
+        1,
+        null,
+        { ...teacher, scopeInstitutionIds: ['inst-s'] },
+        TODAY,
+      ),
+    ).rejects.toThrow(new NotFoundException('Lesson not found'));
+    expect(mockSchedule.build).not.toHaveBeenCalled();
   });
 
   it('lets only the effective teacher open a lesson', async () => {

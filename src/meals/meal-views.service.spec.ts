@@ -143,6 +143,25 @@ describe('MealViewsService', () => {
     });
   });
 
+  describe('teacher header', () => {
+    it('meal-orders today for an own group outside the header answers Group not found', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g2',
+        kind: GroupKind.school_class,
+        institutionId: 'inst-s',
+        teachers: [{ id: teacher.id }],
+      });
+      await expect(
+        service.today(
+          'g2',
+          { ...teacher, scopeInstitutionIds: ['inst-k'] },
+          day('2026-10-14'),
+        ),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+      expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('adminList', () => {
     it('filters by date, kind and group', async () => {
       mockPrisma.mealOrder.findMany.mockResolvedValue([]);

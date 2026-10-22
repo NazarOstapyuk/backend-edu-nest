@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { LessonStatus, PermissionLevel, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { scopeIds } from '../access/access-calc';
+import { groupScopeWhere } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
 import { RegisterService } from '../attendance/register.service';
@@ -33,7 +35,16 @@ export class LessonsService {
   ) {
     const date = parseDay(dateValue);
     const target = isTimetableManager(user) && teacherId ? teacherId : user.id;
-    const schedules = await this.schedule.build(date, date);
+    const ids = scopeIds(user);
+    const scoped = ids
+      ? (
+          await this.prisma.group.findMany({
+            where: groupScopeWhere(ids),
+            select: { id: true },
+          })
+        ).map((g) => g.id)
+      : undefined;
+    const schedules = await this.schedule.build(date, date, scoped);
     const rows = schedules.flatMap((s) =>
       s.days[0].slots
         .filter((slot) => !slot.cancelled && slot.teacherId === target)
@@ -81,6 +92,15 @@ export class LessonsService {
     level: PermissionLevel,
   ) {
     const date = parseDay(dateValue);
+    const ids = scopeIds(user);
+    if (
+      ids &&
+      !(await this.prisma.group.findFirst({
+        where: { id: groupId, ...groupScopeWhere(ids) },
+        select: { id: true },
+      }))
+    )
+      throw new NotFoundException('Lesson not found');
     const [schedule] = await this.schedule.build(date, date, [groupId]);
     const slot = schedule?.days[0].slots.find(
       (s) => !s.cancelled && s.period === period && s.subgroupId === subgroupId,
