@@ -31,6 +31,8 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn(),
 };
 
 const tariff = (over: Record<string, unknown> = {}) => ({
@@ -89,6 +91,9 @@ describe('EnrollmentsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+      fn(mockPrisma),
+    );
     mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
     mockPrisma.enrollment.findMany.mockResolvedValue([]);
     mockPrisma.enrollment.create.mockResolvedValue(loaded());
@@ -163,6 +168,24 @@ describe('EnrollmentsService', () => {
       await expect(
         service.create('child-1', dto, 'u1', fullAdmin),
       ).rejects.toThrow(message);
+    });
+
+    it('rejects when the child moved to another institution after the lock', async () => {
+      mockPrisma.child.findUnique
+        .mockResolvedValueOnce({
+          id: 'child-1',
+          group: { institutionId: 'inst-b' },
+        })
+        .mockResolvedValueOnce({ group: { institutionId: 'inst-a' } });
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ institutionId: 'inst-b' }),
+      );
+
+      await expect(
+        service.create('child-1', dto, 'u1', fullAdmin),
+      ).rejects.toThrow('Tariff belongs to another institution');
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.enrollment.create).not.toHaveBeenCalled();
     });
 
     it('rejects a tariff of another institution', async () => {

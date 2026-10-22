@@ -146,36 +146,50 @@ export class EnrollmentsService {
     if (!priceOn(tariff.prices, startDate))
       throw new BadRequestException('No price for this date');
 
-    const existing = await this.prisma.enrollment.findMany({
-      where: { childId, tariffId: dto.tariffId },
-    });
-    if (
-      existing.some((e) => overlaps(startDate, endDate, e.startDate, e.endDate))
-    ) {
-      throw new BadRequestException(
-        'Enrollment overlaps an existing enrollment on this tariff',
-      );
-    }
-
-    const created = await this.prisma.enrollment.create({
-      data: {
-        childId,
-        tariffId: dto.tariffId,
-        startDate,
-        endDate,
-        billingMode: dto.billingMode ?? null,
-        note: dto.note,
-        createdById: userId,
-      },
-    });
-    await this.audit.recordChange(this.prisma, {
-      actorId: userId,
-      entityType: 'enrollments',
-      entityId: created.id,
-      action: AuditAction.create,
-      before: null,
-      after: enrollmentAudit(created),
-      fields: ENROLLMENT_FIELDS,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${childId} FOR UPDATE`;
+      const fresh = await tx.child.findUnique({
+        where: { id: childId },
+        select: { group: { select: { institutionId: true } } },
+      });
+      if (!fresh) throw new NotFoundException('Child not found');
+      if (
+        tariff.institutionId !== null &&
+        tariff.institutionId !== (fresh.group?.institutionId ?? null)
+      )
+        throw new BadRequestException('Tariff belongs to another institution');
+      const existing = await tx.enrollment.findMany({
+        where: { childId, tariffId: dto.tariffId },
+      });
+      if (
+        existing.some((e) =>
+          overlaps(startDate, endDate, e.startDate, e.endDate),
+        )
+      ) {
+        throw new BadRequestException(
+          'Enrollment overlaps an existing enrollment on this tariff',
+        );
+      }
+      const created = await tx.enrollment.create({
+        data: {
+          childId,
+          tariffId: dto.tariffId,
+          startDate,
+          endDate,
+          billingMode: dto.billingMode ?? null,
+          note: dto.note,
+          createdById: userId,
+        },
+      });
+      await this.audit.recordChange(tx, {
+        actorId: userId,
+        entityType: 'enrollments',
+        entityId: created.id,
+        action: AuditAction.create,
+        before: null,
+        after: enrollmentAudit(created),
+        fields: ENROLLMENT_FIELDS,
+      });
     });
     return this.loadForChild(childId);
   }
