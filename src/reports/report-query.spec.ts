@@ -46,7 +46,10 @@ describe('reportPeriod', () => {
 });
 
 describe('resolveFilter', () => {
-  const db = { group: { findUnique: jest.fn() } };
+  const db = {
+    group: { findUnique: jest.fn() },
+    institution: { findUnique: jest.fn() },
+  };
   beforeEach(() => jest.clearAllMocks());
 
   it('uses the scope institutions when no kind is given', async () => {
@@ -76,6 +79,46 @@ describe('resolveFilter', () => {
     });
     await expect(
       resolveFilter(db, user(AccessScope.institutions), { groupId: 'g1' }),
+    ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+  });
+  it('narrows to one institution inside the scope', async () => {
+    db.institution.findUnique.mockResolvedValue({ id: 'inst-k' });
+    await expect(
+      resolveFilter(db, user(AccessScope.institutions), {
+        institutionId: 'inst-k',
+        kind: GroupKind.kindergarten,
+      }),
+    ).resolves.toEqual({
+      kind: GroupKind.kindergarten,
+      institutionIds: ['inst-k'],
+      groupId: null,
+    });
+  });
+  it('rejects an institution outside the scope', async () => {
+    db.institution.findUnique.mockResolvedValue({ id: 'inst-s' });
+    await expect(
+      resolveFilter(db, user(AccessScope.institutions), {
+        institutionId: 'inst-s',
+      }),
+    ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+  });
+  it('rejects an unknown institution', async () => {
+    db.institution.findUnique.mockResolvedValue(null);
+    await expect(
+      resolveFilter(db, user(AccessScope.all), { institutionId: 'x' }),
+    ).rejects.toThrow(new NotFoundException('Institution not found'));
+  });
+  it('rejects a group of another institution than the filter', async () => {
+    db.institution.findUnique.mockResolvedValue({ id: 'inst-k' });
+    db.group.findUnique.mockResolvedValue({
+      id: 'g1',
+      institutionId: 'inst-s',
+    });
+    await expect(
+      resolveFilter(db, user(AccessScope.all), {
+        institutionId: 'inst-k',
+        groupId: 'g1',
+      }),
     ).rejects.toThrow(new ForbiddenException('Outside access scope'));
   });
   it('rejects an unknown group', async () => {

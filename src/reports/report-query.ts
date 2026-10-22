@@ -5,7 +5,8 @@ import {
 } from '@nestjs/common';
 import { GroupKind, Prisma } from '@prisma/client';
 import { scopeIds } from '../access/access-calc';
-import { OUTSIDE_SCOPE } from '../access/scope';
+import { assertInstitutionInScope, OUTSIDE_SCOPE } from '../access/scope';
+import { findInstitution } from '../institutions/institution-checks';
 import { parseDay } from '../classes/access';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { dayCount } from '../tariffs/dates';
@@ -39,11 +40,17 @@ export async function resolveFilter(
         select: { id: true; institutionId: true };
       }): Promise<{ id: string; institutionId: string | null } | null>;
     };
+    institution: Parameters<typeof findInstitution>[0]['institution'];
   },
   user: AuthenticatedUser,
-  query: { kind?: GroupKind; groupId?: string },
+  query: { kind?: GroupKind; groupId?: string; institutionId?: string },
 ): Promise<ReportFilter> {
-  const ids = scopeIds(user);
+  let ids = scopeIds(user);
+  if (query.institutionId) {
+    await findInstitution(db, query.institutionId);
+    assertInstitutionInScope(ids, query.institutionId);
+    ids = [query.institutionId];
+  }
   if (query.groupId) {
     const group = await db.group.findUnique({
       where: { id: query.groupId },
