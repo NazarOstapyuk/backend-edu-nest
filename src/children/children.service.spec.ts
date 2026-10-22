@@ -365,6 +365,54 @@ describe('ChildrenService', () => {
         expect(mockPrisma.child.update).not.toHaveBeenCalled();
       });
 
+      it('locks group, institution, child in order and uses the locked group', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g2',
+          institutionId: 'i2',
+        });
+        mockPrisma.institution.findUnique.mockResolvedValue({
+          id: 'i2',
+          type: GroupKind.school_class,
+          isActive: true,
+          name: 'S',
+        });
+
+        await service.update('child-1', { groupId: 'g2' }, fullAdmin);
+
+        const lock = (n: number) =>
+          (
+            mockPrisma.$queryRaw.mock.calls[n] as [TemplateStringsArray]
+          )[0].join('?');
+        expect(lock(0)).toContain('"Group"');
+        expect(lock(0)).toContain('FOR SHARE');
+        expect(lock(1)).toContain('"Institution"');
+        expect(lock(2)).toContain('"Child"');
+        expect(mockPrisma.institution.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'i2' } }),
+        );
+      });
+
+      it('rejects a locked group that is outside the scope', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g2',
+          institutionId: 'i2',
+        });
+
+        await expect(
+          service.update(
+            'child-1',
+            { groupId: 'g2' },
+            {
+              ...fullAdmin,
+              accessScope: AccessScope.institutions,
+              institutionIds: ['i1'],
+              scopeInstitutionIds: ['i1'],
+            },
+          ),
+        ).rejects.toThrow();
+        expect(mockPrisma.child.update).not.toHaveBeenCalled();
+      });
+
       it('skips the guard for a move within the same institution', async () => {
         mockPrisma.group.findUnique.mockResolvedValue({
           id: 'g3',

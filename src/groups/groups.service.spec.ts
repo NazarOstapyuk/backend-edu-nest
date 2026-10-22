@@ -346,6 +346,7 @@ describe('GroupsService', () => {
       });
       mockPrisma.$queryRaw
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: 'c1' }]);
       mockPrisma.mealOrder.findFirst.mockResolvedValue({ id: 'm1' });
       await expect(
@@ -371,6 +372,7 @@ describe('GroupsService', () => {
       });
       mockPrisma.$queryRaw
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: 'c1' }]);
       mockPrisma.group.update.mockResolvedValue({
         id: 'g1',
@@ -381,6 +383,14 @@ describe('GroupsService', () => {
         mealPriceCategoryId: null,
       });
       await service.update('g1', { institutionId: 'inst-k2' }, fullAdmin);
+      const lock = (n: number) =>
+        (mockPrisma.$queryRaw.mock.calls[n] as [TemplateStringsArray])[0].join(
+          '?',
+        );
+      expect(lock(0)).toContain('"Group"');
+      expect(lock(0)).toContain('FOR UPDATE');
+      expect(lock(1)).toContain('"Institution"');
+      expect(lock(2)).toContain('"Child"');
       expect(mockPrisma.enrollment.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({

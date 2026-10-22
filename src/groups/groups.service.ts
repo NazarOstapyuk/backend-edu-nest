@@ -175,6 +175,7 @@ export class GroupsService {
   async update(id: string, dto: UpdateGroupDto, user: AuthenticatedUser) {
     const ids = scopeIds(user);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Group" WHERE id = ${id} FOR UPDATE`;
       const group = await tx.group.findUnique({
         where: { id },
         include: { teachers: { select: { id: true } } },

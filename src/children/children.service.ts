@@ -156,33 +156,33 @@ export class ChildrenService {
     if (dto.groupId === null)
       throw new BadRequestException('Group is required');
 
-    let targetInstitutionId: string | null = null;
-    if (dto.groupId) {
-      const group = await this.prisma.group.findUnique({
-        where: { id: dto.groupId },
-      });
-      if (!group) throw new NotFoundException('Group not found');
-      assertInstitutionInScope(ids, group.institutionId);
-      if (group.institutionId !== before.group?.institutionId) {
-        targetInstitutionId = group.institutionId;
-      }
-    }
-
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
 
     return this.prisma.$transaction(async (tx) => {
-      if (targetInstitutionId) {
-        await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${targetInstitutionId} FOR SHARE`;
-        const target = await findInstitution(tx, targetInstitutionId, {
-          active: true,
+      if (dto.groupId) {
+        await tx.$queryRaw`SELECT id FROM "Group" WHERE id = ${dto.groupId} FOR SHARE`;
+        const group = await tx.group.findUnique({
+          where: { id: dto.groupId },
         });
-        assertInstitutionInScope(ids, target.id);
+        if (!group) throw new NotFoundException('Group not found');
+        assertInstitutionInScope(ids, group.institutionId);
+        const targetInstitutionId = group.institutionId;
+        await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${targetInstitutionId} FOR SHARE`;
         await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${id} FOR UPDATE`;
         const current = await tx.child.findUnique({
           where: { id },
           select: { group: { select: { institutionId: true } } },
         });
         const fromInstitutionId = current?.group?.institutionId;
+        if (
+          targetInstitutionId !== before.group?.institutionId ||
+          (fromInstitutionId && fromInstitutionId !== targetInstitutionId)
+        ) {
+          const target = await findInstitution(tx, targetInstitutionId, {
+            active: true,
+          });
+          assertInstitutionInScope(ids, target.id);
+        }
         if (fromInstitutionId && fromInstitutionId !== targetInstitutionId) {
           await assertChildrenCanMove(tx, [id], fromInstitutionId, kyivToday());
         }
