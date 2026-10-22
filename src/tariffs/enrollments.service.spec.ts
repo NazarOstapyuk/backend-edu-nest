@@ -40,6 +40,7 @@ const tariff = (over: Record<string, unknown> = {}) => ({
   unit: TariffUnit.month,
   billingMode: BillingMode.anniversary,
   isActive: true,
+  institutionId: null,
   prices: [{ price: d('15500'), effectiveFrom: day('2026-01-01') }],
   ...over,
 });
@@ -162,6 +163,57 @@ describe('EnrollmentsService', () => {
       await expect(
         service.create('child-1', dto, 'u1', fullAdmin),
       ).rejects.toThrow(message);
+    });
+
+    it('rejects a tariff of another institution', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'child-1',
+        group: { institutionId: 'inst-a' },
+      });
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ institutionId: 'inst-b' }),
+      );
+
+      await expect(
+        service.create('child-1', dto, 'u1', fullAdmin),
+      ).rejects.toThrow('Tariff belongs to another institution');
+      expect(mockPrisma.enrollment.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an institution tariff for a child without a group', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ institutionId: 'inst-b' }),
+      );
+
+      await expect(
+        service.create('child-1', dto, 'u1', fullAdmin),
+      ).rejects.toThrow('Tariff belongs to another institution');
+    });
+
+    it('accepts a tariff of the child institution', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'child-1',
+        group: { institutionId: 'inst-a' },
+      });
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ institutionId: 'inst-a' }),
+      );
+
+      await service.create('child-1', dto, 'u1', fullAdmin);
+
+      expect(mockPrisma.enrollment.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts a shared tariff for any child', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'child-1',
+        group: { institutionId: 'inst-a' },
+      });
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+
+      await service.create('child-1', dto, 'u1', fullAdmin);
+
+      expect(mockPrisma.enrollment.create).toHaveBeenCalledTimes(1);
     });
 
     it('rejects an end date before the start date', async () => {

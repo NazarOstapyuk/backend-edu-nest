@@ -76,6 +76,7 @@ export class AdaptationService {
   ) {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
+      include: { group: { select: { institutionId: true } } },
     });
     if (!child) throw new NotFoundException('Child not found');
     await assertChildInScope(this.prisma, scopeIds(user), childId);
@@ -84,6 +85,11 @@ export class AdaptationService {
       include: { prices: true },
     });
     if (!tariff) throw new NotFoundException('Tariff not found');
+    if (
+      tariff.institutionId !== null &&
+      tariff.institutionId !== (child.group?.institutionId ?? null)
+    )
+      throw new BadRequestException('Tariff belongs to another institution');
     if (tariff.unit !== TariffUnit.hour)
       throw new BadRequestException('Tariff unit must be hour');
     if (!tariff.isActive) throw new BadRequestException('Tariff is not active');

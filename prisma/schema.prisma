@@ -332,7 +332,7 @@ enum AdjustmentType {
 
 model Tariff {
   id            String          @id @default(uuid())
-  name          String          @unique
+  name          String
   category      FinanceCategory
   unit          TariffUnit
   packageSize   Int?
@@ -350,6 +350,8 @@ model Tariff {
   singleGroups     ClassGroup[]      @relation("GroupSingleTariff")
   packageGroups    ClassGroup[]      @relation("GroupPackageTariff")
   packages         Package[]
+
+  @@unique([institutionId, name])
 }
 
 model TariffPrice {

@@ -46,6 +46,8 @@ export class ClassGroupsService {
     const tariff = await this.prisma.tariff.findUnique({ where: { id } });
     if (!tariff) throw new NotFoundException('Tariff not found');
     if (tariff.unit !== unit) throw new BadRequestException(message);
+    if (tariff.institutionId)
+      throw new BadRequestException('Tariff belongs to another institution');
   }
 
   private async assertNameFree(

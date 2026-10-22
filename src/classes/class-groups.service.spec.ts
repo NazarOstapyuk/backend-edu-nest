@@ -132,6 +132,21 @@ describe('ClassGroupsService', () => {
     });
   });
 
+  it('rejects an institution tariff on a class group', async () => {
+    mockPrisma.tariff.findUnique.mockResolvedValue({
+      id: 'x',
+      unit: TariffUnit.session,
+      institutionId: 'inst-a',
+    });
+
+    await expect(
+      service.create({
+        ...dto,
+        singleTariffId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).rejects.toThrow('Tariff belongs to another institution');
+  });
+
   describe('members', () => {
     it('rejects an overlapping membership', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'c1' });

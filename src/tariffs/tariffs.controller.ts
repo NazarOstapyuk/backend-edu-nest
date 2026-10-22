@@ -26,14 +26,14 @@ export class TariffsController {
   constructor(private tariffs: TariffsService) {}
 
   @Get()
-  list() {
-    return this.tariffs.list();
+  list(@CurrentUser() user: AuthenticatedUser) {
+    return this.tariffs.list(user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Post()
   create(@Body() dto: CreateTariffDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.tariffs.create(dto, user.id);
+    return this.tariffs.create(dto, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -43,7 +43,7 @@ export class TariffsController {
     @Body() dto: UpdateTariffDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.tariffs.update(id, dto, user.id);
+    return this.tariffs.update(id, dto, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
@@ -53,12 +53,12 @@ export class TariffsController {
     @Body() dto: AddTariffPriceDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.tariffs.addPrice(id, dto, user.id);
+    return this.tariffs.addPrice(id, dto, user);
   }
 
   @Permission(PermissionArea.tariffs, PermissionLevel.edit)
   @Delete(':id')
   delete(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.tariffs.delete(id, user.id);
+    return this.tariffs.delete(id, user);
   }
 }

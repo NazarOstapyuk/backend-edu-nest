@@ -72,9 +72,11 @@ export class EnrollmentsService {
   private async assertChild(childId: string, user: AuthenticatedUser) {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
+      include: { group: { select: { institutionId: true } } },
     });
     if (!child) throw new NotFoundException('Child not found');
     await assertChildInScope(this.prisma, scopeIds(user), childId);
+    return child;
   }
 
   private async getEnrollment(id: string) {
@@ -121,12 +123,17 @@ export class EnrollmentsService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    await this.assertChild(childId, user);
+    const child = await this.assertChild(childId, user);
     const tariff = await this.prisma.tariff.findUnique({
       where: { id: dto.tariffId },
       include: { prices: true },
     });
     if (!tariff) throw new NotFoundException('Tariff not found');
+    if (
+      tariff.institutionId !== null &&
+      tariff.institutionId !== (child.group?.institutionId ?? null)
+    )
+      throw new BadRequestException('Tariff belongs to another institution');
     if (!tariff.isActive) throw new BadRequestException('Tariff is not active');
     if (tariff.unit !== TariffUnit.month)
       throw new BadRequestException('Tariff unit must be month');

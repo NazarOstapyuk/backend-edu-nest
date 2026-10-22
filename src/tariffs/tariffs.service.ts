@@ -1,10 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, Prisma, TariffUnit } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { baseScope, scopeIds } from '../access/access-calc';
+import { OUTSIDE_SCOPE, assertInstitutionInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { findInstitution } from '../institutions/institution-checks';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatMoney, money } from '../finance/finance-calc';
 import { priceOn } from './billing-engine';
@@ -25,6 +30,7 @@ const TARIFF_FIELDS = [
   'billingMode',
   'validityDays',
   'isActive',
+  'institutionId',
   'prices',
 ] as const;
 
@@ -34,6 +40,7 @@ const tariffAudit = (tariff: LoadedTariff) => ({
   billingMode: tariff.billingMode,
   validityDays: tariff.validityDays,
   isActive: tariff.isActive,
+  institutionId: tariff.institutionId,
   prices: tariff.prices.map(
     (p) => `${p.price.toFixed(2)}@${isoDay(p.effectiveFrom)}`,
   ),
@@ -50,6 +57,7 @@ export const toTariffView = (tariff: LoadedTariff, today: Date) => {
     validityDays: tariff.validityDays,
     billingMode: tariff.billingMode,
     isActive: tariff.isActive,
+    institutionId: tariff.institutionId,
     currentPrice: current ? formatMoney(current) : null,
     prices: tariff.prices.map((p) => ({
       id: p.id,
@@ -66,30 +74,64 @@ export class TariffsService {
     private audit: AuditService,
   ) {}
 
-  private async get(id: string) {
+  private assertWritable(
+    user: AuthenticatedUser,
+    institutionId: string | null,
+  ) {
+    if (institutionId === null) {
+      if (baseScope(user) !== null) throw new ForbiddenException(OUTSIDE_SCOPE);
+      return;
+    }
+    assertInstitutionInScope(scopeIds(user), institutionId);
+  }
+
+  private async get(id: string, user: AuthenticatedUser) {
     const tariff = await this.prisma.tariff.findUnique({
       where: { id },
       include: tariffInclude,
     });
     if (!tariff) throw new NotFoundException('Tariff not found');
+    const ids = scopeIds(user);
+    if (
+      ids &&
+      tariff.institutionId !== null &&
+      !ids.includes(tariff.institutionId)
+    )
+      throw new NotFoundException('Tariff not found');
     return tariff;
   }
 
-  private async assertNameFree(name: string) {
-    const existing = await this.prisma.tariff.findUnique({ where: { name } });
+  private async assertNameFree(
+    name: string,
+    institutionId: string | null,
+    exceptId?: string,
+  ) {
+    const existing = await this.prisma.tariff.findFirst({
+      where: {
+        name,
+        institutionId,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+    });
     if (existing)
       throw new BadRequestException('Tariff with this name already exists');
   }
 
-  async list(today: Date = kyivToday()) {
+  async list(user: AuthenticatedUser, today: Date = kyivToday()) {
+    const ids = scopeIds(user);
     const tariffs = await this.prisma.tariff.findMany({
+      where: ids
+        ? { OR: [{ institutionId: null }, { institutionId: { in: ids } }] }
+        : undefined,
       include: tariffInclude,
       orderBy: { name: 'asc' },
     });
     return tariffs.map((t) => toTariffView(t, today));
   }
 
-  async create(dto: CreateTariffDto, userId: string) {
+  async create(dto: CreateTariffDto, user: AuthenticatedUser) {
+    const userId = user.id;
+    const institutionId = dto.institutionId ?? null;
     if (dto.unit === TariffUnit.package && !dto.packageSize) {
       throw new BadRequestException(
         'Package size is required for package tariffs',
@@ -97,7 +139,10 @@ export class TariffsService {
     }
     if (money(dto.price).lte(0))
       throw new BadRequestException('Amount must be greater than 0');
-    await this.assertNameFree(dto.name);
+    this.assertWritable(user, institutionId);
+    if (institutionId !== null)
+      await findInstitution(this.prisma, institutionId, { active: true });
+    await this.assertNameFree(dto.name, institutionId);
 
     const tariff = await this.prisma.tariff.create({
       data: {
@@ -109,6 +154,7 @@ export class TariffsService {
         validityDays:
           dto.unit === TariffUnit.package ? (dto.validityDays ?? null) : null,
         billingMode: dto.billingMode,
+        institutionId,
         prices: {
           create: {
             price: dto.price,
@@ -131,10 +177,32 @@ export class TariffsService {
     return toTariffView(tariff, kyivToday());
   }
 
-  async update(id: string, dto: UpdateTariffDto, userId: string) {
-    const tariff = await this.get(id);
-    if (dto.name !== undefined && dto.name !== tariff.name)
-      await this.assertNameFree(dto.name);
+  async update(id: string, dto: UpdateTariffDto, user: AuthenticatedUser) {
+    const userId = user.id;
+    const tariff = await this.get(id, user);
+    this.assertWritable(user, tariff.institutionId);
+    const institutionId =
+      dto.institutionId === undefined
+        ? tariff.institutionId
+        : dto.institutionId;
+    const institutionChanged = institutionId !== tariff.institutionId;
+    if (institutionChanged) {
+      this.assertWritable(user, institutionId);
+      if (institutionId !== null)
+        await findInstitution(this.prisma, institutionId, { active: true });
+      const [enrollments, visits, groups] = await Promise.all([
+        this.prisma.enrollment.count({ where: { tariffId: id } }),
+        this.prisma.adaptationVisit.count({ where: { tariffId: id } }),
+        this.prisma.classGroup.count({
+          where: { OR: [{ singleTariffId: id }, { packageTariffId: id }] },
+        }),
+      ]);
+      if (enrollments + visits + groups > 0)
+        throw new BadRequestException('Tariff is in use');
+    }
+    const name = dto.name ?? tariff.name;
+    if (name !== tariff.name || institutionChanged)
+      await this.assertNameFree(name, institutionId, id);
 
     if (
       dto.billingMode !== undefined &&
@@ -155,6 +223,7 @@ export class TariffsService {
         name: dto.name,
         billingMode: dto.billingMode,
         isActive: dto.isActive,
+        institutionId: institutionChanged ? institutionId : undefined,
         validityDays:
           tariff.unit === TariffUnit.package ? dto.validityDays : undefined,
       },
@@ -172,8 +241,10 @@ export class TariffsService {
     return toTariffView(updated, kyivToday());
   }
 
-  async addPrice(id: string, dto: AddTariffPriceDto, userId: string) {
-    const before = await this.get(id);
+  async addPrice(id: string, dto: AddTariffPriceDto, user: AuthenticatedUser) {
+    const userId = user.id;
+    const before = await this.get(id, user);
+    this.assertWritable(user, before.institutionId);
     if (money(dto.price).lte(0))
       throw new BadRequestException('Amount must be greater than 0');
     const effectiveFrom = toDay(dto.effectiveFrom);
@@ -192,7 +263,7 @@ export class TariffsService {
         createdById: userId,
       },
     });
-    const after = await this.get(id);
+    const after = await this.get(id, user);
     await this.audit.recordChange(this.prisma, {
       actorId: userId,
       entityType: 'tariffs',
@@ -205,8 +276,10 @@ export class TariffsService {
     return toTariffView(after, kyivToday());
   }
 
-  async delete(id: string, userId: string) {
-    const tariff = await this.get(id);
+  async delete(id: string, user: AuthenticatedUser) {
+    const userId = user.id;
+    const tariff = await this.get(id, user);
+    this.assertWritable(user, tariff.institutionId);
     const [enrollments, visits, packages, groups] = await Promise.all([
       this.prisma.enrollment.count({ where: { tariffId: id } }),
       this.prisma.adaptationVisit.count({ where: { tariffId: id } }),

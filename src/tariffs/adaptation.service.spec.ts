@@ -36,6 +36,7 @@ const tariff = (over: Record<string, unknown> = {}) => ({
   unit: TariffUnit.hour,
   billingMode: BillingMode.calendar_full,
   isActive: true,
+  institutionId: null,
   prices: [{ price: d('200'), effectiveFrom: day('2026-01-01') }],
   ...over,
 });
@@ -153,6 +154,36 @@ describe('AdaptationService', () => {
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();
     },
   );
+
+  it('rejects a tariff of another institution', async () => {
+    mockPrisma.child.findUnique.mockResolvedValue({
+      id: 'child-1',
+      group: { institutionId: 'inst-a' },
+    });
+    mockPrisma.tariff.findUnique.mockResolvedValue(
+      tariff({ institutionId: 'inst-b' }),
+    );
+
+    await expect(
+      service.create('child-1', dto, 'u1', fullAdmin),
+    ).rejects.toThrow('Tariff belongs to another institution');
+    expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a shared tariff and the child institution tariff', async () => {
+    mockPrisma.child.findUnique.mockResolvedValue({
+      id: 'child-1',
+      group: { institutionId: 'inst-a' },
+    });
+    mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+    await service.create('child-1', dto, 'u1', fullAdmin);
+    mockPrisma.tariff.findUnique.mockResolvedValue(
+      tariff({ institutionId: 'inst-a' }),
+    );
+    await service.create('child-1', dto, 'u1', fullAdmin);
+
+    expect(mockPrisma.charge.create).toHaveBeenCalledTimes(2);
+  });
 
   it('voids the visit and its charge', async () => {
     mockPrisma.adaptationVisit.findUnique.mockResolvedValue({

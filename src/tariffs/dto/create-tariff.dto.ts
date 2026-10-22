@@ -5,11 +5,13 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { AMOUNT_PATTERN } from '../../finance/finance-calc';
 
@@ -47,4 +49,9 @@ export class CreateTariffDto {
 
   @IsDateString()
   effectiveFrom: string;
+
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID('4')
+  @IsOptional()
+  institutionId?: string | null;
 }

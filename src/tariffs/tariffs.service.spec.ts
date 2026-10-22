@@ -1,12 +1,16 @@
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import {
+  AccessScope,
   AuditAction,
   BillingMode,
   FinanceCategory,
+  PermissionLevel,
   Prisma,
+  Role,
   TariffUnit,
 } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TariffsService } from './tariffs.service';
@@ -18,10 +22,12 @@ const mockPrisma = {
   tariff: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
   },
+  institution: { findUnique: jest.fn() },
   tariffPrice: {
     findUnique: jest.fn(),
     create: jest.fn(),
@@ -43,6 +49,7 @@ const tariff = (over: Record<string, unknown> = {}) => ({
   validityDays: null,
   billingMode: BillingMode.calendar_full,
   isActive: true,
+  institutionId: null,
   prices: [
     { id: 'p2', price: d('16500'), effectiveFrom: day('2027-01-01') },
     { id: 'p1', price: d('15500'), effectiveFrom: day('2026-09-01') },
@@ -57,6 +64,25 @@ const dto = {
   billingMode: BillingMode.calendar_full,
   price: '15500.00',
   effectiveFrom: '2026-09-01',
+};
+
+const admin: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  institutionIds: [],
+  scopeInstitutionIds: null,
+  permissions: { tariffs: PermissionLevel.edit },
+};
+
+const scoped: AuthenticatedUser = {
+  ...admin,
+  id: 'u2',
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-a'],
+  scopeInstitutionIds: ['inst-a'],
 };
 
 const mockAudit = { recordChange: jest.fn() };
@@ -82,7 +108,7 @@ describe('TariffsService', () => {
   it('lists tariffs with the price effective today', async () => {
     mockPrisma.tariff.findMany.mockResolvedValue([tariff()]);
 
-    const [view] = await service.list(day('2026-10-11'));
+    const [view] = await service.list(admin, day('2026-10-11'));
 
     expect(view.currentPrice).toBe('15500.00');
     expect(view.prices.map((p) => p.price)).toEqual(['16500.00', '15500.00']);
@@ -90,12 +116,12 @@ describe('TariffsService', () => {
 
   describe('create', () => {
     it('creates a tariff with its first price', async () => {
-      mockPrisma.tariff.findUnique.mockResolvedValue(null);
+      mockPrisma.tariff.findFirst.mockResolvedValue(null);
       mockPrisma.tariff.create.mockResolvedValue(
         tariff({ prices: [tariff().prices[1]] }),
       );
 
-      const view = await service.create(dto, 'u1');
+      const view = await service.create(dto, admin);
 
       expect(view.name).toBe('Садочок повний день');
       expect(mockPrisma.tariff.create).toHaveBeenCalledWith({
@@ -106,6 +132,7 @@ describe('TariffsService', () => {
           packageSize: null,
           validityDays: null,
           billingMode: BillingMode.calendar_full,
+          institutionId: null,
           prices: {
             create: {
               price: '15500.00',
@@ -120,22 +147,190 @@ describe('TariffsService', () => {
 
     it('requires a package size for package tariffs', async () => {
       await expect(
-        service.create({ ...dto, unit: TariffUnit.package }, 'u1'),
+        service.create({ ...dto, unit: TariffUnit.package }, admin),
       ).rejects.toThrow('Package size is required for package tariffs');
     });
 
     it('rejects a duplicate name', async () => {
-      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.tariff.findFirst.mockResolvedValue(tariff());
 
-      await expect(service.create(dto, 'u1')).rejects.toThrow(
+      await expect(service.create(dto, admin)).rejects.toThrow(
         'Tariff with this name already exists',
       );
     });
 
     it('rejects a zero price', async () => {
       await expect(
-        service.create({ ...dto, price: '0.00' }, 'u1'),
+        service.create({ ...dto, price: '0.00' }, admin),
       ).rejects.toThrow('Amount must be greater than 0');
+    });
+  });
+
+  describe('institutions', () => {
+    it('lists shared and own tariffs only for a scoped user', async () => {
+      mockPrisma.tariff.findMany.mockResolvedValue([]);
+
+      await service.list(scoped);
+
+      expect(mockPrisma.tariff.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: [
+              { institutionId: null },
+              { institutionId: { in: ['inst-a'] } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('lists everything for an unscoped user', async () => {
+      mockPrisma.tariff.findMany.mockResolvedValue([]);
+
+      await service.list(admin);
+
+      expect(mockPrisma.tariff.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: undefined }),
+      );
+    });
+
+    it('allows the same name in two institutions', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-b',
+        isActive: true,
+      });
+      mockPrisma.tariff.findFirst.mockResolvedValue(null);
+      mockPrisma.tariff.create.mockResolvedValue(
+        tariff({ institutionId: 'inst-b' }),
+      );
+
+      const view = await service.create(
+        { ...dto, institutionId: 'inst-b' },
+        admin,
+      );
+
+      expect(mockPrisma.tariff.findFirst).toHaveBeenCalledWith({
+        where: { name: dto.name, institutionId: 'inst-b' },
+      });
+      expect(view.institutionId).toBe('inst-b');
+    });
+
+    it('rejects a duplicate name inside the same institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-a',
+        isActive: true,
+      });
+      mockPrisma.tariff.findFirst.mockResolvedValue(tariff());
+
+      await expect(
+        service.create({ ...dto, institutionId: 'inst-a' }, scoped),
+      ).rejects.toThrow('Tariff with this name already exists');
+    });
+
+    it('refuses a scoped user creating a shared tariff', async () => {
+      await expect(service.create(dto, scoped)).rejects.toThrow(
+        'Outside access scope',
+      );
+      expect(mockPrisma.tariff.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses creating in an institution outside the scope', async () => {
+      await expect(
+        service.create({ ...dto, institutionId: 'inst-b' }, scoped),
+      ).rejects.toThrow('Outside access scope');
+    });
+
+    it('refuses an inactive institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-a',
+        isActive: false,
+      });
+
+      await expect(
+        service.create({ ...dto, institutionId: 'inst-a' }, scoped),
+      ).rejects.toThrow('Institution is inactive');
+    });
+
+    it('refuses a scoped admin editing a shared tariff', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+
+      await expect(
+        service.update('t1', { isActive: false }, scoped),
+      ).rejects.toThrow('Outside access scope');
+      await expect(service.delete('t1', scoped)).rejects.toThrow(
+        'Outside access scope',
+      );
+      expect(mockPrisma.tariff.update).not.toHaveBeenCalled();
+    });
+
+    it('hides a tariff of another institution from a scoped user', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(
+        tariff({ institutionId: 'inst-b' }),
+      );
+
+      await expect(
+        service.update('t1', { isActive: false }, scoped),
+      ).rejects.toThrow('Tariff not found');
+    });
+
+    it('lets a header-narrowed unscoped user change a shared tariff', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.tariff.update.mockResolvedValue(tariff({ isActive: false }));
+
+      await service.update(
+        't1',
+        { isActive: false },
+        { ...admin, scopeInstitutionIds: ['inst-a'] },
+      );
+
+      expect(mockPrisma.tariff.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses moving a used tariff to another institution', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-a',
+        isActive: true,
+      });
+      mockPrisma.enrollment.count.mockResolvedValue(1);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
+
+      await expect(
+        service.update('t1', { institutionId: 'inst-a' }, admin),
+      ).rejects.toThrow('Tariff is in use');
+      expect(mockPrisma.tariff.update).not.toHaveBeenCalled();
+    });
+
+    it('moves an unused tariff and records the institution', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-a',
+        isActive: true,
+      });
+      mockPrisma.enrollment.count.mockResolvedValue(0);
+      mockPrisma.adaptationVisit.count.mockResolvedValue(0);
+      mockPrisma.classGroup.count.mockResolvedValue(0);
+      mockPrisma.tariff.findFirst.mockResolvedValue(null);
+      mockPrisma.tariff.update.mockResolvedValue(
+        tariff({ institutionId: 'inst-a' }),
+      );
+
+      await service.update('t1', { institutionId: 'inst-a' }, admin);
+
+      expect(mockPrisma.tariff.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            institutionId: 'inst-a',
+          }) as unknown,
+        }),
+      );
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          fields: expect.arrayContaining(['institutionId']) as unknown,
+        }),
+      );
     });
   });
 
@@ -148,7 +343,7 @@ describe('TariffsService', () => {
         service.addPrice(
           't1',
           { price: '17000.00', effectiveFrom: '2026-09-01' },
-          'u1',
+          admin,
         ),
       ).rejects.toThrow('Price for this date already exists');
     });
@@ -160,7 +355,7 @@ describe('TariffsService', () => {
       await service.addPrice(
         't1',
         { price: '17000.00', effectiveFrom: '2027-09-01' },
-        'u1',
+        admin,
       );
 
       expect(mockPrisma.tariffPrice.create).toHaveBeenCalledWith({
@@ -180,7 +375,7 @@ describe('TariffsService', () => {
       mockPrisma.enrollment.count.mockResolvedValue(2);
 
       await expect(
-        service.update('t1', { billingMode: BillingMode.anniversary }, 'u1'),
+        service.update('t1', { billingMode: BillingMode.anniversary }, admin),
       ).rejects.toThrow('Cannot change billing mode: tariff has enrollments');
       expect(mockPrisma.tariff.update).not.toHaveBeenCalled();
     });
@@ -195,7 +390,7 @@ describe('TariffsService', () => {
       await service.update(
         't1',
         { billingMode: BillingMode.anniversary },
-        'u1',
+        admin,
       );
 
       expect(mockPrisma.tariff.update).toHaveBeenCalledTimes(1);
@@ -211,7 +406,7 @@ describe('TariffsService', () => {
         tariff({ unit: TariffUnit.package, packageSize: 4 }),
       );
 
-      await service.update('t1', { validityDays: 30 }, 'u1');
+      await service.update('t1', { validityDays: 30 }, admin);
 
       const arg = (
         mockPrisma.tariff.update.mock.calls[0] as [
@@ -225,7 +420,7 @@ describe('TariffsService', () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
       mockPrisma.tariff.update.mockResolvedValue(tariff());
 
-      await service.update('t1', { validityDays: 30 }, 'u1');
+      await service.update('t1', { validityDays: 30 }, admin);
 
       const arg = (
         mockPrisma.tariff.update.mock.calls[0] as [
@@ -244,7 +439,7 @@ describe('TariffsService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
 
-      await expect(service.delete('t1', 'u1')).rejects.toThrow(
+      await expect(service.delete('t1', admin)).rejects.toThrow(
         'Cannot delete: tariff is in use',
       );
       expect(mockPrisma.tariff.delete).not.toHaveBeenCalled();
@@ -257,7 +452,7 @@ describe('TariffsService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
 
-      await expect(service.delete('t1', 'u1')).resolves.toEqual({
+      await expect(service.delete('t1', admin)).resolves.toEqual({
         message: 'Tariff deleted',
       });
       expect(mockPrisma.tariffPrice.deleteMany).toHaveBeenCalledWith({
@@ -271,7 +466,7 @@ describe('TariffsService', () => {
     it('throws NotFoundException for an unknown tariff', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(null);
 
-      await expect(service.delete('missing', 'u1')).rejects.toThrow(
+      await expect(service.delete('missing', admin)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -284,7 +479,7 @@ describe('TariffsService', () => {
         tariff({ prices: [tariff().prices[1]] }),
       );
 
-      await service.create(dto, 'u1');
+      await service.create(dto, admin);
 
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
         mockPrisma,
@@ -312,7 +507,7 @@ describe('TariffsService', () => {
       await service.update(
         't1',
         { billingMode: BillingMode.anniversary },
-        'u1',
+        admin,
       );
 
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
@@ -348,7 +543,7 @@ describe('TariffsService', () => {
       await service.addPrice(
         't1',
         { price: '17000.00', effectiveFrom: '2027-09-01' },
-        'u1',
+        admin,
       );
 
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
@@ -380,7 +575,7 @@ describe('TariffsService', () => {
       mockPrisma.package.count.mockResolvedValue(0);
       mockPrisma.classGroup.count.mockResolvedValue(0);
 
-      await service.delete('t1', 'u1');
+      await service.delete('t1', admin);
 
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
         mockPrisma,

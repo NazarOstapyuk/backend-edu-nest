@@ -5,11 +5,13 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateTariffDto {
@@ -33,4 +35,9 @@ export class UpdateTariffDto {
   @Max(3650)
   @IsOptional()
   validityDays?: number | null;
+
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID('4')
+  @IsOptional()
+  institutionId?: string | null;
 }
