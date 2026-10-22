@@ -38,6 +38,7 @@ model User {
   refreshToken             String?
   isActive                 Boolean                @default(true)
   accessScope              AccessScope            @default(all)
+  institutions             UserInstitution[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   groups                   Group[]                @relation("GroupTeachers")
@@ -105,6 +106,8 @@ model Group {
   teachers            User[]             @relation("GroupTeachers")
   children            Child[]
   kind                GroupKind          @default(kindergarten)
+  institutionId       String?
+  institution         Institution?       @relation(fields: [institutionId], references: [id], onDelete: Restrict)
   dailyAttendances    DailyAttendance[]
   calendarDays        CalendarDay[]
   bellScheduleId      String?
@@ -326,16 +329,18 @@ enum AdjustmentType {
 }
 
 model Tariff {
-  id           String          @id @default(uuid())
-  name         String          @unique
-  category     FinanceCategory
-  unit         TariffUnit
-  packageSize  Int?
-  billingMode  BillingMode     @default(calendar_full)
-  validityDays Int?
-  isActive     Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id            String          @id @default(uuid())
+  name          String          @unique
+  category      FinanceCategory
+  unit          TariffUnit
+  packageSize   Int?
+  billingMode   BillingMode     @default(calendar_full)
+  validityDays  Int?
+  isActive      Boolean         @default(true)
+  institutionId String?
+  institution   Institution?    @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   prices           TariffPrice[]
   enrollments      Enrollment[]
@@ -638,6 +643,7 @@ enum CalendarScope {
   all
   kindergarten
   school_class
+  institution
   group
 }
 
@@ -661,21 +667,23 @@ model AbsenceReason {
 }
 
 model CalendarDay {
-  id          String          @id @default(uuid())
-  startDate   DateTime        @db.Date
-  endDate     DateTime        @db.Date
-  type        CalendarDayType
-  scope       CalendarScope
-  groupId     String?
-  group       Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
-  title       String
-  createdById String
-  createdBy   User            @relation("CalendarCreatedBy", fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
-  voidedAt    DateTime?
-  voidedById  String?
-  voidedBy    User?           @relation("CalendarVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
-  voidReason  String?
+  id            String          @id @default(uuid())
+  startDate     DateTime        @db.Date
+  endDate       DateTime        @db.Date
+  type          CalendarDayType
+  scope         CalendarScope
+  institutionId String?
+  institution   Institution?    @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  groupId       String?
+  group         Group?          @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  title         String
+  createdById   String
+  createdBy     User            @relation("CalendarCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+  voidedAt      DateTime?
+  voidedById    String?
+  voidedBy      User?           @relation("CalendarVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason    String?
 
   @@index([startDate, endDate])
 }
@@ -995,15 +1003,17 @@ enum MenuStatus {
 }
 
 model MenuDay {
-  id          String        @id @default(uuid())
-  date        DateTime      @db.Date
-  kind        GroupKind
-  status      MenuStatus    @default(draft)
-  publishedAt DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  items       MenuDayItem[]
-  orders      MealOrder[]
+  id            String        @id @default(uuid())
+  date          DateTime      @db.Date
+  kind          GroupKind
+  institutionId String?
+  institution   Institution?  @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  status        MenuStatus    @default(draft)
+  publishedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  items         MenuDayItem[]
+  orders        MealOrder[]
 
   @@unique([date, kind])
 }
@@ -1286,6 +1296,7 @@ enum AccessScope {
   all
   kindergarten
   school_class
+  institutions
 }
 
 model UserPermission {
@@ -1433,4 +1444,32 @@ model PaymentInvoice {
 
   @@index([requestId])
   @@index([status])
+}
+
+enum InstitutionType {
+  kindergarten
+  school_class
+}
+
+model Institution {
+  id           String            @id @default(uuid())
+  name         String            @unique
+  type         InstitutionType
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  groups       Group[]
+  tariffs      Tariff[]
+  menuDays     MenuDay[]
+  calendarDays CalendarDay[]
+  users        UserInstitution[]
+}
+
+model UserInstitution {
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+
+  @@id([userId, institutionId])
 }
