@@ -269,7 +269,7 @@ export class MenusService {
       });
       if (!days.length) return { count: 0 };
       const ids = days.map((d) => d.id);
-      await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(ids)}) ORDER BY "institutionId", id FOR UPDATE`;
       const orders = await tx.mealOrder.count({
         where: { menuDayId: { in: ids }, cancelledAt: null },
       });

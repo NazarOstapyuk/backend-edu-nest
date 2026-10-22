@@ -578,6 +578,10 @@ describe('MenusService', () => {
           admin,
         ),
       ).resolves.toEqual({ count: 1 });
+      const strings = (
+        mockPrisma.$queryRaw.mock.calls[0] as [TemplateStringsArray]
+      )[0].join('?');
+      expect(strings).toContain('ORDER BY "institutionId", id FOR UPDATE');
     });
   });
 
