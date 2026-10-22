@@ -389,6 +389,40 @@ describe('MealOrdersService', () => {
       );
     });
 
+    it('uses the group re-read after the child lock', async () => {
+      mockPrisma.child.findUnique
+        .mockResolvedValueOnce(child())
+        .mockResolvedValueOnce(
+          child({
+            group: {
+              id: 'g2',
+              kind: GroupKind.school_class,
+              institutionId: 'inst-s',
+              mealPriceCategory: { id: 'pc2', active: true },
+            },
+          }),
+        );
+      mockPrisma.mealComplexPrice.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            complexId: 'x1',
+            priceCategoryId: 'pc2',
+            validFrom: day('2026-09-01'),
+            price: new Prisma.Decimal(90),
+          },
+        ]);
+      await service.create('c1', [order()], admin, BEFORE);
+      const where = firstArg<{ where: { institutionId: string } }>(
+        mockPrisma.menuDay.findMany,
+      ).where;
+      expect(where.institutionId).toBe('inst-s');
+      expect(
+        (mockPrisma.mealOrder.create.mock.calls[0] as [{ data: object }])[0]
+          .data,
+      ).toMatchObject({ priceCategoryId: 'pc2' });
+    });
+
     it('re-reads the menu status after taking the lock', async () => {
       useMenus(
         [{ id: 'm1', date: day('2026-10-14'), status: MenuStatus.published }],

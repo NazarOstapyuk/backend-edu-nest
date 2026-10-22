@@ -34,6 +34,18 @@ const isParent = (user: AuthenticatedUser) => user.role === Role.parent;
 const dayError = (date: Date, message: string) =>
   new BadRequestException(`${isoDay(date)}: ${message}`);
 
+const childGroupSelect = {
+  id: true,
+  group: {
+    select: {
+      id: true,
+      kind: true,
+      institutionId: true,
+      mealPriceCategory: { select: { id: true, active: true } },
+    },
+  },
+} as const;
+
 @Injectable()
 export class MealOrdersService {
   constructor(
@@ -65,26 +77,17 @@ export class MealOrdersService {
     await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
-      select: {
-        id: true,
-        group: {
-          select: {
-            id: true,
-            kind: true,
-            institutionId: true,
-            mealPriceCategory: { select: { id: true, active: true } },
-          },
-        },
-      },
+      select: childGroupSelect,
     });
     if (!child) throw new NotFoundException('Child not found');
-    const group = child.group;
-    if (!group) throw new BadRequestException('Child has no group');
-    const category = group.mealPriceCategory;
-    if (!category?.active)
+    const firstGroup = child.group;
+    if (!firstGroup) throw new BadRequestException('Child has no group');
+    const firstCategory = firstGroup.mealPriceCategory;
+    if (!firstCategory?.active)
       throw new BadRequestException('Group has no meal price category');
+    const firstCategoryId = firstCategory.id;
     const complexIds = [...new Set(parsed.map((d) => d.complexId))];
-    const [deadline, entries, complexes, prices] = await Promise.all([
+    const [deadline, entries, complexes, firstPrices] = await Promise.all([
       this.settings.getDeadline(),
       this.calendar.entriesBetween(
         parsed[0].day,
@@ -100,7 +103,10 @@ export class MealOrdersService {
         },
       }),
       this.prisma.mealComplexPrice.findMany({
-        where: { complexId: { in: complexIds }, priceCategoryId: category.id },
+        where: {
+          complexId: { in: complexIds },
+          priceCategoryId: firstCategoryId,
+        },
       }),
     ]);
     if (complexIds.some((id) => !complexes.some((c) => c.id === id)))
@@ -108,6 +114,25 @@ export class MealOrdersService {
 
     const ids = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${childId} FOR UPDATE`;
+      const locked = await tx.child.findUnique({
+        where: { id: childId },
+        select: childGroupSelect,
+      });
+      if (!locked) throw new NotFoundException('Child not found');
+      const group = locked.group;
+      if (!group) throw new BadRequestException('Child has no group');
+      const category = group.mealPriceCategory;
+      if (!category?.active)
+        throw new BadRequestException('Group has no meal price category');
+      const prices =
+        category.id === firstCategoryId
+          ? firstPrices
+          : await tx.mealComplexPrice.findMany({
+              where: {
+                complexId: { in: complexIds },
+                priceCategoryId: category.id,
+              },
+            });
       const found = await tx.menuDay.findMany({
         where: {
           institutionId: group.institutionId,
@@ -119,11 +144,11 @@ export class MealOrdersService {
       if (found.length) {
         const menuIds = found.map((m) => m.id);
         await tx.$queryRaw`SELECT id FROM "MenuDay" WHERE id IN (${Prisma.join(menuIds)}) ORDER BY id FOR SHARE`;
-        const locked = await tx.menuDay.findMany({
+        const lockedMenus = await tx.menuDay.findMany({
           where: { id: { in: menuIds } },
           select: { id: true, date: true, status: true },
         });
-        for (const m of locked)
+        for (const m of lockedMenus)
           menus.set(m.date.getTime(), { id: m.id, status: m.status });
       }
       const created: string[] = [];
