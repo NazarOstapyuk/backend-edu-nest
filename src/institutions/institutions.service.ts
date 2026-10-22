@@ -137,4 +137,38 @@ export class InstitutionsService {
       }),
     );
   }
+
+  async delete(id: string, user: AuthenticatedUser) {
+    this.assertFullScope(user);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${id} FOR UPDATE`;
+      const current = await findInstitution(tx, id);
+      const where = { institutionId: id };
+      const counts = await Promise.all([
+        tx.group.count({ where }),
+        tx.tariff.count({ where }),
+        tx.menuDay.count({ where }),
+        tx.calendarDay.count({ where }),
+        tx.userInstitution.count({ where }),
+      ]);
+      if (counts.some((count) => count > 0)) {
+        throw new BadRequestException('Institution is in use');
+      }
+      await tx.institution.delete({ where: { id } });
+      await this.audit.recordChange(tx, {
+        actorId: user.id,
+        entityType: 'institutions',
+        entityId: id,
+        action: AuditAction.delete,
+        before: {
+          name: current.name,
+          type: current.type,
+          isActive: current.isActive,
+        },
+        after: null,
+        fields: INSTITUTION_FIELDS,
+      });
+      return { message: 'Institution deleted' };
+    });
+  }
 }

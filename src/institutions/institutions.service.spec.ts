@@ -23,9 +23,13 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
-  userInstitution: { findMany: jest.fn() },
+  userInstitution: { findMany: jest.fn(), count: jest.fn() },
   group: { count: jest.fn() },
+  tariff: { count: jest.fn() },
+  menuDay: { count: jest.fn() },
+  calendarDay: { count: jest.fn() },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
@@ -221,5 +225,65 @@ describe('InstitutionsService', () => {
     expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       mockPrisma.group.count.mock.invocationCallOrder[0],
     );
+  });
+
+  describe('delete', () => {
+    const empty = () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(existing);
+      mockPrisma.group.count.mockResolvedValue(0);
+      mockPrisma.tariff.count.mockResolvedValue(0);
+      mockPrisma.menuDay.count.mockResolvedValue(0);
+      mockPrisma.calendarDay.count.mockResolvedValue(0);
+      mockPrisma.userInstitution.count.mockResolvedValue(0);
+    };
+
+    it('deletes an empty institution and records the change', async () => {
+      empty();
+      await expect(service.delete('i1', root)).resolves.toEqual({
+        message: 'Institution deleted',
+      });
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.institution.delete).toHaveBeenCalledWith({
+        where: { id: 'i1' },
+      });
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'institutions',
+          entityId: 'i1',
+          action: 'delete',
+          after: null,
+        }),
+      );
+    });
+
+    it.each([
+      'group',
+      'tariff',
+      'menuDay',
+      'calendarDay',
+      'userInstitution',
+    ] as const)('refuses when the institution has %s rows', async (model) => {
+      empty();
+      mockPrisma[model].count.mockResolvedValue(1);
+      await expect(service.delete('i1', root)).rejects.toThrow(
+        new BadRequestException('Institution is in use'),
+      );
+      expect(mockPrisma.institution.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects a scoped admin', async () => {
+      await expect(service.delete('i1', scoped)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockPrisma.institution.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws Institution not found for a missing id', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(null);
+      await expect(service.delete('x', root)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
   });
 });

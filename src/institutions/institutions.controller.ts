@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -44,5 +45,11 @@ export class InstitutionsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.institutions.update(id, dto, user);
+  }
+
+  @Permission(PermissionArea.settings, PermissionLevel.edit)
+  @Delete(':id')
+  delete(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.institutions.delete(id, user);
   }
 }
