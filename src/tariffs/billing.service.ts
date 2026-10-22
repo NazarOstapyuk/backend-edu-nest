@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { AuditAction, ChargeSource, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
-import { scopeIds } from '../access/access-calc';
+import { baseScope, scopeIds } from '../access/access-calc';
 import {
   OUTSIDE_SCOPE,
   assertChildInScope,
@@ -150,7 +150,7 @@ export class BillingService {
   }
 
   async runForUser(user: AuthenticatedUser) {
-    if (scopeIds(user)) throw new ForbiddenException(OUTSIDE_SCOPE);
+    if (baseScope(user)) throw new ForbiddenException(OUTSIDE_SCOPE);
     return this.runAll(user.id);
   }
 

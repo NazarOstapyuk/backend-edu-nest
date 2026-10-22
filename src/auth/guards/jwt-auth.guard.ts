@@ -12,17 +12,19 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const ok = (await super.canActivate(context)) as boolean;
-    if (!ok) return false;
     const allowed =
       this.reflector.getAllAndOverride<boolean>(ALLOW_WITHOUT_PASSWORD_CHANGE, [
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
-    const { user } = context
-      .switchToHttp()
-      .getRequest<{ user?: AuthenticatedUser }>();
-    assertPasswordChanged(user, allowed);
+    const request = context.switchToHttp().getRequest<{
+      user?: AuthenticatedUser;
+      ignoreInstitutionHeader?: boolean;
+    }>();
+    if (allowed) request.ignoreInstitutionHeader = true;
+    const ok = (await super.canActivate(context)) as boolean;
+    if (!ok) return false;
+    assertPasswordChanged(request.user, allowed);
     return true;
   }
 }

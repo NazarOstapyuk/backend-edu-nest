@@ -19,6 +19,11 @@ import { findInstitution } from '../../institutions/institution-checks';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const selectedInstitution = (req: Request): string | null => {
+  if (
+    (req as Request & { ignoreInstitutionHeader?: boolean })
+      .ignoreInstitutionHeader
+  )
+    return null;
   const header = req.headers['x-institution-id'];
   return typeof header === 'string' && header !== '' ? header : null;
 };

@@ -15,9 +15,10 @@ describe('JwtStrategy', () => {
     config as unknown as ConfigService,
   );
 
-  const request = (header?: string | string[]) =>
+  const request = (header?: string | string[], ignore = false) =>
     ({
       headers: header === undefined ? {} : { 'x-institution-id': header },
+      ...(ignore ? { ignoreInstitutionHeader: true } : {}),
     }) as unknown as Request;
 
   const dbUser = (overrides: Record<string, unknown> = {}) => ({
@@ -144,6 +145,36 @@ describe('JwtStrategy', () => {
 
     expect(user.scopeInstitutionIds).toBeNull();
     expect(prisma.institution.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('ignores an outside or unknown header when the request is flagged', async () => {
+    prisma.user.findUnique.mockResolvedValue(dbUser());
+
+    const outside = await strategy.validate(request('inst-x', true), {
+      sub: 'u1',
+      role: 'admin',
+    });
+    const unknown = await strategy.validate(request('missing', true), {
+      sub: 'u1',
+      role: 'admin',
+    });
+
+    expect(outside.scopeInstitutionIds).toEqual(['inst-k', 'inst-s']);
+    expect(unknown.scopeInstitutionIds).toEqual(['inst-k', 'inst-s']);
+    expect(prisma.institution.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('uses the full scope for a flagged root request', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      dbUser({ role: 'root', accessScope: 'all', institutions: [] }),
+    );
+
+    const user = await strategy.validate(request('inst-k', true), {
+      sub: 'u1',
+      role: 'root',
+    });
+
+    expect(user.scopeInstitutionIds).toBeNull();
   });
 
   it('rejects missing or inactive users', async () => {

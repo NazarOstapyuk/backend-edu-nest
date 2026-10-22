@@ -426,6 +426,21 @@ describe('BillingService', () => {
       });
     });
 
+    it('lets root and scope-all users run billing with a selected institution', async () => {
+      mockPrisma.appSetting.findUnique.mockResolvedValue(null);
+      mockPrisma.enrollment.findMany.mockResolvedValue([]);
+      await expect(
+        service.runForUser({
+          ...fullAdmin,
+          role: Role.root,
+          scopeInstitutionIds: ['inst-x'],
+        }),
+      ).resolves.toMatchObject({ created: 0 });
+      await expect(
+        service.runForUser({ ...fullAdmin, scopeInstitutionIds: ['inst-x'] }),
+      ).resolves.toMatchObject({ created: 0 });
+    });
+
     it('lists problems of the scope only', async () => {
       mockPrisma.appSetting.findUnique.mockResolvedValue(null);
       mockPrisma.enrollment.findMany.mockResolvedValue([]);
