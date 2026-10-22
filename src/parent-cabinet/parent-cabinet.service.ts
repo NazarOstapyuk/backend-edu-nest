@@ -42,6 +42,26 @@ const moneyPayment = {
   },
 } as const;
 
+const groupSelect = {
+  id: true,
+  name: true,
+  institution: { select: { id: true, name: true } },
+} as const;
+
+const splitGroup = (
+  group: {
+    id: string;
+    name: string;
+    institution: { id: string; name: string };
+  } | null,
+) =>
+  group
+    ? {
+        group: { id: group.id, name: group.name },
+        institution: group.institution,
+      }
+    : { group: null, institution: null };
+
 const visitOrder = { adaptation: 0, lesson: 1, legacy: 2 } as const;
 
 @Injectable()
@@ -60,7 +80,7 @@ export class ParentCabinetService {
         firstName: true,
         lastName: true,
         middleName: true,
-        group: { select: { id: true, name: true } },
+        group: { select: groupSelect },
         charges: moneyCharge,
         payments: moneyPayment,
       },
@@ -73,7 +93,7 @@ export class ParentCabinetService {
         firstName: c.firstName,
         lastName: c.lastName,
         middleName: c.middleName,
-        group: c.group,
+        ...splitGroup(c.group),
         due: money.due,
         overdue: money.overdue,
         prepayment: money.prepayment,
@@ -101,7 +121,7 @@ export class ParentCabinetService {
         lastName: true,
         middleName: true,
         birthDate: true,
-        group: { select: { id: true, name: true } },
+        group: { select: groupSelect },
         parents: {
           select: {
             id: true,
@@ -202,7 +222,7 @@ export class ParentCabinetService {
       lastName: child.lastName,
       middleName: child.middleName,
       birthDate: child.birthDate,
-      group: child.group,
+      ...splitGroup(child.group),
       parents: child.parents,
       enrollments: child.enrollments.map((e) => ({
         id: e.id,

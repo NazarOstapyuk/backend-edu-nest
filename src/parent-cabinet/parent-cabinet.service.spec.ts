@@ -81,6 +81,30 @@ describe('ParentCabinetService', () => {
     expect(family.children.map((c) => c.due)).toEqual(['1000.00', '500.00']);
   });
 
+  it('shows the institution of each child group in the family view', async () => {
+    const withGroup = {
+      ...moneyChild('A', '100'),
+      group: {
+        id: 'g1',
+        name: 'Сонечка',
+        institution: { id: 'i1', name: 'Садок' },
+      },
+    };
+    mockPrisma.child.findMany.mockResolvedValue([
+      withGroup,
+      moneyChild('B', '50'),
+    ]);
+
+    const family = await service.family('parent-1', TODAY);
+
+    expect(family.children[0]).toMatchObject({
+      group: { id: 'g1', name: 'Сонечка' },
+      institution: { id: 'i1', name: 'Садок' },
+    });
+    expect(family.children[0].group).not.toHaveProperty('institution');
+    expect(family.children[1].institution).toBeNull();
+  });
+
   it('includes categorized prepayment and unallocated in child and family prepayment', async () => {
     const child = moneyChild('A', '100');
     mockPrisma.child.findMany.mockResolvedValue([
