@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { PermissionArea, PermissionLevel } from '@prisma/client';
@@ -15,6 +16,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permission } from '../common/decorators/permission.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { CreateGroupDto } from './dto/create-group.dto';
+import { ListGroupsQueryDto } from './dto/list-groups-query.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupsService } from './groups.service';
 
@@ -31,8 +33,11 @@ export class GroupsController {
   }
 
   @Get()
-  findAll(@CurrentUser() user: AuthenticatedUser) {
-    return this.groupsService.findAll(user);
+  findAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListGroupsQueryDto,
+  ) {
+    return this.groupsService.findAll(user, query.institutionId);
   }
 
   @Permission(PermissionArea.children, PermissionLevel.edit)

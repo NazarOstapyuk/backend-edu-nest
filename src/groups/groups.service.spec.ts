@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AccessScope, GroupKind, PermissionLevel, Role } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -24,6 +28,24 @@ const mockPrisma = {
   bellSchedule: { findUnique: jest.fn() },
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
+  institution: { findUnique: jest.fn() },
+  enrollment: { findFirst: jest.fn() },
+  mealOrder: { findFirst: jest.fn() },
+  $queryRaw: jest.fn(),
+  $transaction: jest.fn(),
+};
+
+const schoolInst = {
+  id: 'inst-s',
+  name: 'Школа',
+  type: GroupKind.school_class,
+  isActive: true,
+};
+const kgInst = {
+  id: 'inst-k',
+  name: 'Садок',
+  type: GroupKind.kindergarten,
+  isActive: true,
 };
 
 const mockAudit = { recordChange: jest.fn() };
@@ -46,6 +68,13 @@ describe('GroupsService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    mockPrisma.$transaction.mockImplementation(
+      (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma),
+    );
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+    mockPrisma.institution.findUnique.mockResolvedValue(kgInst);
+    mockPrisma.enrollment.findFirst.mockResolvedValue(null);
+    mockPrisma.mealOrder.findFirst.mockResolvedValue(null);
     const moduleRef = await Test.createTestingModule({
       providers: [
         GroupsService,
@@ -59,13 +88,11 @@ describe('GroupsService', () => {
     service = moduleRef.get(GroupsService);
   });
 
-  it('stores the group kind', async () => {
+  it('copies the kind from the institution type', async () => {
+    mockPrisma.institution.findUnique.mockResolvedValue(schoolInst);
     mockPrisma.group.findUnique.mockResolvedValue(null);
     mockPrisma.group.create.mockResolvedValue({ id: 'g1' });
-    await service.create(
-      { name: '1-А', kind: GroupKind.school_class },
-      fullAdmin,
-    );
+    await service.create({ name: '1-А', institutionId: 'inst-s' }, fullAdmin);
     expect(
       firstArg<{ data: { kind: GroupKind } }>(mockPrisma.group.create).data
         .kind,
@@ -231,8 +258,149 @@ describe('GroupsService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
       mockPrisma.mealPriceCategory.findUnique.mockResolvedValue(null);
       await expect(
-        service.create({ name: 'Нова', mealPriceCategoryId: 'pc9' }, fullAdmin),
+        service.create(
+          {
+            name: 'Нова',
+            institutionId: 'inst-k',
+            mealPriceCategoryId: 'pc9',
+          },
+          fullAdmin,
+        ),
       ).rejects.toThrow(new NotFoundException('Meal price category not found'));
+    });
+  });
+
+  describe('institutions', () => {
+    it('rejects an unknown institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(null);
+      await expect(
+        service.create({ name: 'A', institutionId: 'x' }, fullAdmin),
+      ).rejects.toThrow(new NotFoundException('Institution not found'));
+    });
+
+    it('rejects an inactive institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...kgInst,
+        isActive: false,
+      });
+      await expect(
+        service.create({ name: 'A', institutionId: 'inst-k' }, fullAdmin),
+      ).rejects.toThrow(new BadRequestException('Institution is inactive'));
+      expect(mockPrisma.group.create).not.toHaveBeenCalled();
+    });
+
+    it('locks the institution row before reading it', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(null);
+      mockPrisma.group.create.mockResolvedValue({ id: 'g1' });
+      await service.create({ name: 'A', institutionId: 'inst-k' }, fullAdmin);
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.institution.findUnique.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('looks the name up inside the institution', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(null);
+      mockPrisma.group.create.mockResolvedValue({ id: 'g1' });
+      await service.create({ name: 'A', institutionId: 'inst-k' }, fullAdmin);
+      expect(mockPrisma.group.findUnique).toHaveBeenCalledWith({
+        where: { institutionId_name: { institutionId: 'inst-k', name: 'A' } },
+      });
+    });
+
+    it('rejects a duplicate name in the same institution', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({ id: 'g0' });
+      await expect(
+        service.create({ name: 'A', institutionId: 'inst-k' }, fullAdmin),
+      ).rejects.toThrow(new ConflictException('Group name already taken'));
+    });
+
+    it('refuses moving to an institution of another type', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'A',
+        kind: GroupKind.kindergarten,
+        institutionId: 'inst-k',
+      });
+      mockPrisma.institution.findUnique.mockResolvedValue(schoolInst);
+      await expect(
+        service.update('g1', { institutionId: 'inst-s' }, fullAdmin),
+      ).rejects.toThrow(
+        new BadRequestException('Institution type cannot change'),
+      );
+      expect(mockPrisma.group.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses moving a group whose child has a future meal order', async () => {
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce({
+          id: 'g1',
+          name: 'A',
+          kind: GroupKind.kindergarten,
+          institutionId: 'inst-k',
+        })
+        .mockResolvedValueOnce(null);
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...kgInst,
+        id: 'inst-k2',
+      });
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'c1' }]);
+      mockPrisma.mealOrder.findFirst.mockResolvedValue({ id: 'm1' });
+      await expect(
+        service.update('g1', { institutionId: 'inst-k2' }, fullAdmin),
+      ).rejects.toThrow(new BadRequestException('Child has meal orders'));
+      expect(mockPrisma.group.update).not.toHaveBeenCalled();
+    });
+
+    it('moves a group and audits in the transaction', async () => {
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce({
+          id: 'g1',
+          name: 'A',
+          kind: GroupKind.kindergarten,
+          institutionId: 'inst-k',
+          bellScheduleId: null,
+          mealPriceCategoryId: null,
+        })
+        .mockResolvedValueOnce(null);
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...kgInst,
+        id: 'inst-k2',
+      });
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'c1' }]);
+      mockPrisma.group.update.mockResolvedValue({
+        id: 'g1',
+        name: 'A',
+        kind: GroupKind.kindergarten,
+        institutionId: 'inst-k2',
+        bellScheduleId: null,
+        mealPriceCategoryId: null,
+      });
+      await service.update('g1', { institutionId: 'inst-k2' }, fullAdmin);
+      expect(mockPrisma.enrollment.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            childId: { in: ['c1'] },
+            tariff: { institutionId: 'inst-k' },
+          }) as unknown,
+        }),
+      );
+      expect(
+        firstArg<{ data: { institutionId: string } }>(mockPrisma.group.update)
+          .data.institutionId,
+      ).toBe('inst-k2');
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          after: expect.objectContaining({
+            institutionId: 'inst-k2',
+          }) as unknown,
+        }),
+      );
     });
   });
 
@@ -258,10 +426,21 @@ describe('GroupsService', () => {
       );
     });
 
-    it('refuses to create a group without an institution in scope', async () => {
+    it('refuses to create a group outside the scope', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(schoolInst);
       await expect(
-        service.create({ name: '1-А', kind: GroupKind.school_class }, kgAdmin),
+        service.create({ name: '1-А', institutionId: 'inst-s' }, kgAdmin),
       ).rejects.toThrow('Outside access scope');
+      expect(mockPrisma.group.create).not.toHaveBeenCalled();
+    });
+
+    it('filters the list by institution inside the scope', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.findAll(kgAdmin, 'inst-k');
+      expect(mockPrisma.group.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { institutionId: 'inst-k' } }),
+      );
+      await expect(service.findAll(kgAdmin, 'inst-s')).resolves.toEqual([]);
     });
 
     it('hides a group of another institution on update and delete', async () => {
@@ -278,14 +457,19 @@ describe('GroupsService', () => {
       );
     });
 
-    it('refuses changing the kind out of the scope', async () => {
+    it('refuses moving a group into an institution outside the scope', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
+        name: 'A',
         kind: GroupKind.kindergarten,
         institutionId: 'inst-k',
       });
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...kgInst,
+        id: 'inst-k2',
+      });
       await expect(
-        service.update('g1', { kind: GroupKind.school_class }, kgAdmin),
+        service.update('g1', { institutionId: 'inst-k2' }, kgAdmin),
       ).rejects.toThrow('Outside access scope');
     });
   });
@@ -303,10 +487,8 @@ describe('GroupsService', () => {
       mockPrisma.group.findUnique.mockResolvedValue(null);
       mockPrisma.group.create.mockResolvedValue(row);
 
-      await service.create(
-        { name: '1-А', kind: GroupKind.school_class },
-        fullAdmin,
-      );
+      mockPrisma.institution.findUnique.mockResolvedValue(schoolInst);
+      await service.create({ name: '1-А', institutionId: 'inst-s' }, fullAdmin);
 
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
         mockPrisma,
