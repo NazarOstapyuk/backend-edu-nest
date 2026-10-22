@@ -255,8 +255,15 @@ describe('MenusService', () => {
         admin,
       );
       expect(result).toEqual([
-        { date: '2026-10-13', working: true, title: null, menu: null },
         {
+          institutionId: IK,
+          date: '2026-10-13',
+          working: true,
+          title: null,
+          menu: null,
+        },
+        {
+          institutionId: IK,
           date: '2026-10-14',
           working: true,
           title: null,
@@ -415,6 +422,15 @@ describe('MenusService', () => {
       ).toEqual([IK, IS]);
       expect(mockPrisma.menuDayItem.createMany).toHaveBeenCalledTimes(2);
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns views carrying their institutionIds in request order', async () => {
+      const result = await service.saveDay(
+        '2026-10-14',
+        { institutionIds: [IS, IK], dishIds: ['soup'] },
+        admin,
+      );
+      expect(result.map((v) => v.institutionId)).toEqual([IS, IK]);
     });
 
     it('locks and writes institutions in id order regardless of request order', async () => {

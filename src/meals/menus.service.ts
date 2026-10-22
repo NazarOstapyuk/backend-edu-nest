@@ -147,6 +147,7 @@ export class MenusService {
       const info = working(date);
       const menu = days.find((d) => d.date.getTime() === date.getTime());
       return {
+        institutionId: institution.id,
         date: isoDay(date),
         working: info.working,
         title: info.title,
