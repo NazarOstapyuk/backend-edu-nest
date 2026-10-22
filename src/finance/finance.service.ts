@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope, childScopeWhere } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,7 +49,7 @@ export class FinanceService {
   }
 
   async getChildFinance(childId: string, user: AuthenticatedUser) {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.findChild(childId);
     const [charges, payments] = await this.loadRecords(childId);
     const parents = await this.prisma.user.findMany({
@@ -68,7 +68,7 @@ export class FinanceService {
   }
 
   async getHistory(childId: string, user: AuthenticatedUser) {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     await this.findChild(childId);
     const [charges, payments] = await this.loadRecords(childId);
     return buildHistory(charges, payments);
@@ -79,7 +79,7 @@ export class FinanceService {
     dto: AllocationSuggestionDto,
     user: AuthenticatedUser,
   ) {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     await this.findChild(childId);
     const amount = money(dto.amount);
     if (amount.lte(0))
@@ -94,7 +94,7 @@ export class FinanceService {
 
   async getBalances(query: BalancesQueryDto, user: AuthenticatedUser) {
     const children = await this.prisma.child.findMany({
-      where: childScopeWhere(scopeKind(user)),
+      where: childScopeWhere(scopeIds(user)),
       select: balanceChildSelect,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });

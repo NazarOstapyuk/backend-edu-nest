@@ -18,6 +18,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
@@ -26,6 +28,8 @@ const teacher = {
   login: 't',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 
@@ -86,33 +90,50 @@ describe('MealViewsService', () => {
   });
 
   describe('scope', () => {
-    const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
+    const kgAdmin = {
+      ...admin,
+      accessScope: AccessScope.institutions,
+      institutionIds: ['inst-k'],
+      scopeInstitutionIds: ['inst-k'],
+    };
 
-    it('limits the admin list to children of the scoped kind', async () => {
+    it('limits the admin list to children of the scope', async () => {
       mockPrisma.mealOrder.findMany.mockResolvedValue([]);
       await service.adminList({ date: '2026-10-14', groupId: 'g1' }, kgAdmin);
       expect(
         firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
       ).toEqual({
         date: day('2026-10-14'),
-        child: { group: { kind: GroupKind.kindergarten, id: 'g1' } },
+        child: {
+          group: { id: 'g1', institutionId: { in: ['inst-k'] } },
+        },
       });
     });
 
-    it('rejects a request for another kind than the scope', async () => {
-      await expect(
-        service.adminList(
-          { date: '2026-10-14', kind: GroupKind.school_class },
-          kgAdmin,
-        ),
-      ).rejects.toThrow(new ForbiddenException('Outside access scope'));
-      expect(mockPrisma.mealOrder.findMany).not.toHaveBeenCalled();
+    it('intersects the requested kind with the scope', async () => {
+      mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+      await service.adminList(
+        { date: '2026-10-14', kind: GroupKind.school_class },
+        kgAdmin,
+      );
+      expect(
+        firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
+      ).toEqual({
+        date: day('2026-10-14'),
+        child: {
+          group: {
+            kind: GroupKind.school_class,
+            institutionId: { in: ['inst-k'] },
+          },
+        },
+      });
     });
 
-    it('404s today for a group of another kind', async () => {
+    it('404s today for a group of another institution', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g2',
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
         teachers: [],
       });
       await expect(

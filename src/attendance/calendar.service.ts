@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CalendarScope, GroupKind } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { CalendarScope } from '@prisma/client';
+import { scopeIds } from '../access/access-calc';
 import { OUTSIDE_SCOPE } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -25,12 +25,16 @@ export class CalendarService {
   }
 
   private entryInScope(
-    kind: GroupKind | null,
-    entry: { scope: CalendarScope; group?: { kind: GroupKind } | null },
+    ids: string[] | null,
+    entry: {
+      scope: CalendarScope;
+      group?: { institutionId: string | null } | null;
+    },
   ) {
-    if (!kind) return true;
-    if (entry.scope === CalendarScope.group) return entry.group?.kind === kind;
-    return entry.scope === CalendarScope[kind];
+    if (!ids) return true;
+    if (entry.scope !== CalendarScope.group) return false;
+    const institutionId = entry.group?.institutionId ?? null;
+    return institutionId !== null && ids.includes(institutionId);
   }
 
   async list(
@@ -39,7 +43,7 @@ export class CalendarService {
     groupId: string | undefined,
     user: AuthenticatedUser,
   ) {
-    const kind = scopeKind(user);
+    const ids = scopeIds(user);
     const from = parseDay(fromValue);
     const to = parseDay(toValue);
     if (to.getTime() < from.getTime())
@@ -48,9 +52,12 @@ export class CalendarService {
     if (groupId) {
       const group = await this.prisma.group.findUnique({
         where: { id: groupId },
-        select: { id: true, kind: true },
+        select: { id: true, kind: true, institutionId: true },
       });
-      if (!group || (kind && group.kind !== kind))
+      if (
+        !group ||
+        (ids && (!group.institutionId || !ids.includes(group.institutionId)))
+      )
         throw new NotFoundException('Group not found');
       scopeFilter = {
         OR: [
@@ -59,12 +66,20 @@ export class CalendarService {
           { scope: CalendarScope.group, groupId },
         ],
       };
-    } else if (kind) {
+    } else if (ids) {
+      const institutions = await this.prisma.institution.findMany({
+        where: { id: { in: ids } },
+        select: { type: true },
+      });
+      const kinds = [...new Set(institutions.map((i) => i.type))];
       scopeFilter = {
         OR: [
           { scope: CalendarScope.all },
-          { scope: CalendarScope[kind] },
-          { scope: CalendarScope.group, group: { kind } },
+          ...kinds.map((k) => ({ scope: CalendarScope[k] })),
+          {
+            scope: CalendarScope.group,
+            group: { institutionId: { in: ids } },
+          },
         ],
       };
     }
@@ -88,22 +103,15 @@ export class CalendarService {
     const isGroup = dto.scope === CalendarScope.group;
     if (isGroup !== Boolean(dto.groupId))
       throw new BadRequestException('Group is required for group scope');
-    const kind = scopeKind(user);
-    let groupKind: GroupKind | undefined;
+    let group: { institutionId: string | null } | null = null;
     if (dto.groupId) {
-      const group = await this.prisma.group.findUnique({
+      group = await this.prisma.group.findUnique({
         where: { id: dto.groupId },
-        select: { id: true, kind: true },
+        select: { id: true, institutionId: true },
       });
       if (!group) throw new NotFoundException('Group not found');
-      groupKind = group.kind;
     }
-    if (
-      !this.entryInScope(kind, {
-        scope: dto.scope,
-        group: groupKind ? { kind: groupKind } : null,
-      })
-    )
+    if (!this.entryInScope(scopeIds(user), { scope: dto.scope, group }))
       throw new ForbiddenException(OUTSIDE_SCOPE);
     return this.prisma.calendarDay.create({
       data: {
@@ -122,10 +130,10 @@ export class CalendarService {
   async void(id: string, reason: string, user: AuthenticatedUser) {
     const entry = await this.prisma.calendarDay.findUnique({
       where: { id },
-      include: { group: { select: { kind: true } } },
+      include: { group: { select: { institutionId: true } } },
     });
     if (!entry) throw new NotFoundException('Calendar entry not found');
-    if (!this.entryInScope(scopeKind(user), entry))
+    if (!this.entryInScope(scopeIds(user), entry))
       throw new ForbiddenException(OUTSIDE_SCOPE);
     if (entry.voidedAt)
       throw new BadRequestException('Calendar entry is voided');

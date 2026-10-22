@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import {
   AccessScope,
   FinanceCategory,
@@ -10,12 +10,14 @@ import {
 } from '@prisma/client';
 import { FinanceReportsService } from './finance-reports.service';
 
-const user = (accessScope: AccessScope) => ({
+const user = (accessScope: AccessScope, ids: string[] = ['inst-k']) => ({
   id: 'u1',
   role: Role.admin,
   login: 'a',
   mustChangePassword: false,
   accessScope,
+  institutionIds: accessScope === AccessScope.institutions ? ids : [],
+  scopeInstitutionIds: accessScope === AccessScope.institutions ? ids : null,
   permissions: {},
 });
 
@@ -40,7 +42,7 @@ describe('FinanceReportsService', () => {
     it('queries confirmed, non-voided payments within Kyiv day bounds', async () => {
       await service.payments(
         { from: '2026-10-01', to: '2026-10-31' },
-        user(AccessScope.kindergarten),
+        user(AccessScope.institutions),
       );
       expect(prisma.payment.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -51,7 +53,7 @@ describe('FinanceReportsService', () => {
               gte: new Date('2026-09-30T21:00:00.000Z'),
               lt: new Date('2026-10-31T22:00:00.000Z'),
             },
-            child: { group: { kind: GroupKind.kindergarten } },
+            child: { group: { institutionId: { in: ['inst-k'] } } },
           },
         }),
       );
@@ -82,17 +84,27 @@ describe('FinanceReportsService', () => {
       expect(JSON.stringify(report.rows[0])).toContain('Petrenko Ivan');
     });
 
-    it('rejects a school_class kind for a kindergarten-scoped user', async () => {
-      await expect(
-        service.payments(
-          {
-            from: '2026-10-01',
-            to: '2026-10-31',
-            kind: GroupKind.school_class,
-          },
-          user(AccessScope.kindergarten),
-        ),
-      ).rejects.toThrow(ForbiddenException);
+    it('intersects a requested kind with the scope', async () => {
+      await service.payments(
+        {
+          from: '2026-10-01',
+          to: '2026-10-31',
+          kind: GroupKind.school_class,
+        },
+        user(AccessScope.institutions),
+      );
+      expect(prisma.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            child: {
+              group: {
+                kind: GroupKind.school_class,
+                institutionId: { in: ['inst-k'] },
+              },
+            },
+          }) as unknown,
+        }),
+      );
     });
 
     it('rejects an invalid period', async () => {
@@ -170,10 +182,10 @@ describe('FinanceReportsService', () => {
     });
 
     it('applies the scope filter to the child query', async () => {
-      await service.debts({}, user(AccessScope.school_class));
+      await service.debts({}, user(AccessScope.institutions, ['inst-s']));
       expect(prisma.child.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { group: { kind: GroupKind.school_class } },
+          where: { group: { institutionId: { in: ['inst-s'] } } },
         }),
       );
     });

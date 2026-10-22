@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GroupKind, Prisma } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { OUTSIDE_SCOPE } from '../access/scope';
 import { parseDay } from '../classes/access';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -14,6 +14,7 @@ export const MAX_PERIOD_DAYS = 366;
 
 export interface ReportFilter {
   kind: GroupKind | null;
+  institutionIds: string[] | null;
   groupId: string | null;
 }
 
@@ -35,33 +36,46 @@ export async function resolveFilter(
     group: {
       findUnique(args: {
         where: { id: string };
-        select: { id: true; kind: true };
-      }): Promise<{ id: string; kind: GroupKind } | null>;
+        select: { id: true; institutionId: true };
+      }): Promise<{ id: string; institutionId: string | null } | null>;
     };
   },
   user: AuthenticatedUser,
   query: { kind?: GroupKind; groupId?: string },
 ): Promise<ReportFilter> {
-  const scope = scopeKind(user);
-  if (scope && query.kind && query.kind !== scope)
-    throw new ForbiddenException(OUTSIDE_SCOPE);
+  const ids = scopeIds(user);
   if (query.groupId) {
     const group = await db.group.findUnique({
       where: { id: query.groupId },
-      select: { id: true, kind: true },
+      select: { id: true, institutionId: true },
     });
     if (!group) throw new NotFoundException('Group not found');
-    if (scope && group.kind !== scope)
+    if (ids && (!group.institutionId || !ids.includes(group.institutionId)))
       throw new ForbiddenException(OUTSIDE_SCOPE);
   }
-  return { kind: query.kind ?? scope, groupId: query.groupId ?? null };
+  return {
+    kind: query.kind ?? null,
+    institutionIds: ids,
+    groupId: query.groupId ?? null,
+  };
 }
+
+export const groupFilterWhere = (
+  filter: ReportFilter,
+): Prisma.GroupWhereInput => ({
+  ...(filter.kind ? { kind: filter.kind } : {}),
+  ...(filter.institutionIds
+    ? { institutionId: { in: filter.institutionIds } }
+    : {}),
+});
 
 export const childFilterWhere = (
   filter: ReportFilter,
   childId?: string,
 ): Prisma.ChildWhereInput => ({
-  ...(filter.kind ? { group: { kind: filter.kind } } : {}),
+  ...(filter.kind || filter.institutionIds
+    ? { group: groupFilterWhere(filter) }
+    : {}),
   ...(filter.groupId ? { groupId: filter.groupId } : {}),
   ...(childId ? { id: childId } : {}),
 });

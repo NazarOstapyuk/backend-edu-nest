@@ -20,6 +20,9 @@ const user = (
   login: 'a',
   mustChangePassword: false,
   accessScope,
+  institutionIds: accessScope === AccessScope.institutions ? ['inst-k'] : [],
+  scopeInstitutionIds:
+    accessScope === AccessScope.institutions ? ['inst-k'] : null,
   permissions,
 });
 
@@ -202,6 +205,21 @@ describe('ActivityReportsService', () => {
       });
     });
 
+    it('limits school lessons to the scope', async () => {
+      await service.lessons(
+        { ...range, kind: GroupKind.school_class },
+        user(bothAreas, AccessScope.institutions),
+      );
+      expect(firstArg(prisma.schoolLesson.findMany)).toMatchObject({
+        where: {
+          group: {
+            kind: GroupKind.school_class,
+            institutionId: { in: ['inst-k'] },
+          },
+        },
+      });
+    });
+
     it('maps both kinds into the report', async () => {
       prisma.schoolLesson.findMany.mockResolvedValue([
         {
@@ -331,12 +349,12 @@ describe('ActivityReportsService', () => {
     it('still validates the group filter', async () => {
       prisma.group.findUnique.mockResolvedValue({
         id: groupId,
-        kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
       await expect(
         service.payroll(
           { ...range, groupId },
-          user({}, AccessScope.kindergarten),
+          user({}, AccessScope.institutions),
         ),
       ).rejects.toThrow(ForbiddenException);
     });

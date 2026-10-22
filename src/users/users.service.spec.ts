@@ -67,6 +67,8 @@ const actorOf = (
   login: 'actor',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions,
 });
 const rootActor = actorOf(Role.root);
@@ -656,6 +658,8 @@ describe('UsersService', () => {
       login: 'deputy',
       mustChangePassword: false,
       accessScope: AccessScope.all,
+      institutionIds: [] as string[],
+      scopeInstitutionIds: null as string[] | null,
       permissions: {
         users: PermissionLevel.edit,
         finance: PermissionLevel.edit,

@@ -13,7 +13,12 @@ import { PayrollService } from '../payroll/payroll.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isoDay, kyivToday } from '../tariffs/dates';
 import { ReportQueryDto } from './dto/report-query.dto';
-import { childFilterWhere, reportPeriod, resolveFilter } from './report-query';
+import {
+  childFilterWhere,
+  groupFilterWhere,
+  reportPeriod,
+  resolveFilter,
+} from './report-query';
 import { Report } from './report.types';
 import {
   PayrollMonthRow,
@@ -122,7 +127,7 @@ export class ActivityReportsService {
             date,
             ...(teacherId ? { teacherId } : {}),
             group: {
-              ...(filter.kind ? { kind: filter.kind } : {}),
+              ...groupFilterWhere(filter),
               ...(filter.groupId ? { id: filter.groupId } : {}),
             },
           },

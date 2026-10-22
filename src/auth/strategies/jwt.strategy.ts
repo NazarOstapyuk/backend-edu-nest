@@ -1,10 +1,27 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import { Role } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
-import { toPermissionMap } from '../../access/access-calc';
+import {
+  baseScope,
+  effectiveScope,
+  toPermissionMap,
+} from '../../access/access-calc';
+import { OUTSIDE_SCOPE } from '../../access/scope';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user.type';
+import { findInstitution } from '../../institutions/institution-checks';
 import { PrismaService } from '../../prisma/prisma.service';
+
+const selectedInstitution = (req: Request): string | null => {
+  const header = req.headers['x-institution-id'];
+  return typeof header === 'string' && header !== '' ? header : null;
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -20,21 +37,43 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       ]),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_SECRET')!,
+      passReqToCallback: true,
     });
   }
 
-  async validate(payload: { sub: string; role: string }) {
+  async validate(
+    req: Request,
+    payload: { sub: string; role: string },
+  ): Promise<AuthenticatedUser> {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { permissions: { select: { area: true, level: true } } },
+      include: {
+        permissions: { select: { area: true, level: true } },
+        institutions: { select: { institutionId: true } },
+      },
     });
     if (!user || !user.isActive) throw new UnauthorizedException();
+    const institutionIds = user.institutions.map((row) => row.institutionId);
+    const selected =
+      user.role === Role.parent ? null : selectedInstitution(req);
+    if (selected !== null) await findInstitution(this.prisma, selected);
+    const scope = effectiveScope(
+      baseScope({
+        role: user.role,
+        accessScope: user.accessScope,
+        institutionIds,
+      }),
+      selected,
+    );
+    if (scope === 'outside') throw new ForbiddenException(OUTSIDE_SCOPE);
     return {
       id: user.id,
       role: user.role,
       login: user.login,
       mustChangePassword: user.mustChangePassword,
       accessScope: user.accessScope,
+      institutionIds,
+      scopeInstitutionIds: scope,
       permissions: toPermissionMap(user.permissions),
     };
   }

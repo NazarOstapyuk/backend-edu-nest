@@ -1,6 +1,5 @@
 import {
   AccessScope,
-  GroupKind,
   PermissionArea,
   PermissionLevel,
   Role,
@@ -12,8 +11,10 @@ import {
   grantDenial,
   hasPermission,
   levelSatisfies,
+  baseScope,
+  effectiveScope,
   scopeCovers,
-  scopeKind,
+  scopeIds,
   toPermissionMap,
 } from './access-calc';
 
@@ -22,7 +23,7 @@ const user = (
   permissions = {},
   accessScope: AccessScope = AccessScope.all,
   id = 'u1',
-) => ({ id, role, accessScope, permissions });
+) => ({ id, role, accessScope, institutionIds: [] as string[], permissions });
 
 describe('levels and permissions', () => {
   it('lets edit satisfy view but not the other way round', () => {
@@ -78,15 +79,51 @@ describe('levels and permissions', () => {
 });
 
 describe('scope', () => {
-  it('maps scope to a group kind', () => {
-    expect(scopeKind(user(Role.admin))).toBeNull();
-    expect(scopeKind(user(Role.root, {}, AccessScope.kindergarten))).toBeNull();
-    expect(scopeKind(user(Role.admin, {}, AccessScope.kindergarten))).toBe(
-      GroupKind.kindergarten,
-    );
-    expect(scopeKind(user(Role.teacher, {}, AccessScope.school_class))).toBe(
-      GroupKind.school_class,
-    );
+  it('computes the base scope', () => {
+    expect(baseScope(user(Role.root))).toBeNull();
+    expect(baseScope(user(Role.admin))).toBeNull();
+    expect(
+      baseScope({
+        role: Role.parent,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['a'],
+      }),
+    ).toBeNull();
+    expect(
+      baseScope({
+        role: Role.root,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['a'],
+      }),
+    ).toBeNull();
+    expect(
+      baseScope({
+        role: Role.admin,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['a', 'b'],
+      }),
+    ).toEqual(['a', 'b']);
+    expect(
+      baseScope({
+        role: Role.teacher,
+        accessScope: AccessScope.institutions,
+        institutionIds: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it('applies the selected institution', () => {
+    expect(effectiveScope(null, null)).toBeNull();
+    expect(effectiveScope(['a', 'b'], null)).toEqual(['a', 'b']);
+    expect(effectiveScope(null, 'x')).toEqual(['x']);
+    expect(effectiveScope(['a', 'b'], 'b')).toEqual(['b']);
+    expect(effectiveScope(['a'], 'b')).toBe('outside');
+    expect(effectiveScope([], 'b')).toBe('outside');
+  });
+
+  it('reads the effective scope ids', () => {
+    expect(scopeIds({ scopeInstitutionIds: null })).toBeNull();
+    expect(scopeIds({ scopeInstitutionIds: ['a'] })).toEqual(['a']);
   });
 
   it('checks scope coverage', () => {

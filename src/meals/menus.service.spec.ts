@@ -26,9 +26,16 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: allPermissions(PermissionLevel.edit),
 };
-const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
+const kgAdmin = {
+  ...admin,
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-k'],
+  scopeInstitutionIds: ['inst-k'],
+};
 
 const dish = (id: string, active = true) => ({
   id,
@@ -52,6 +59,7 @@ const mockPrisma = {
     findMany: jest.fn(),
   },
   dish: { findMany: jest.fn() },
+  institution: { findFirst: jest.fn() },
   mealOrder: { groupBy: jest.fn(), count: jest.fn() },
   mealOrderItem: { count: jest.fn() },
   $queryRaw: jest.fn(),
@@ -103,26 +111,35 @@ describe('MenusService', () => {
     const school = GroupKind.school_class;
     const period = { from: '2026-10-12', to: '2026-10-16' };
 
-    it('rejects a scoped manager on another kind for every operation', async () => {
+    it('rejects a scoped manager reading a kind outside their institutions', async () => {
+      mockPrisma.institution.findFirst.mockResolvedValue(null);
       await expect(
         service.list({ kind: school, ...period }, kgAdmin),
       ).rejects.toThrow(outside);
+      expect(mockPrisma.institution.findFirst).toHaveBeenCalledWith({
+        where: { id: { in: ['inst-k'] }, type: school },
+        select: { id: true },
+      });
+      expect(mockPrisma.menuDay.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a scoped manager on every kind-level write', async () => {
       await expect(
-        service.saveDay('2026-10-14', school, { dishIds: [] }, kgAdmin),
+        service.saveDay('2026-10-14', K, { dishIds: [] }, kgAdmin),
+      ).rejects.toThrow(outside);
+      await expect(service.deleteDay('2026-10-14', K, kgAdmin)).rejects.toThrow(
+        outside,
+      );
+      await expect(
+        service.publish({ kind: K, ...period }, kgAdmin),
       ).rejects.toThrow(outside);
       await expect(
-        service.deleteDay('2026-10-14', school, kgAdmin),
-      ).rejects.toThrow(outside);
-      await expect(
-        service.publish({ kind: school, ...period }, kgAdmin),
-      ).rejects.toThrow(outside);
-      await expect(
-        service.unpublish({ kind: school, ...period }, kgAdmin),
+        service.unpublish({ kind: K, ...period }, kgAdmin),
       ).rejects.toThrow(outside);
       await expect(
         service.copy(
           {
-            kind: school,
+            kind: K,
             fromStart: '2026-10-12',
             fromEnd: '2026-10-16',
             toStart: '2026-11-02',
@@ -134,7 +151,8 @@ describe('MenusService', () => {
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('lets a scoped manager work on their own kind', async () => {
+    it('lets a scoped manager read the kind of their institution', async () => {
+      mockPrisma.institution.findFirst.mockResolvedValue({ id: 'inst-k' });
       await expect(
         service.list({ kind: K, ...period }, kgAdmin),
       ).resolves.toHaveLength(5);

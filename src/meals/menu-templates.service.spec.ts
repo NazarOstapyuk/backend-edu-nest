@@ -19,6 +19,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: allPermissions(PermissionLevel.edit),
 };
 
@@ -191,17 +193,22 @@ describe('MenuTemplatesService', () => {
       );
     });
 
-    it('rejects applying to another kind than the scope', async () => {
+    it('rejects applying for a scoped manager', async () => {
       await expect(
         service.apply(
           't1',
           {
-            kind: GroupKind.school_class,
+            kind: GroupKind.kindergarten,
             from: '2026-10-12',
             to: '2026-10-16',
             startWeek: 1,
           },
-          { ...admin, accessScope: AccessScope.kindergarten },
+          {
+            ...admin,
+            accessScope: AccessScope.institutions,
+            institutionIds: ['inst-k'],
+            scopeInstitutionIds: ['inst-k'],
+          },
         ),
       ).rejects.toThrow(new ForbiddenException('Outside access scope'));
       expect(mockMenus.fill).not.toHaveBeenCalled();

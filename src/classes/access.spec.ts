@@ -18,6 +18,8 @@ const user = (
   login: id,
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions,
 });
 

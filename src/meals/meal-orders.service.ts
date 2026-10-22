@@ -10,7 +10,7 @@ import {
   Prisma,
   Role,
 } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -62,7 +62,7 @@ export class MealOrdersService {
       .sort((a, b) => a.day.getTime() - b.day.getTime());
     if (new Set(parsed.map((d) => d.day.getTime())).size !== parsed.length)
       throw new BadRequestException('Duplicate date in order');
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
       select: {
@@ -210,7 +210,7 @@ export class MealOrdersService {
       throw new NotFoundException('Order not found');
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       order.childId,
       'Order not found',
     );

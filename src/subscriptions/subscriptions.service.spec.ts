@@ -107,6 +107,8 @@ describe('SubscriptionsService', () => {
         login: 'admin',
         mustChangePassword: false,
         accessScope: AccessScope.all,
+        institutionIds: [] as string[],
+        scopeInstitutionIds: null as string[] | null,
         permissions: {},
       };
       mockPrisma.subscription.findMany.mockResolvedValue(subs);
@@ -124,6 +126,8 @@ describe('SubscriptionsService', () => {
         login: 'parent',
         mustChangePassword: false,
         accessScope: AccessScope.all,
+        institutionIds: [] as string[],
+        scopeInstitutionIds: null as string[] | null,
         permissions: {},
       };
       mockPrisma.child.findFirst.mockResolvedValue({ id: 'child-1' });
@@ -144,6 +148,8 @@ describe('SubscriptionsService', () => {
         login: 'parent',
         mustChangePassword: false,
         accessScope: AccessScope.all,
+        institutionIds: [] as string[],
+        scopeInstitutionIds: null as string[] | null,
         permissions: {},
       };
       mockPrisma.child.findFirst.mockResolvedValue(null);

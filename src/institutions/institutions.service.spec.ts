@@ -37,6 +37,8 @@ const user = (over: Partial<AuthenticatedUser>): AuthenticatedUser => ({
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { settings: PermissionLevel.edit },
   ...over,
 });

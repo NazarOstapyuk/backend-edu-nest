@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { ChargeSource, Prisma, TariffUnit } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -55,7 +55,7 @@ export class AdaptationService {
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     return this.loadForChild(childId);
   }
 
@@ -78,7 +78,7 @@ export class AdaptationService {
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const tariff = await this.prisma.tariff.findUnique({
       where: { id: dto.tariffId },
       include: { prices: true },
@@ -142,13 +142,13 @@ export class AdaptationService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    const kind = scopeKind(user);
+    const ids = scopeIds(user);
     const childId = await this.prisma.$transaction(async (tx) => {
       const visit = await tx.adaptationVisit.findUnique({ where: { id } });
       if (!visit) throw new NotFoundException('Adaptation visit not found');
       await assertChildInScope(
         tx,
-        kind,
+        ids,
         visit.childId,
         'Adaptation visit not found',
       );

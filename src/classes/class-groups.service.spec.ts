@@ -189,6 +189,8 @@ describe('ClassGroupsService', () => {
         login: 't2',
         mustChangePassword: false,
         accessScope: AccessScope.all,
+        institutionIds: [] as string[],
+        scopeInstitutionIds: null as string[] | null,
         permissions: {},
       }),
     ).rejects.toThrow('Not your class group');

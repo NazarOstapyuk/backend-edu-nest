@@ -28,6 +28,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
@@ -36,6 +38,8 @@ const teacher = {
   login: 'teacher',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 
@@ -61,6 +65,7 @@ const group = {
   id: 'g1',
   name: 'Сонечко',
   kind: GroupKind.kindergarten,
+  institutionId: 'inst-k',
   teachers: [{ id: 't1' }],
 };
 const kid = (id: string) => ({
@@ -141,23 +146,31 @@ describe('RegisterService', () => {
       ).rejects.toThrow(new NotFoundException('Group not found'));
     });
 
-    it('limits a scoped manager to groups of their kind', async () => {
+    it('limits a scoped manager to groups of their institutions', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groupsFor({
         ...admin,
-        accessScope: AccessScope.kindergarten,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-k'],
+        scopeInstitutionIds: ['inst-k'],
       });
       expect(
         firstArg<{ where: object }>(mockPrisma.group.findMany).where,
-      ).toEqual({ kind: GroupKind.kindergarten });
+      ).toEqual({ institutionId: { in: ['inst-k'] } });
     });
 
-    it('hides groups of another kind from a scoped manager', async () => {
+    it('hides groups of another institution from a scoped manager', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         ...group,
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
-      const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+      const scoped = {
+        ...admin,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-k'],
+        scopeInstitutionIds: ['inst-k'],
+      };
       const notFound = new NotFoundException('Group not found');
       await expect(
         service.day('g1', '2026-10-14', scoped, TODAY),

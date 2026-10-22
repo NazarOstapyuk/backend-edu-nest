@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { AccessScope, GroupKind, NoticeStatus, Role } from '@prisma/client';
+import { AccessScope, NoticeStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoticesService } from './notices.service';
 
@@ -12,6 +12,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 
@@ -98,16 +100,24 @@ describe('NoticesService', () => {
   });
 
   describe('scope', () => {
-    const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+    const scoped = {
+      ...admin,
+      accessScope: AccessScope.institutions,
+      institutionIds: ['inst-k'],
+      scopeInstitutionIds: ['inst-k'],
+    };
 
-    it('adds the kind filter to the list', async () => {
+    it('adds the institution filter to the list', async () => {
       mockPrisma.absenceNotice.findMany.mockResolvedValue([]);
       await service.list({ groupId: 'g1' }, scoped);
       expect(
         firstArg<{ where: object }>(mockPrisma.absenceNotice.findMany).where,
       ).toEqual({
         status: undefined,
-        child: { groupId: 'g1', group: { kind: GroupKind.kindergarten } },
+        child: {
+          groupId: 'g1',
+          group: { institutionId: { in: ['inst-k'] } },
+        },
       });
     });
 
@@ -122,7 +132,7 @@ describe('NoticesService', () => {
     it('reports a notice outside the scope as not found', async () => {
       mockPrisma.absenceNotice.findUnique.mockResolvedValue({
         id: 'n1',
-        child: { group: { kind: GroupKind.school_class } },
+        child: { group: { institutionId: 'inst-s' } },
       });
       await expect(service.approve('n1', scoped)).rejects.toThrow(
         new NotFoundException('Notice not found'),
@@ -133,7 +143,7 @@ describe('NoticesService', () => {
     it('decides a notice inside the scope', async () => {
       mockPrisma.absenceNotice.findUnique.mockResolvedValue({
         ...notice({ status: NoticeStatus.rejected }),
-        child: { group: { kind: GroupKind.kindergarten } },
+        child: { group: { institutionId: 'inst-k' } },
       });
       mockPrisma.absenceNotice.updateMany.mockResolvedValue({ count: 1 });
       await service.reject('n1', 'Немає підстав', scoped);

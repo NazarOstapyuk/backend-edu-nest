@@ -20,7 +20,7 @@ import {
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import { assertOwnChild } from '../common/ownership';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -216,7 +216,7 @@ export class OnlinePaymentsService {
     this.assertEnabled();
     const amount = money(dto.amount);
     onlineKopecks(amount);
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
       select: { id: true },
@@ -248,7 +248,7 @@ export class OnlinePaymentsService {
     user: AuthenticatedUser,
     childId: string,
   ): Promise<RequestView[]> {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const requests = await this.prisma.paymentRequest.findMany({
       where: { childId },
       include: requestInclude,
@@ -266,7 +266,7 @@ export class OnlinePaymentsService {
     if (!request) throw new NotFoundException(notFound);
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       request.childId,
       notFound,
     );

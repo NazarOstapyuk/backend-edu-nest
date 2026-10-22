@@ -9,7 +9,7 @@ import {
   Prisma,
   Role,
 } from '@prisma/client';
-import { hasPermission, scopeKind } from '../access/access-calc';
+import { hasPermission, scopeIds } from '../access/access-calc';
 import { childScopeWhere, groupScopeWhere } from '../access/scope';
 import { kyivDayStart } from '../audit/audit-calc';
 import { CalendarService } from '../attendance/calendar.service';
@@ -63,7 +63,7 @@ export class DashboardService {
       throw new ForbiddenException('Insufficient permissions');
     }
     const today = kyivToday();
-    const childScope = childScopeWhere(scopeKind(user));
+    const childScope = childScopeWhere(scopeIds(user));
     const isTeacher = user.role === Role.teacher;
     const result: TodayDashboard = { date: isoDay(today) };
 
@@ -131,7 +131,7 @@ export class DashboardService {
         ...(canManageRegister(user)
           ? {}
           : { teachers: { some: { id: user.id } } }),
-        ...groupScopeWhere(scopeKind(user)),
+        ...groupScopeWhere(scopeIds(user)),
       },
       select: {
         id: true,
@@ -182,7 +182,7 @@ export class DashboardService {
   }
 
   private async meals(user: AuthenticatedUser, today: Date) {
-    const scoped = childScopeWhere(scopeKind(user));
+    const scoped = childScopeWhere(scopeIds(user));
     const child: Prisma.ChildWhereInput = can(user, PermissionArea.meals)
       ? scoped
       : { AND: [scoped, { group: { teachers: { some: { id: user.id } } } }] };

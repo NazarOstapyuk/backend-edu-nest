@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,7 +22,7 @@ export class PaymentsService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
@@ -53,8 +53,8 @@ export class PaymentsService {
   }
 
   private async assertPaymentInScope(id: string, user: AuthenticatedUser) {
-    const kind = scopeKind(user);
-    if (!kind) return;
+    const ids = scopeIds(user);
+    if (!ids) return;
     const payment = await this.prisma.payment.findUnique({
       where: { id },
       select: { childId: true },
@@ -62,7 +62,7 @@ export class PaymentsService {
     if (payment)
       await assertChildInScope(
         this.prisma,
-        kind,
+        ids,
         payment.childId,
         'Payment not found',
       );
@@ -113,7 +113,7 @@ export class PaymentsService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    const kind = scopeKind(user);
+    const ids = scopeIds(user);
     return this.prisma.$transaction(async (tx) => {
       const allocation = await tx.allocation.findUnique({
         where: { id },
@@ -122,7 +122,7 @@ export class PaymentsService {
       if (!allocation) throw new NotFoundException('Allocation not found');
       await assertChildInScope(
         tx,
-        kind,
+        ids,
         allocation.payment.childId,
         'Allocation not found',
       );

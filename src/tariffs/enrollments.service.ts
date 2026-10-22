@@ -11,7 +11,7 @@ import {
   TariffUnit,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,7 +74,7 @@ export class EnrollmentsService {
       where: { id: childId },
     });
     if (!child) throw new NotFoundException('Child not found');
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
   }
 
   private async getEnrollment(id: string) {
@@ -90,7 +90,7 @@ export class EnrollmentsService {
     const enrollment = await this.getEnrollment(enrollmentId);
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       enrollment.childId,
       'Enrollment not found',
     );
@@ -177,7 +177,7 @@ export class EnrollmentsService {
     const enrollment = await this.getEnrollment(id);
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       enrollment.childId,
       'Enrollment not found',
     );
@@ -226,7 +226,7 @@ export class EnrollmentsService {
     const enrollment = await this.getEnrollment(enrollmentId);
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       enrollment.childId,
       'Enrollment not found',
     );
@@ -286,7 +286,7 @@ export class EnrollmentsService {
     if (!adjustment) throw new NotFoundException('Adjustment not found');
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       adjustment.enrollment.childId,
       'Adjustment not found',
     );

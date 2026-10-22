@@ -12,7 +12,7 @@ import {
   PermissionLevel,
   Prisma,
 } from '@prisma/client';
-import { hasPermission, scopeKind } from '../access/access-calc';
+import { hasPermission, scopeIds } from '../access/access-calc';
 import { groupScopeWhere } from '../access/scope';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -89,7 +89,7 @@ export class RegisterService {
         ...(canManageRegister(user)
           ? {}
           : { teachers: { some: { id: user.id } } }),
-        ...groupScopeWhere(scopeKind(user)),
+        ...groupScopeWhere(scopeIds(user)),
       },
       select: { id: true, name: true, kind: true },
       orderBy: { name: 'asc' },
@@ -107,12 +107,13 @@ export class RegisterService {
         id: true,
         name: true,
         kind: true,
+        institutionId: true,
         teachers: { select: { id: true } },
       },
     });
     if (!group) throw new NotFoundException('Group not found');
-    const kind = scopeKind(user);
-    if (kind && group.kind !== kind)
+    const ids = scopeIds(user);
+    if (ids && (!group.institutionId || !ids.includes(group.institutionId)))
       throw new NotFoundException('Group not found');
     if (
       !canManageRegister(user, level) &&

@@ -23,6 +23,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: allPermissions(PermissionLevel.edit),
 };
 const teacher = {
@@ -31,6 +33,8 @@ const teacher = {
   login: 'teacher',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 

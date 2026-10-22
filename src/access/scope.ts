@@ -1,21 +1,23 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { GroupKind, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 export const OUTSIDE_SCOPE = 'Outside access scope';
 
 export const childScopeWhere = (
-  kind: GroupKind | null,
-): Prisma.ChildWhereInput => (kind ? { group: { kind } } : {});
+  ids: string[] | null,
+): Prisma.ChildWhereInput =>
+  ids ? { group: { institutionId: { in: ids } } } : {};
 
 export const groupScopeWhere = (
-  kind: GroupKind | null,
-): Prisma.GroupWhereInput => (kind ? { kind } : {});
+  ids: string[] | null,
+): Prisma.GroupWhereInput => (ids ? { institutionId: { in: ids } } : {});
 
-export function assertKindInScope(
-  kind: GroupKind | null,
-  target: GroupKind | null,
+export function assertInstitutionInScope(
+  ids: string[] | null,
+  institutionId: string | null,
 ): void {
-  if (kind && target !== kind) throw new ForbiddenException(OUTSIDE_SCOPE);
+  if (ids && (institutionId === null || !ids.includes(institutionId)))
+    throw new ForbiddenException(OUTSIDE_SCOPE);
 }
 
 export async function assertChildInScope(
@@ -26,13 +28,13 @@ export async function assertChildInScope(
       ): Promise<{ id: string } | null>;
     };
   },
-  kind: GroupKind | null,
+  ids: string[] | null,
   childId: string,
   message = 'Child not found',
 ): Promise<void> {
-  if (!kind) return;
+  if (!ids) return;
   const found = await db.child.findFirst({
-    where: { id: childId, ...childScopeWhere(kind) },
+    where: { id: childId, ...childScopeWhere(ids) },
     select: { id: true },
   });
   if (!found) throw new NotFoundException(message);

@@ -53,6 +53,8 @@ const fullAdmin: AuthenticatedUser = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
@@ -61,7 +63,9 @@ const kgAccountant: AuthenticatedUser = {
   role: Role.admin,
   login: 'kg',
   mustChangePassword: false,
-  accessScope: AccessScope.kindergarten,
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-k'],
+  scopeInstitutionIds: ['inst-k'],
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 

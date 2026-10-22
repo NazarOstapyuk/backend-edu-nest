@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ChargeSource } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,7 +22,7 @@ export class ChargesService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    await assertChildInScope(this.prisma, scopeKind(user), childId);
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
@@ -60,8 +60,8 @@ export class ChargesService {
     userId: string,
     user: AuthenticatedUser,
   ) {
-    const kind = scopeKind(user);
-    if (kind) {
+    const ids = scopeIds(user);
+    if (ids) {
       const charge = await this.prisma.charge.findUnique({
         where: { id },
         select: { childId: true },
@@ -69,7 +69,7 @@ export class ChargesService {
       if (charge)
         await assertChildInScope(
           this.prisma,
-          kind,
+          ids,
           charge.childId,
           'Charge not found',
         );

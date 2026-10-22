@@ -20,6 +20,8 @@ const makeUser = (
   login: 'a',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
   ...overrides,
 });
@@ -42,7 +44,7 @@ const allView: AuthenticatedUser['permissions'] = {
 const containing = (value: object): object =>
   expect.objectContaining(value) as object;
 
-const kindergarten = { group: { kind: GroupKind.kindergarten } };
+const kindergarten = { group: { institutionId: { in: ['inst-k'] } } };
 
 describe('DashboardService', () => {
   let service: DashboardService;
@@ -141,13 +143,15 @@ describe('DashboardService', () => {
     prisma.paymentInvoice.count.mockResolvedValue(2);
     const result = await service.today(
       makeUser({
-        accessScope: AccessScope.kindergarten,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-k'],
+        scopeInstitutionIds: ['inst-k'],
         permissions: { ...allView },
       }),
     );
     expect(result.onlinePending).toEqual({ count: 2 });
     expect(prisma.group.findMany).toHaveBeenCalledWith(
-      containing({ where: { kind: GroupKind.kindergarten } }),
+      containing({ where: { institutionId: { in: ['inst-k'] } } }),
     );
     expect(prisma.absenceNotice.count).toHaveBeenCalledWith({
       where: { status: NoticeStatus.pending, child: kindergarten },
@@ -199,13 +203,18 @@ describe('DashboardService', () => {
 
   it('narrows a kindergarten-scoped plain teacher to own groups in scope', async () => {
     await service.today(
-      makeUser({ role: Role.teacher, accessScope: AccessScope.kindergarten }),
+      makeUser({
+        role: Role.teacher,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-k'],
+        scopeInstitutionIds: ['inst-k'],
+      }),
     );
     expect(prisma.group.findMany).toHaveBeenCalledWith(
       containing({
         where: {
           teachers: { some: { id: 'u1' } },
-          kind: GroupKind.kindergarten,
+          institutionId: { in: ['inst-k'] },
         },
       }),
     );

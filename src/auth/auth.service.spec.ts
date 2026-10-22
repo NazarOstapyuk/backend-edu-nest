@@ -415,6 +415,7 @@ describe('AuthService', () => {
         role: 'root',
         accessScope: 'all',
         permissions: [],
+        institutions: [],
       });
 
       const profile = await service.getProfile('r1');
@@ -427,11 +428,12 @@ describe('AuthService', () => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'a1',
         role: 'admin',
-        accessScope: 'kindergarten',
+        accessScope: 'institutions',
         permissions: [
           { area: 'finance', level: 'view' },
           { area: 'children', level: 'edit' },
         ],
+        institutions: [{ institutionId: 'inst-k' }],
       });
 
       const profile = await service.getProfile('a1');
@@ -440,7 +442,16 @@ describe('AuthService', () => {
         finance: 'view',
         children: 'edit',
       });
-      expect(profile.accessScope).toBe('kindergarten');
+      expect(profile.accessScope).toBe('institutions');
+      expect(profile.institutionIds).toEqual(['inst-k']);
+      expect(profile).not.toHaveProperty('institutions');
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            institutions: { select: { institutionId: true } },
+          }) as unknown,
+        }),
+      );
     });
   });
 
@@ -463,6 +474,7 @@ describe('AuthService', () => {
         role: 'parent',
         phone: '+380671234567',
         permissions: [],
+        institutions: [],
       });
       mockPrisma.user.update.mockResolvedValue({});
 

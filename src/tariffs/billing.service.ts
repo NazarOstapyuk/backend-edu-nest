@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { AuditAction, ChargeSource, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import {
   OUTSIDE_SCOPE,
   assertChildInScope,
@@ -137,7 +137,7 @@ export class BillingService {
     if (!enrollment) throw new NotFoundException('Enrollment not found');
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       enrollment.childId,
       'Enrollment not found',
     );
@@ -150,7 +150,7 @@ export class BillingService {
   }
 
   async runForUser(user: AuthenticatedUser) {
-    if (scopeKind(user)) throw new ForbiddenException(OUTSIDE_SCOPE);
+    if (scopeIds(user)) throw new ForbiddenException(OUTSIDE_SCOPE);
     return this.runAll(user.id);
   }
 
@@ -179,7 +179,7 @@ export class BillingService {
   async problems(user: AuthenticatedUser, today: Date = kyivToday()) {
     const leadDays = await this.getLeadDays();
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { child: childScopeWhere(scopeKind(user)) },
+      where: { child: childScopeWhere(scopeIds(user)) },
       include: enrollmentInclude,
     });
     return enrollments.flatMap((e) =>
@@ -205,7 +205,7 @@ export class BillingService {
     if (!period) throw new NotFoundException('Billed period not found');
     await assertChildInScope(
       this.prisma,
-      scopeKind(user),
+      scopeIds(user),
       period.enrollment.childId,
       'Billed period not found',
     );

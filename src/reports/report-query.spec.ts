@@ -12,6 +12,11 @@ const user = (accessScope: AccessScope, role: Role = Role.admin) => ({
   login: 'a',
   mustChangePassword: false,
   accessScope,
+  institutionIds: accessScope === AccessScope.institutions ? ['inst-k'] : [],
+  scopeInstitutionIds:
+    accessScope === AccessScope.institutions && role !== Role.root
+      ? ['inst-k']
+      : null,
   permissions: {},
 });
 
@@ -44,26 +49,34 @@ describe('resolveFilter', () => {
   const db = { group: { findUnique: jest.fn() } };
   beforeEach(() => jest.clearAllMocks());
 
-  it('uses the scope kind when no kind is given', async () => {
+  it('uses the scope institutions when no kind is given', async () => {
     await expect(
-      resolveFilter(db, user(AccessScope.kindergarten), {}),
-    ).resolves.toEqual({ kind: GroupKind.kindergarten, groupId: null });
+      resolveFilter(db, user(AccessScope.institutions), {}),
+    ).resolves.toEqual({
+      kind: null,
+      institutionIds: ['inst-k'],
+      groupId: null,
+    });
   });
-  it('rejects a kind outside the scope', async () => {
+  it('intersects a kind with the scope', async () => {
     await expect(
-      resolveFilter(db, user(AccessScope.kindergarten), {
+      resolveFilter(db, user(AccessScope.institutions), {
         kind: GroupKind.school_class,
       }),
-    ).rejects.toThrow(ForbiddenException);
+    ).resolves.toEqual({
+      kind: GroupKind.school_class,
+      institutionIds: ['inst-k'],
+      groupId: null,
+    });
   });
   it('rejects a group outside the scope', async () => {
     db.group.findUnique.mockResolvedValue({
       id: 'g1',
-      kind: GroupKind.school_class,
+      institutionId: 'inst-s',
     });
     await expect(
-      resolveFilter(db, user(AccessScope.kindergarten), { groupId: 'g1' }),
-    ).rejects.toThrow('Outside access scope');
+      resolveFilter(db, user(AccessScope.institutions), { groupId: 'g1' }),
+    ).rejects.toThrow(new ForbiddenException('Outside access scope'));
   });
   it('rejects an unknown group', async () => {
     db.group.findUnique.mockResolvedValue(null);
@@ -73,22 +86,38 @@ describe('resolveFilter', () => {
   });
   it('lets root and scope all pick any kind', async () => {
     await expect(
-      resolveFilter(db, user(AccessScope.kindergarten, Role.root), {
+      resolveFilter(db, user(AccessScope.institutions, Role.root), {
         kind: GroupKind.school_class,
       }),
-    ).resolves.toEqual({ kind: GroupKind.school_class, groupId: null });
+    ).resolves.toEqual({
+      kind: GroupKind.school_class,
+      institutionIds: null,
+      groupId: null,
+    });
   });
 });
 
 describe('childFilterWhere', () => {
-  it('combines kind, group and child', () => {
+  it('combines kind, institutions, group and child', () => {
     expect(
-      childFilterWhere({ kind: GroupKind.kindergarten, groupId: 'g1' }, 'c1'),
+      childFilterWhere(
+        {
+          kind: GroupKind.kindergarten,
+          institutionIds: ['inst-k'],
+          groupId: 'g1',
+        },
+        'c1',
+      ),
     ).toEqual({
-      group: { kind: GroupKind.kindergarten },
+      group: {
+        kind: GroupKind.kindergarten,
+        institutionId: { in: ['inst-k'] },
+      },
       groupId: 'g1',
       id: 'c1',
     });
-    expect(childFilterWhere({ kind: null, groupId: null })).toEqual({});
+    expect(
+      childFilterWhere({ kind: null, institutionIds: null, groupId: null }),
+    ).toEqual({});
   });
 });

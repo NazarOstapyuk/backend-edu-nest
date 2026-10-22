@@ -1,12 +1,17 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, GroupKind, Role } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
-import { assertKindInScope, groupScopeWhere } from '../access/scope';
+import { scopeIds } from '../access/access-calc';
+import {
+  assertInstitutionInScope,
+  groupScopeWhere,
+  OUTSIDE_SCOPE,
+} from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -100,7 +105,7 @@ export class GroupsService {
   }
 
   async create(dto: CreateGroupDto, user: AuthenticatedUser) {
-    assertKindInScope(scopeKind(user), dto.kind ?? GroupKind.kindergarten);
+    assertInstitutionInScope(scopeIds(user), null);
     const existing = await this.prisma.group.findUnique({
       where: { name: dto.name },
     });
@@ -143,7 +148,7 @@ export class GroupsService {
 
   async findAll(user: AuthenticatedUser) {
     return this.prisma.group.findMany({
-      where: groupScopeWhere(scopeKind(user)),
+      where: groupScopeWhere(scopeIds(user)),
       include: {
         teachers: { omit: { password: true, refreshToken: true } },
         children: true,
@@ -152,15 +157,19 @@ export class GroupsService {
   }
 
   async update(id: string, dto: UpdateGroupDto, user: AuthenticatedUser) {
-    const kind = scopeKind(user);
+    const ids = scopeIds(user);
     const group = await this.prisma.group.findUnique({
       where: { id },
       include: { teachers: { select: { id: true } } },
     });
-    if (!group || (kind && group.kind !== kind)) {
+    if (
+      !group ||
+      (ids && (!group.institutionId || !ids.includes(group.institutionId)))
+    ) {
       throw new NotFoundException('Group not found');
     }
-    assertKindInScope(kind, dto.kind ?? group.kind);
+    if (ids && dto.kind && dto.kind !== group.kind)
+      throw new ForbiddenException(OUTSIDE_SCOPE);
 
     if (dto.name && dto.name !== group.name) {
       const existing = await this.prisma.group.findUnique({
@@ -209,12 +218,15 @@ export class GroupsService {
   }
 
   async delete(id: string, user: AuthenticatedUser) {
-    const kind = scopeKind(user);
+    const ids = scopeIds(user);
     const group = await this.prisma.group.findUnique({
       where: { id },
       include: { teachers: { select: { id: true } } },
     });
-    if (!group || (kind && group.kind !== kind)) {
+    if (
+      !group ||
+      (ids && (!group.institutionId || !ids.includes(group.institutionId)))
+    ) {
       throw new NotFoundException('Group not found');
     }
 

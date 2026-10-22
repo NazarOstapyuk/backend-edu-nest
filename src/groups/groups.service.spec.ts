@@ -34,6 +34,8 @@ const fullAdmin: AuthenticatedUser = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { children: PermissionLevel.edit },
 };
 
@@ -240,7 +242,9 @@ describe('GroupsService', () => {
       role: Role.admin,
       login: 'kg',
       mustChangePassword: false,
-      accessScope: AccessScope.kindergarten,
+      accessScope: AccessScope.institutions,
+      institutionIds: ['inst-k'],
+      scopeInstitutionIds: ['inst-k'],
       permissions: { children: PermissionLevel.edit },
     };
 
@@ -248,20 +252,23 @@ describe('GroupsService', () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.findAll(kgAdmin);
       expect(mockPrisma.group.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { kind: GroupKind.kindergarten } }),
+        expect.objectContaining({
+          where: { institutionId: { in: ['inst-k'] } },
+        }),
       );
     });
 
-    it('refuses to create a group of another kind', async () => {
+    it('refuses to create a group without an institution in scope', async () => {
       await expect(
         service.create({ name: '1-А', kind: GroupKind.school_class }, kgAdmin),
       ).rejects.toThrow('Outside access scope');
     });
 
-    it('hides a group of another kind on update and delete', async () => {
+    it('hides a group of another institution on update and delete', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
       await expect(service.update('g1', {}, kgAdmin)).rejects.toThrow(
         'Group not found',
@@ -275,6 +282,7 @@ describe('GroupsService', () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
         kind: GroupKind.kindergarten,
+        institutionId: 'inst-k',
       });
       await expect(
         service.update('g1', { kind: GroupKind.school_class }, kgAdmin),

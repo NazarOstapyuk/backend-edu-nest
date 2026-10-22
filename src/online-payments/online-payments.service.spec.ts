@@ -87,6 +87,8 @@ const admin: AuthenticatedUser = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { finance: PermissionLevel.edit },
 };
 
@@ -893,7 +895,12 @@ describe('OnlinePaymentsService', () => {
       mockPrisma.child.findFirst.mockResolvedValue(null);
       await expect(
         service.createLink(
-          { ...admin, accessScope: AccessScope.kindergarten },
+          {
+            ...admin,
+            accessScope: AccessScope.institutions,
+            institutionIds: ['inst-k'],
+            scopeInstitutionIds: ['inst-k'],
+          },
           'child-1',
           { category: FinanceCategory.meals, amount: '300.00' },
         ),
@@ -1026,7 +1033,12 @@ describe('OnlinePaymentsService', () => {
       mockPrisma.child.findFirst.mockResolvedValue(null);
       await expect(
         service.cancel(
-          { ...admin, accessScope: AccessScope.school_class },
+          {
+            ...admin,
+            accessScope: AccessScope.institutions,
+            institutionIds: ['inst-s'],
+            scopeInstitutionIds: ['inst-s'],
+          },
           'req-1',
         ),
       ).rejects.toThrow(new NotFoundException('Payment request not found'));

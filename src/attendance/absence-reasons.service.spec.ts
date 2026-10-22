@@ -20,6 +20,8 @@ const user = (role: Role) => ({
   login: 'x',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: role === Role.admin ? allPermissions(PermissionLevel.edit) : {},
 });
 const firstArg = <T>(fn: jest.Mock): T => (fn.mock.calls[0] as [T])[0];

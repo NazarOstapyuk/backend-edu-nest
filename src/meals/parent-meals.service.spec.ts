@@ -22,6 +22,8 @@ const parent = {
   login: 'p',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 const BEFORE = new Date('2026-10-14T06:00:00Z');

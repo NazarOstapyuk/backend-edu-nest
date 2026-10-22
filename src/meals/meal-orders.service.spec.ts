@@ -24,6 +24,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 const parent = {
@@ -32,10 +34,17 @@ const parent = {
   login: 'parent',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 
-const kgAdmin = { ...admin, accessScope: AccessScope.kindergarten };
+const kgAdmin = {
+  ...admin,
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-k'],
+  scopeInstitutionIds: ['inst-k'],
+};
 
 const child = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
@@ -164,7 +173,7 @@ describe('MealOrdersService', () => {
         firstArg<{ where: object }>(mockPrisma.child.findFirst).where,
       ).toEqual({
         id: 'c1',
-        group: { kind: GroupKind.kindergarten },
+        group: { institutionId: { in: ['inst-k'] } },
       });
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });

@@ -23,6 +23,8 @@ const teacherUser = {
   login: 'olena',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 
@@ -256,6 +258,8 @@ describe('PayrollService', () => {
       login: 'admin',
       mustChangePassword: false,
       accessScope: AccessScope.all,
+      institutionIds: [] as string[],
+      scopeInstitutionIds: null as string[] | null,
       permissions: {},
     };
     const dec = (value: string) => new Prisma.Decimal(value);

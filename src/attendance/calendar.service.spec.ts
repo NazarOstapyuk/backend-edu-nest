@@ -22,6 +22,7 @@ const mockPrisma = {
     update: jest.fn(),
   },
   group: { findUnique: jest.fn() },
+  institution: { findMany: jest.fn() },
 };
 
 const admin = {
@@ -30,6 +31,8 @@ const admin = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: {},
 };
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
@@ -155,7 +158,12 @@ describe('CalendarService', () => {
   });
 
   describe('scope', () => {
-    const scoped = { ...admin, accessScope: AccessScope.kindergarten };
+    const scoped = {
+      ...admin,
+      accessScope: AccessScope.institutions,
+      institutionIds: ['inst-k'],
+      scopeInstitutionIds: ['inst-k'],
+    };
     const base = {
       startDate: '2026-10-14',
       type: CalendarDayType.non_working,
@@ -170,26 +178,44 @@ describe('CalendarService', () => {
       expect(mockPrisma.calendarDay.create).not.toHaveBeenCalled();
     });
 
-    it('creates an entry of the own kind and refuses the other', async () => {
-      mockPrisma.calendarDay.create.mockResolvedValue({ id: 'c1' });
-      await service.create(
-        { ...base, scope: CalendarScope.kindergarten },
-        scoped,
-      );
-      expect(mockPrisma.calendarDay.create).toHaveBeenCalledTimes(1);
+    it('refuses kind-level entries', async () => {
+      await expect(
+        service.create({ ...base, scope: CalendarScope.kindergarten }, scoped),
+      ).rejects.toThrow(outside);
       await expect(
         service.create({ ...base, scope: CalendarScope.school_class }, scoped),
       ).rejects.toThrow(outside);
+      expect(mockPrisma.calendarDay.create).not.toHaveBeenCalled();
     });
 
-    it('checks the kind of the group for group entries', async () => {
-      mockPrisma.group.findUnique.mockResolvedValue({
+    it('checks the institution of the group for group entries', async () => {
+      mockPrisma.calendarDay.create.mockResolvedValue({ id: 'c1' });
+      mockPrisma.group.findUnique.mockResolvedValueOnce({
         id: 'g1',
-        kind: GroupKind.school_class,
+        institutionId: 'inst-k',
+      });
+      await service.create(
+        { ...base, scope: CalendarScope.group, groupId: 'g1' },
+        scoped,
+      );
+      expect(mockPrisma.calendarDay.create).toHaveBeenCalledTimes(1);
+      mockPrisma.group.findUnique.mockResolvedValueOnce({
+        id: 'g2',
+        institutionId: 'inst-s',
       });
       await expect(
         service.create(
-          { ...base, scope: CalendarScope.group, groupId: 'g1' },
+          { ...base, scope: CalendarScope.group, groupId: 'g2' },
+          scoped,
+        ),
+      ).rejects.toThrow(outside);
+      mockPrisma.group.findUnique.mockResolvedValueOnce({
+        id: 'g3',
+        institutionId: null,
+      });
+      await expect(
+        service.create(
+          { ...base, scope: CalendarScope.group, groupId: 'g3' },
           scoped,
         ),
       ).rejects.toThrow(outside);
@@ -208,21 +234,32 @@ describe('CalendarService', () => {
 
     it('scopes the list without a group', async () => {
       mockPrisma.calendarDay.findMany.mockResolvedValue([]);
+      mockPrisma.institution.findMany.mockResolvedValue([
+        { type: GroupKind.kindergarten },
+      ]);
       await service.list('2026-10-01', '2026-10-31', undefined, scoped);
+      expect(mockPrisma.institution.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['inst-k'] } },
+        select: { type: true },
+      });
       expect(
         firstArg<{ where: { OR: object[] } }>(mockPrisma.calendarDay.findMany)
           .where.OR,
       ).toEqual([
         { scope: CalendarScope.all },
         { scope: CalendarScope.kindergarten },
-        { scope: CalendarScope.group, group: { kind: GroupKind.kindergarten } },
+        {
+          scope: CalendarScope.group,
+          group: { institutionId: { in: ['inst-k'] } },
+        },
       ]);
     });
 
-    it('hides a group of another kind in the list', async () => {
+    it('hides a group of another institution in the list', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
       await expect(
         service.list('2026-10-01', '2026-10-31', 'g1', scoped),

@@ -2,7 +2,7 @@ import { AccessScope, PermissionLevel, Role } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ChargeSource, FinanceCategory, GroupKind } from '@prisma/client';
+import { ChargeSource, FinanceCategory } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChargesService } from './charges.service';
 
@@ -20,6 +20,8 @@ const fullAdmin: AuthenticatedUser = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
@@ -28,7 +30,9 @@ const kgAccountant: AuthenticatedUser = {
   role: Role.admin,
   login: 'kg',
   mustChangePassword: false,
-  accessScope: AccessScope.kindergarten,
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-k'],
+  scopeInstitutionIds: ['inst-k'],
   permissions: { finance: PermissionLevel.edit, tariffs: PermissionLevel.edit },
 };
 
@@ -183,7 +187,7 @@ describe('ChargesService', () => {
         ),
       ).rejects.toThrow('Child not found');
       expect(mockPrisma.child.findFirst).toHaveBeenCalledWith({
-        where: { id: 'child-1', group: { kind: GroupKind.kindergarten } },
+        where: { id: 'child-1', group: { institutionId: { in: ['inst-k'] } } },
         select: { id: true },
       });
       expect(mockPrisma.charge.create).not.toHaveBeenCalled();

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { NoticeStatus } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
+import { scopeIds } from '../access/access-calc';
 import { childScopeWhere } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -63,7 +63,7 @@ export class NoticesService {
         status: query.status,
         child: {
           ...(query.groupId ? { groupId: query.groupId } : {}),
-          ...childScopeWhere(scopeKind(user)),
+          ...childScopeWhere(scopeIds(user)),
         },
       },
       select: adminSelect,
@@ -115,12 +115,13 @@ export class NoticesService {
       where: { id },
       select: {
         id: true,
-        child: { select: { group: { select: { kind: true } } } },
+        child: { select: { group: { select: { institutionId: true } } } },
       },
     });
     if (!exists) throw new NotFoundException('Notice not found');
-    const kind = scopeKind(user);
-    if (kind && exists.child?.group?.kind !== kind)
+    const ids = scopeIds(user);
+    const institutionId = exists.child?.group?.institutionId ?? null;
+    if (ids && (institutionId === null || !ids.includes(institutionId)))
       throw new NotFoundException('Notice not found');
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.absenceNotice.updateMany({

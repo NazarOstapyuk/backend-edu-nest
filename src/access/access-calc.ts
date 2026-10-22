@@ -1,6 +1,5 @@
 import {
   AccessScope,
-  GroupKind,
   PermissionArea,
   PermissionLevel,
   Role,
@@ -11,6 +10,7 @@ export type PermissionMap = Partial<Record<PermissionArea, PermissionLevel>>;
 export interface AccessUser {
   role: Role;
   accessScope: AccessScope;
+  institutionIds: string[];
   permissions: PermissionMap;
 }
 
@@ -46,13 +46,28 @@ export function hasPermission(
   return levelSatisfies(user.permissions[area], level);
 }
 
-export function scopeKind(user: AccessUser): GroupKind | null {
-  if (user.role === Role.root || user.accessScope === AccessScope.all)
-    return null;
-  return user.accessScope === AccessScope.kindergarten
-    ? GroupKind.kindergarten
-    : GroupKind.school_class;
+export function baseScope(user: {
+  role: Role;
+  accessScope: AccessScope;
+  institutionIds: string[];
+}): string[] | null {
+  if (user.role === Role.root || user.role === Role.parent) return null;
+  if (user.accessScope === AccessScope.all) return null;
+  return user.institutionIds;
 }
+
+export function effectiveScope(
+  base: string[] | null,
+  selected: string | null,
+): string[] | null | 'outside' {
+  if (selected === null) return base;
+  if (base === null || base.includes(selected)) return [selected];
+  return 'outside';
+}
+
+export const scopeIds = (user: {
+  scopeInstitutionIds: string[] | null;
+}): string[] | null => user.scopeInstitutionIds;
 
 export const scopeCovers = (granter: AccessScope, target: AccessScope) =>
   granter === AccessScope.all || granter === target;

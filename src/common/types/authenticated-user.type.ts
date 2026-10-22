@@ -7,5 +7,7 @@ export type AuthenticatedUser = {
   login: string;
   mustChangePassword: boolean;
   accessScope: AccessScope;
+  institutionIds: string[];
+  scopeInstitutionIds: string[] | null;
   permissions: PermissionMap;
 };

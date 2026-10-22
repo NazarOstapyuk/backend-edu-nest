@@ -45,6 +45,8 @@ const fullAdmin: AuthenticatedUser = {
   login: 'admin',
   mustChangePassword: false,
   accessScope: AccessScope.all,
+  institutionIds: [] as string[],
+  scopeInstitutionIds: null as string[] | null,
   permissions: { children: PermissionLevel.edit },
 };
 
@@ -435,7 +437,9 @@ describe('ChildrenService', () => {
       role: Role.admin,
       login: 'kg',
       mustChangePassword: false,
-      accessScope: AccessScope.kindergarten,
+      accessScope: AccessScope.institutions,
+      institutionIds: ['inst-k'],
+      scopeInstitutionIds: ['inst-k'],
       permissions: { children: PermissionLevel.edit },
     };
     const validDto: CreateChildDto = {
@@ -450,15 +454,16 @@ describe('ChildrenService', () => {
       await service.findAll(kgAdmin);
       expect(mockPrisma.child.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { group: { kind: GroupKind.kindergarten } },
+          where: { group: { institutionId: { in: ['inst-k'] } } },
         }),
       );
     });
 
-    it('refuses a child in a group of another kind', async () => {
+    it('refuses a child in a group of another institution', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
       await expect(
         service.create({ ...validDto, groupId: 'g1' }, kgAdmin),
@@ -471,11 +476,11 @@ describe('ChildrenService', () => {
       ).rejects.toThrow('Outside access scope');
     });
 
-    it('hides a child of another kind on update and delete', async () => {
+    it('hides a child of another institution on update and delete', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({
         id: 'c1',
         groupId: 'g2',
-        group: { kind: GroupKind.school_class },
+        group: { institutionId: 'inst-s' },
       });
       await expect(service.update('c1', {}, kgAdmin)).rejects.toThrow(
         'Child not found',
@@ -485,15 +490,16 @@ describe('ChildrenService', () => {
       );
     });
 
-    it('refuses moving a child to another kind or out of groups', async () => {
+    it('refuses moving a child to another institution or out of groups', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({
         id: 'c1',
         groupId: 'g1',
-        group: { kind: GroupKind.kindergarten },
+        group: { institutionId: 'inst-k' },
       });
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g2',
         kind: GroupKind.school_class,
+        institutionId: 'inst-s',
       });
       await expect(
         service.update('c1', { groupId: 'g2' }, kgAdmin),

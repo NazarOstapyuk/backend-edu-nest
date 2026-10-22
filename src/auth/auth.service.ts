@@ -165,6 +165,7 @@ export class AuthService {
     mustChangePassword: true,
     accessScope: true,
     permissions: { select: { area: true, level: true } },
+    institutions: { select: { institutionId: true } },
   } as const;
 
   async getProfile(userId: string) {
@@ -180,11 +181,13 @@ export class AuthService {
     T extends {
       role: Role;
       permissions: { area: PermissionArea; level: PermissionLevel }[];
+      institutions: { institutionId: string }[];
     },
   >(user: T) {
-    const { permissions, ...profile } = user;
+    const { permissions, institutions, ...profile } = user;
     return {
       ...profile,
+      institutionIds: institutions.map((row) => row.institutionId),
       permissions:
         user.role === Role.root
           ? allPermissions(PermissionLevel.edit)

@@ -1,11 +1,6 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PermissionArea } from '@prisma/client';
-import { scopeKind } from '../access/access-calc';
-import { OUTSIDE_SCOPE } from '../access/scope';
+import { scopeIds } from '../access/access-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { assertGroupAccess, parseDay } from '../classes/access';
@@ -69,13 +64,16 @@ export class MealViewsService {
 
   async adminList(query: MealOrdersQueryDto, user: AuthenticatedUser) {
     const date = parseDay(query.date);
-    const scope = scopeKind(user);
-    if (scope && query.kind && query.kind !== scope)
-      throw new ForbiddenException(OUTSIDE_SCOPE);
-    const kind = scope ?? query.kind;
+    const ids = scopeIds(user);
     const groupFilter =
-      kind || query.groupId
-        ? { group: { kind, id: query.groupId } }
+      ids || query.kind || query.groupId
+        ? {
+            group: {
+              kind: query.kind,
+              id: query.groupId,
+              ...(ids ? { institutionId: { in: ids } } : {}),
+            },
+          }
         : undefined;
     const rows = await this.prisma.mealOrder.findMany({
       where: {
@@ -106,11 +104,16 @@ export class MealViewsService {
   ) {
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
-      select: { id: true, kind: true, teachers: { select: { id: true } } },
+      select: {
+        id: true,
+        kind: true,
+        institutionId: true,
+        teachers: { select: { id: true } },
+      },
     });
     if (!group) throw new NotFoundException('Group not found');
-    const kind = scopeKind(user);
-    if (kind && group.kind !== kind)
+    const ids = scopeIds(user);
+    if (ids && (!group.institutionId || !ids.includes(group.institutionId)))
       throw new NotFoundException('Group not found');
     assertGroupAccess(group, user, PermissionArea.meals);
     const rows = await this.prisma.mealOrder.findMany({
