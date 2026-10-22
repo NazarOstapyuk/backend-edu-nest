@@ -24,6 +24,7 @@ import { AuditModule } from './audit/audit.module';
 import { ReportsModule } from './reports/reports.module';
 import { OnlinePaymentsModule } from './online-payments/online-payments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { InstitutionsModule } from './institutions/institutions.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ReportsModule,
     OnlinePaymentsModule,
     DashboardModule,
+    InstitutionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
