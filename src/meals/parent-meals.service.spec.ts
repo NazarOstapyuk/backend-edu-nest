@@ -70,6 +70,7 @@ describe('ParentMealsService', () => {
       group: {
         id: 'g1',
         kind: GroupKind.kindergarten,
+        institutionId: 'inst-k',
         mealPriceCategory: { id: 'pc1', active: true },
       },
     });
@@ -143,12 +144,12 @@ describe('ParentMealsService', () => {
     ).rejects.toThrow(new NotFoundException('Child not found'));
   });
 
-  it('reads only published menus of the child kind', async () => {
+  it('reads only published menus of the child institution', async () => {
     await service.menu('p1', 'c1', '2026-10-12', '2026-10-18', BEFORE);
     expect(
       firstArg<{ where: object }>(mockPrisma.menuDay.findMany).where,
     ).toEqual({
-      kind: GroupKind.kindergarten,
+      institutionId: 'inst-k',
       status: MenuStatus.published,
       date: { gte: day('2026-10-12'), lte: day('2026-10-18') },
     });

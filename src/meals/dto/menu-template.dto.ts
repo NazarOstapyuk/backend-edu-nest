@@ -1,10 +1,10 @@
 import { Type } from 'class-transformer';
-import { GroupKind } from '@prisma/client';
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -72,8 +72,11 @@ export class SaveTemplateItemsDto {
 }
 
 export class ApplyTemplateDto {
-  @IsEnum(GroupKind)
-  kind: GroupKind;
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds: string[];
 
   @IsDateString()
   from: string;

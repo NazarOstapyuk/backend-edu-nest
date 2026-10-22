@@ -51,6 +51,7 @@ const child = (over: Record<string, unknown> = {}) => ({
   group: {
     id: 'g1',
     kind: GroupKind.kindergarten,
+    institutionId: 'inst-k',
     mealPriceCategory: { id: 'pc1', active: true },
   },
   ...over,
@@ -176,6 +177,17 @@ describe('MealOrdersService', () => {
         group: { institutionId: { in: ['inst-k'] } },
       });
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('reads the menu of the child institution only', async () => {
+      mockPrisma.child.findFirst.mockResolvedValue({ id: 'c1' });
+      await service.create('c1', [order()], kgAdmin, BEFORE);
+      expect(
+        firstArg<{ where: object }>(mockPrisma.menuDay.findMany).where,
+      ).toEqual({
+        institutionId: 'inst-k',
+        date: { in: [day('2026-10-14')] },
+      });
     });
 
     it('creates for a child inside the scope', async () => {

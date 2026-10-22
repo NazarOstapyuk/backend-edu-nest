@@ -65,13 +65,20 @@ export class MealViewsService {
   async adminList(query: MealOrdersQueryDto, user: AuthenticatedUser) {
     const date = parseDay(query.date);
     const ids = scopeIds(user);
+    const institutionFilter = query.institutionId
+      ? ids
+        ? { in: ids.filter((i) => i === query.institutionId) }
+        : query.institutionId
+      : ids
+        ? { in: ids }
+        : undefined;
     const groupFilter =
-      ids || query.kind || query.groupId
+      ids || query.kind || query.institutionId || query.groupId
         ? {
             group: {
               kind: query.kind,
               id: query.groupId,
-              ...(ids ? { institutionId: { in: ids } } : {}),
+              institutionId: institutionFilter,
             },
           }
         : undefined;

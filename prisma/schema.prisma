@@ -1009,9 +1009,8 @@ enum MenuStatus {
 model MenuDay {
   id            String        @id @default(uuid())
   date          DateTime      @db.Date
-  kind          GroupKind
-  institutionId String?
-  institution   Institution?  @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  institutionId String
+  institution   Institution   @relation(fields: [institutionId], references: [id], onDelete: Restrict)
   status        MenuStatus    @default(draft)
   publishedAt   DateTime?
   createdAt     DateTime      @default(now())
@@ -1019,7 +1018,7 @@ model MenuDay {
   items         MenuDayItem[]
   orders        MealOrder[]
 
-  @@unique([date, kind])
+  @@unique([date, institutionId])
 }
 
 model MenuDayItem {

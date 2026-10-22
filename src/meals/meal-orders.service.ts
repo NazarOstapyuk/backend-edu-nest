@@ -109,7 +109,10 @@ export class MealOrdersService {
     const ids = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${childId} FOR UPDATE`;
       const found = await tx.menuDay.findMany({
-        where: { kind: group.kind, date: { in: parsed.map((d) => d.day) } },
+        where: {
+          institutionId: group.institutionId,
+          date: { in: parsed.map((d) => d.day) },
+        },
         select: { id: true },
       });
       const menus = new Map<number, { id: string; status: MenuStatus }>();

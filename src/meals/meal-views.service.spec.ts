@@ -129,6 +129,34 @@ describe('MealViewsService', () => {
       });
     });
 
+    it('filters by institution inside the scope', async () => {
+      mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+      await service.adminList(
+        { date: '2026-10-14', institutionId: 'inst-k' },
+        kgAdmin,
+      );
+      expect(
+        firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
+      ).toEqual({
+        date: day('2026-10-14'),
+        child: { group: { institutionId: { in: ['inst-k'] } } },
+      });
+    });
+
+    it('returns nothing for an institution outside the scope', async () => {
+      mockPrisma.mealOrder.findMany.mockResolvedValue([]);
+      await service.adminList(
+        { date: '2026-10-14', institutionId: 'inst-s' },
+        kgAdmin,
+      );
+      expect(
+        firstArg<{ where: object }>(mockPrisma.mealOrder.findMany).where,
+      ).toEqual({
+        date: day('2026-10-14'),
+        child: { group: { institutionId: { in: [] } } },
+      });
+    });
+
     it('404s today for a group of another institution', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g2',

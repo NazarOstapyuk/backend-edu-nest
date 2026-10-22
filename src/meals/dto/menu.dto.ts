@@ -1,17 +1,30 @@
-import { GroupKind } from '@prisma/client';
 import {
+  ArrayNotEmpty,
   ArrayUnique,
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
   IsOptional,
   IsUUID,
 } from 'class-validator';
 
 export class MenuPeriodDto {
-  @IsEnum(GroupKind)
-  kind: GroupKind;
+  @IsUUID('4')
+  institutionId: string;
+
+  @IsDateString()
+  from: string;
+
+  @IsDateString()
+  to: string;
+}
+
+export class MenuRangeDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds: string[];
 
   @IsDateString()
   from: string;
@@ -22,14 +35,26 @@ export class MenuPeriodDto {
 
 export class SaveMenuDayDto {
   @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds: string[];
+
+  @IsArray()
   @ArrayUnique()
   @IsUUID('4', { each: true })
   dishIds: string[];
 }
 
 export class CopyMenuDto {
-  @IsEnum(GroupKind)
-  kind: GroupKind;
+  @IsUUID('4')
+  sourceInstitutionId: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds: string[];
 
   @IsDateString()
   fromStart: string;

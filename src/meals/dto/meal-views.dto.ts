@@ -11,6 +11,10 @@ export class MealOrdersQueryDto {
 
   @IsUUID('4')
   @IsOptional()
+  institutionId?: string;
+
+  @IsUUID('4')
+  @IsOptional()
   groupId?: string;
 }
 

@@ -88,7 +88,7 @@ export class ParentMealsService {
       this.calendar.entriesBetween(from, to),
       this.prisma.menuDay.findMany({
         where: {
-          kind: group.kind,
+          institutionId: group.institutionId,
           status: MenuStatus.published,
           date: { gte: from, lte: to },
         },

@@ -5,8 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { scopeIds } from '../access/access-calc';
-import { assertInstitutionInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { dayRange } from '../attendance/register-calc';
@@ -133,7 +131,11 @@ export class MenuTemplatesService {
   }
 
   async apply(id: string, dto: ApplyTemplateDto, user: AuthenticatedUser) {
-    assertInstitutionInScope(scopeIds(user), null);
+    const institutions = await this.menus.resolveInstitutions(
+      dto.institutionIds,
+      user,
+      true,
+    );
     const template = await this.get(id);
     if (!template.active)
       throw new BadRequestException('Menu template is inactive');
@@ -154,6 +156,6 @@ export class MenuTemplatesService {
         };
       })
       .filter((p) => p.dishIds.length);
-    return this.menus.fill(dto.kind, plan, dto.overwrite ?? false);
+    return this.menus.fill(institutions, plan, dto.overwrite ?? false);
   }
 }

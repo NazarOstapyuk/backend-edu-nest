@@ -4,20 +4,25 @@ import {
   Delete,
   Get,
   Param,
-  ParseEnumPipe,
+  ParseUUIDPipe,
   Post,
   Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { GroupKind, PermissionArea, PermissionLevel } from '@prisma/client';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { Permission } from '../common/decorators/permission.decorator';
 import { MenusService } from './menus.service';
-import { CopyMenuDto, MenuPeriodDto, SaveMenuDayDto } from './dto/menu.dto';
+import {
+  CopyMenuDto,
+  MenuPeriodDto,
+  MenuRangeDto,
+  SaveMenuDayDto,
+} from './dto/menu.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Permission(PermissionArea.meals, PermissionLevel.view)
@@ -32,16 +37,13 @@ export class MenusController {
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('publish')
-  publish(@Body() dto: MenuPeriodDto, @CurrentUser() user: AuthenticatedUser) {
+  publish(@Body() dto: MenuRangeDto, @CurrentUser() user: AuthenticatedUser) {
     return this.menus.publish(dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
   @Post('unpublish')
-  unpublish(
-    @Body() dto: MenuPeriodDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  unpublish(@Body() dto: MenuRangeDto, @CurrentUser() user: AuthenticatedUser) {
     return this.menus.unpublish(dto, user);
   }
 
@@ -52,23 +54,23 @@ export class MenusController {
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
-  @Put(':date/:kind')
+  @Put(':date')
   save(
     @Param('date') date: string,
-    @Param('kind', new ParseEnumPipe(GroupKind)) kind: GroupKind,
     @Body() dto: SaveMenuDayDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.menus.saveDay(date, kind, dto, user);
+    return this.menus.saveDay(date, dto, user);
   }
 
   @Permission(PermissionArea.meals, PermissionLevel.edit)
-  @Delete(':date/:kind')
+  @Delete(':date/:institutionId')
   remove(
     @Param('date') date: string,
-    @Param('kind', new ParseEnumPipe(GroupKind)) kind: GroupKind,
+    @Param('institutionId', new ParseUUIDPipe({ version: '4' }))
+    institutionId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.menus.deleteDay(date, kind, user);
+    return this.menus.deleteDay(date, institutionId, user);
   }
 }

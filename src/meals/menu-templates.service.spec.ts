@@ -12,7 +12,10 @@ import { MenusService } from './menus.service';
 import { MenuTemplatesService } from './menu-templates.service';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
-const K = GroupKind.kindergarten;
+const IK = '11111111-1111-4111-8111-111111111111';
+const IS = '22222222-2222-4222-8222-222222222222';
+const KI = { id: IK, type: GroupKind.kindergarten };
+const SI = { id: IS, type: GroupKind.school_class };
 const admin = {
   id: 'a1',
   role: Role.admin,
@@ -48,7 +51,7 @@ const mockPrisma = {
   dish: { findMany: jest.fn() },
   $transaction: jest.fn(),
 };
-const mockMenus = { fill: jest.fn() };
+const mockMenus = { fill: jest.fn(), resolveInstitutions: jest.fn() };
 
 describe('MenuTemplatesService', () => {
   let service: MenuTemplatesService;
@@ -67,6 +70,7 @@ describe('MenuTemplatesService', () => {
       fn(mockPrisma),
     );
     mockPrisma.menuTemplate.findUnique.mockResolvedValue(template());
+    mockMenus.resolveInstitutions.mockResolvedValue([KI, SI]);
     mockMenus.fill.mockResolvedValue({
       created: 0,
       overwritten: 0,
@@ -174,7 +178,7 @@ describe('MenuTemplatesService', () => {
       await service.apply(
         't1',
         {
-          kind: K,
+          institutionIds: [IK, IS],
           from: '2026-10-12',
           to: '2026-10-27',
           startWeek: 1,
@@ -182,8 +186,13 @@ describe('MenuTemplatesService', () => {
         },
         admin,
       );
+      expect(mockMenus.resolveInstitutions).toHaveBeenCalledWith(
+        [IK, IS],
+        admin,
+        true,
+      );
       expect(mockMenus.fill).toHaveBeenCalledWith(
-        K,
+        [KI, SI],
         [
           { date: day('2026-10-12'), dishIds: ['mon1'] },
           { date: day('2026-10-19'), dishIds: ['mon2'] },
@@ -193,22 +202,20 @@ describe('MenuTemplatesService', () => {
       );
     });
 
-    it('rejects applying for a scoped manager', async () => {
+    it('writes nothing when an institution is refused', async () => {
+      mockMenus.resolveInstitutions.mockRejectedValue(
+        new ForbiddenException('Outside access scope'),
+      );
       await expect(
         service.apply(
           't1',
           {
-            kind: GroupKind.kindergarten,
+            institutionIds: [IS],
             from: '2026-10-12',
             to: '2026-10-16',
             startWeek: 1,
           },
-          {
-            ...admin,
-            accessScope: AccessScope.institutions,
-            institutionIds: ['inst-k'],
-            scopeInstitutionIds: ['inst-k'],
-          },
+          admin,
         ),
       ).rejects.toThrow(new ForbiddenException('Outside access scope'));
       expect(mockMenus.fill).not.toHaveBeenCalled();
@@ -221,7 +228,12 @@ describe('MenuTemplatesService', () => {
       await expect(
         service.apply(
           't1',
-          { kind: K, from: '2026-10-12', to: '2026-10-16', startWeek: 1 },
+          {
+            institutionIds: [IK],
+            from: '2026-10-12',
+            to: '2026-10-16',
+            startWeek: 1,
+          },
           admin,
         ),
       ).rejects.toThrow(new BadRequestException('Menu template is inactive'));
@@ -232,7 +244,12 @@ describe('MenuTemplatesService', () => {
       await expect(
         service.apply(
           't1',
-          { kind: K, from: '2026-10-12', to: '2026-10-16', startWeek: 3 },
+          {
+            institutionIds: [IK],
+            from: '2026-10-12',
+            to: '2026-10-16',
+            startWeek: 3,
+          },
           admin,
         ),
       ).rejects.toThrow(new BadRequestException('Template week out of range'));
