@@ -1297,8 +1297,6 @@ enum PermissionLevel {
 
 enum AccessScope {
   all
-  kindergarten
-  school_class
   institutions
 }
 
