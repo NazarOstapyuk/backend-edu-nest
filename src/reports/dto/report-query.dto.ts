@@ -16,6 +16,10 @@ export class ReportQueryDto {
 
   @IsOptional()
   @IsUUID('4')
+  institutionId?: string;
+
+  @IsOptional()
+  @IsUUID('4')
   groupId?: string;
 
   @IsOptional()
