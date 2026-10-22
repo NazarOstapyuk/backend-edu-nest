@@ -417,6 +417,54 @@ describe('MenusService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
+    it('locks and writes institutions in id order regardless of request order', async () => {
+      await service.saveDay(
+        '2026-10-14',
+        { institutionIds: [IS, IK], dishIds: ['soup'] },
+        admin,
+      );
+      expect(
+        mockPrisma.menuDay.findUnique.mock.calls.map(
+          (c: [{ where: { date_institutionId: { institutionId: string } } }]) =>
+            c[0].where.date_institutionId.institutionId,
+        ),
+      ).toEqual([IK, IS]);
+    });
+
+    it('fills institutions in id order regardless of request order', async () => {
+      mockPrisma.menuDay.findMany.mockResolvedValue([]);
+      await service.fill(
+        [{ id: IS, type: GroupKind.school_class }, KI],
+        [{ date: day('2026-10-14'), dishIds: ['a'] }],
+        false,
+      );
+      expect(
+        mockPrisma.menuDay.create.mock.calls.map(
+          (c: [{ data: { institutionId: string } }]) => c[0].data.institutionId,
+        ),
+      ).toEqual([IK, IS]);
+    });
+
+    it('unpublishes and deletes in an inactive institution', async () => {
+      mockPrisma.menuDay.findMany.mockResolvedValue([{ id: 'm1' }]);
+      mockPrisma.mealOrder.count.mockResolvedValue(0);
+      mockPrisma.menuDay.updateMany.mockResolvedValue({ count: 1 });
+      await expect(
+        service.unpublish(
+          { institutionIds: [IX], from: '2026-10-12', to: '2026-10-16' },
+          admin,
+        ),
+      ).resolves.toEqual({ count: 1 });
+      mockPrisma.menuDay.findUnique
+        .mockResolvedValueOnce({ id: 'm1' })
+        .mockResolvedValueOnce({ status: MenuStatus.draft });
+      await expect(service.deleteDay('2026-10-14', IX, admin)).resolves.toEqual(
+        {
+          message: 'Menu day deleted',
+        },
+      );
+    });
+
     it('writes nothing when one institution is inactive', async () => {
       await expect(
         service.saveDay(

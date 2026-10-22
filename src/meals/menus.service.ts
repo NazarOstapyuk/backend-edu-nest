@@ -72,6 +72,9 @@ const sortDishes = <
 
 type InstitutionRef = { id: string; type: InstitutionType };
 
+const byId = <T extends { id: string }>(list: T[]) =>
+  [...list].sort((a, b) => a.id.localeCompare(b.id));
+
 @Injectable()
 export class MenusService {
   constructor(
@@ -184,7 +187,7 @@ export class MenusService {
     if (dto.dishIds.some((id) => !dishes.some((d) => d.id === id)))
       throw new NotFoundException('Dish not found');
     await this.prisma.$transaction(async (tx) => {
-      for (const { id: institutionId } of institutions) {
+      for (const { id: institutionId } of byId(institutions)) {
         const existing = await tx.menuDay.findUnique({
           where: { date_institutionId: { date, institutionId } },
           select: { id: true },
@@ -252,7 +255,7 @@ export class MenusService {
     const institutions = await this.resolveInstitutions(
       dto.institutionIds,
       user,
-      true,
+      false,
     );
     const { from, to } = parsePeriod(dto.from, dto.to, 92);
     return this.prisma.$transaction(async (tx) => {
@@ -300,7 +303,7 @@ export class MenusService {
       }),
     ]);
     await this.prisma.$transaction(async (tx) => {
-      for (const institution of institutions) {
+      for (const institution of byId(institutions)) {
         const existing = existingAll.filter(
           (e) => e.institutionId === institution.id,
         );
@@ -402,7 +405,7 @@ export class MenusService {
     institutionId: string,
     user: AuthenticatedUser,
   ) {
-    await this.resolveInstitutions([institutionId], user, true);
+    await this.resolveInstitutions([institutionId], user, false);
     const date = parseDay(dateValue);
     await this.prisma.$transaction(async (tx) => {
       const day = await tx.menuDay.findUnique({
