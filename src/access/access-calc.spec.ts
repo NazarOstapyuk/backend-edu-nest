@@ -127,14 +127,17 @@ describe('scope', () => {
   });
 
   it('checks scope coverage', () => {
-    expect(scopeCovers(AccessScope.all, AccessScope.kindergarten)).toBe(true);
-    expect(
-      scopeCovers(AccessScope.kindergarten, AccessScope.kindergarten),
-    ).toBe(true);
-    expect(scopeCovers(AccessScope.kindergarten, AccessScope.all)).toBe(false);
-    expect(
-      scopeCovers(AccessScope.kindergarten, AccessScope.school_class),
-    ).toBe(false);
+    const all = { accessScope: AccessScope.all, institutionIds: [] };
+    const some = (...institutionIds: string[]) => ({
+      accessScope: AccessScope.institutions,
+      institutionIds,
+    });
+    expect(scopeCovers(all, all)).toBe(true);
+    expect(scopeCovers(all, some('a'))).toBe(true);
+    expect(scopeCovers(some('a', 'b'), some('a'))).toBe(true);
+    expect(scopeCovers(some('a'), some('a', 'b'))).toBe(false);
+    expect(scopeCovers(some('a'), some('b'))).toBe(false);
+    expect(scopeCovers(some('a', 'b'), all)).toBe(false);
   });
 });
 
@@ -153,13 +156,16 @@ describe('grantDenial', () => {
     permissions = {},
     accessScope: AccessScope = AccessScope.all,
     role: Role = Role.admin,
-  ) => ({ id: 't1', role, accessScope, permissions });
+    institutionIds: string[] = [],
+  ) => ({ id: 't1', role, accessScope, institutionIds, permissions });
   const request = (
     permissions = {},
     accessScope: AccessScope = AccessScope.all,
+    institutionIds: string[] = [],
   ) => ({
     permissions,
     accessScope,
+    institutionIds,
   });
 
   it('protects root, parents and oneself', () => {
@@ -243,37 +249,54 @@ describe('grantDenial', () => {
   });
 
   it('refuses a scope wider than the granter or changing a wider target', () => {
-    const kgDeputy = {
+    const I = AccessScope.institutions;
+    const abDeputy = {
       ...deputy,
       id: 'g3',
-      accessScope: AccessScope.kindergarten,
+      accessScope: I,
+      institutionIds: ['a', 'b'],
     };
+    const aDeputy = { ...abDeputy, institutionIds: ['a'] };
     expect(
       grantDenial(
-        kgDeputy,
-        target({}, AccessScope.kindergarten),
-        request({}, AccessScope.kindergarten),
+        aDeputy,
+        target({}, I, Role.admin, ['a']),
+        request({}, I, ['a']),
       ),
     ).toBeNull();
     expect(
       grantDenial(
-        kgDeputy,
-        target({}, AccessScope.kindergarten),
+        abDeputy,
+        target({}, I, Role.admin, ['a']),
+        request({}, I, ['a', 'b']),
+      ),
+    ).toBeNull();
+    expect(
+      grantDenial(
+        aDeputy,
+        target({}, I, Role.admin, ['a']),
+        request({}, I, ['a', 'b']),
+      ),
+    ).toBe('too_much');
+    expect(
+      grantDenial(
+        aDeputy,
+        target({}, I, Role.admin, ['a']),
         request({}, AccessScope.all),
       ),
     ).toBe('too_much');
     expect(
       grantDenial(
-        kgDeputy,
+        aDeputy,
         target({}, AccessScope.all),
         request({}, AccessScope.all),
       ),
     ).toBe('too_much');
     expect(
       grantDenial(
-        kgDeputy,
-        target({}, AccessScope.school_class),
-        request({}, AccessScope.kindergarten),
+        aDeputy,
+        target({}, I, Role.admin, ['b']),
+        request({}, I, ['a']),
       ),
     ).toBe('too_much');
   });
@@ -312,11 +335,27 @@ describe('coversUser', () => {
   });
 
   it('refuses a wider scope target', () => {
-    const narrow = user(
+    const narrow = {
+      ...user(
+        Role.admin,
+        { [PermissionArea.users]: edit },
+        AccessScope.institutions,
+      ),
+      institutionIds: ['a'],
+    };
+    expect(coversUser(narrow, user(Role.admin))).toBe(false);
+  });
+
+  it('covers a target whose institutions are a subset', () => {
+    const base = user(
       Role.admin,
       { [PermissionArea.users]: edit },
-      AccessScope.kindergarten,
+      AccessScope.institutions,
     );
-    expect(coversUser(narrow, user(Role.admin))).toBe(false);
+    const granter = { ...base, institutionIds: ['a', 'b'] };
+    expect(coversUser(granter, { ...base, institutionIds: ['b'] })).toBe(true);
+    expect(coversUser(granter, { ...base, institutionIds: ['b', 'c'] })).toBe(
+      false,
+    );
   });
 });

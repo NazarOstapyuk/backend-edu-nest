@@ -69,8 +69,24 @@ export const scopeIds = (user: {
   scopeInstitutionIds: string[] | null;
 }): string[] | null => user.scopeInstitutionIds;
 
-export const scopeCovers = (granter: AccessScope, target: AccessScope) =>
-  granter === AccessScope.all || granter === target;
+export interface ScopeRef {
+  accessScope: AccessScope;
+  institutionIds: string[];
+}
+
+export const scopeCovers = (granter: ScopeRef, target: ScopeRef): boolean => {
+  if (granter.accessScope === AccessScope.all) return true;
+  if (target.accessScope === AccessScope.all) return false;
+  return target.institutionIds.every((id) =>
+    granter.institutionIds.includes(id),
+  );
+};
+
+const sameScope = (a: ScopeRef, b: ScopeRef): boolean =>
+  a.accessScope === b.accessScope &&
+  (a.accessScope === AccessScope.all ||
+    (a.institutionIds.length === b.institutionIds.length &&
+      a.institutionIds.every((id) => b.institutionIds.includes(id))));
 
 export function grantDenial(
   granter: AccessUser & { id: string },
@@ -78,9 +94,14 @@ export function grantDenial(
     id: string;
     role: Role;
     accessScope: AccessScope;
+    institutionIds: string[];
     permissions: PermissionMap;
   },
-  request: { accessScope: AccessScope; permissions: PermissionMap },
+  request: {
+    accessScope: AccessScope;
+    institutionIds: string[];
+    permissions: PermissionMap;
+  },
 ): GrantDenial {
   if (target.role === Role.root) return 'root';
   if (target.role === Role.parent) return 'staff_only';
@@ -88,11 +109,8 @@ export function grantDenial(
   if (granter.role === Role.root) return null;
   if (!levelSatisfies(granter.permissions.users, PermissionLevel.edit))
     return 'too_much';
-  if (!scopeCovers(granter.accessScope, request.accessScope)) return 'too_much';
-  if (
-    request.accessScope !== target.accessScope &&
-    !scopeCovers(granter.accessScope, target.accessScope)
-  )
+  if (!scopeCovers(granter, request)) return 'too_much';
+  if (!sameScope(request, target) && !scopeCovers(granter, target))
     return 'too_much';
   for (const area of ALL_AREAS) {
     const before = target.permissions[area];
@@ -108,12 +126,17 @@ export function grantDenial(
 
 export function coversUser(
   actor: AccessUser,
-  target: { role: Role; accessScope: AccessScope; permissions: PermissionMap },
+  target: {
+    role: Role;
+    accessScope: AccessScope;
+    institutionIds: string[];
+    permissions: PermissionMap;
+  },
 ): boolean {
   if (actor.role === Role.root) return true;
   if (target.role === Role.root) return false;
   if (target.role === Role.parent) return true;
-  if (!scopeCovers(actor.accessScope, target.accessScope)) return false;
+  if (!scopeCovers(actor, target)) return false;
   return ALL_AREAS.every((area) => {
     const level = target.permissions[area];
     return (

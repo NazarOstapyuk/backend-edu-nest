@@ -21,12 +21,26 @@ import {
 } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuditService } from '../audit/audit.service';
+import { findInstitution } from '../institutions/institution-checks';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 const permissionSelect = { select: { area: true, level: true } } as const;
+const institutionSelect = { select: { institutionId: true } } as const;
+
+const idsOf = (row: { institutions?: { institutionId: string }[] }) =>
+  (row.institutions ?? []).map((i) => i.institutionId).sort();
+
+const withInstitutionIds = <
+  T extends { institutions?: { institutionId: string }[] },
+>(
+  row: T,
+): Omit<T, 'institutions'> & { institutionIds: string[] } => {
+  const { institutions, ...rest } = row;
+  return { ...rest, institutionIds: idsOf({ institutions }) };
+};
 
 const USER_FIELDS = [
   'login',
@@ -38,6 +52,7 @@ const USER_FIELDS = [
   'email',
   'isActive',
   'accessScope',
+  'institutionIds',
   'permissions',
   'password',
 ] as const;
@@ -55,6 +70,7 @@ const userAudit = (
     isActive: boolean;
     accessScope: AccessScope;
     permissions?: { area: PermissionArea; level: PermissionLevel }[];
+    institutions?: { institutionId: string }[];
   },
   passwordChanged = false,
 ) => ({
@@ -67,6 +83,7 @@ const userAudit = (
   email: user.email,
   isActive: user.isActive,
   accessScope: user.accessScope,
+  institutionIds: idsOf(user),
   permissions: (user.permissions ?? []).map((p) => `${p.area}:${p.level}`),
   password: passwordChanged ? 'змінено' : null,
 });
@@ -108,9 +125,21 @@ export class UsersService {
         phone: dto.phone ?? null,
         email: dto.email ?? null,
         mustChangePassword: dto.role === Role.parent,
-        ...(scoped ? { accessScope: actor.accessScope } : {}),
+        ...(scoped
+          ? {
+              accessScope: actor.accessScope,
+              institutions: {
+                create: actor.institutionIds.map((institutionId) => ({
+                  institutionId,
+                })),
+              },
+            }
+          : {}),
       },
-      include: { permissions: permissionSelect },
+      include: {
+        permissions: permissionSelect,
+        institutions: institutionSelect,
+      },
     });
     await this.audit.recordChange(this.prisma, {
       actorId: actor.id,
@@ -123,11 +152,11 @@ export class UsersService {
     });
 
     const { password: _p, refreshToken: _r, ...result } = user;
-    return result;
+    return withInstitutionIds(result);
   }
 
   async findAll() {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { role: { not: Role.root } },
       select: {
         id: true,
@@ -142,10 +171,12 @@ export class UsersService {
         isActive: true,
         accessScope: true,
         permissions: permissionSelect,
+        institutions: institutionSelect,
         createdAt: true,
         updatedAt: true,
       },
     });
+    return users.map(withInstitutionIds);
   }
 
   private assertManageable(
@@ -154,12 +185,14 @@ export class UsersService {
       role: Role;
       accessScope: AccessScope;
       permissions: { area: PermissionArea; level: PermissionLevel }[];
+      institutions?: { institutionId: string }[];
     },
   ) {
     if (
       !coversUser(actor, {
         role: target.role,
         accessScope: target.accessScope,
+        institutionIds: idsOf(target),
         permissions: toPermissionMap(target.permissions),
       })
     )
@@ -169,7 +202,10 @@ export class UsersService {
   async delete(id: string, actor: AuthenticatedUser) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { permissions: permissionSelect },
+      include: {
+        permissions: permissionSelect,
+        institutions: institutionSelect,
+      },
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.role === Role.root)
@@ -261,7 +297,10 @@ export class UsersService {
 
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { permissions: permissionSelect },
+      include: {
+        permissions: permissionSelect,
+        institutions: institutionSelect,
+      },
     });
     if (!user) throw new NotFoundException('User not found');
     if (actor.id === id && dto.role !== undefined && dto.role !== user.role)
@@ -313,6 +352,10 @@ export class UsersService {
       refreshToken?: null;
       accessScope?: AccessScope;
       permissions?: { deleteMany: object };
+      institutions?: {
+        deleteMany: object;
+        create?: { institutionId: string }[];
+      };
     } = {};
     if (dto.login !== undefined) data.login = dto.login;
     if (dto.password) {
@@ -329,6 +372,7 @@ export class UsersService {
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (becomesParent) {
       data.permissions = { deleteMany: {} };
+      data.institutions = { deleteMany: {} };
       data.accessScope = AccessScope.all;
     }
     if (
@@ -336,13 +380,23 @@ export class UsersService {
       (dto.role === Role.admin || dto.role === Role.teacher) &&
       actor.role !== Role.root &&
       actor.accessScope !== AccessScope.all
-    )
+    ) {
       data.accessScope = actor.accessScope;
+      data.institutions = {
+        deleteMany: {},
+        create: actor.institutionIds.map((institutionId) => ({
+          institutionId,
+        })),
+      };
+    }
 
     const updated = await this.prisma.user.update({
       where: { id },
       data,
-      include: { permissions: permissionSelect },
+      include: {
+        permissions: permissionSelect,
+        institutions: institutionSelect,
+      },
     });
     await this.audit.recordChange(this.prisma, {
       actorId: actor.id,
@@ -354,27 +408,37 @@ export class UsersService {
       fields: USER_FIELDS,
     });
     const { password: _p, refreshToken: _r, ...result } = updated;
-    return result;
+    return withInstitutionIds(result);
   }
   async setAccess(id: string, dto: UpdateAccessDto, actor: AuthenticatedUser) {
     const target = await this.prisma.user.findUnique({
       where: { id },
-      include: { permissions: permissionSelect },
+      include: {
+        permissions: permissionSelect,
+        institutions: institutionSelect,
+      },
     });
     if (!target) throw new NotFoundException('User not found');
     const areas = new Set(dto.permissions.map((p) => p.area));
     if (areas.size !== dto.permissions.length)
       throw new BadRequestException('Duplicate permission');
+    const targetIds = idsOf(target);
+    const requestedIds =
+      dto.accessScope === AccessScope.institutions
+        ? [...new Set(dto.institutionIds ?? [])].sort()
+        : [];
     const denial = grantDenial(
       actor,
       {
         id: target.id,
         role: target.role,
         accessScope: target.accessScope,
+        institutionIds: targetIds,
         permissions: toPermissionMap(target.permissions),
       },
       {
         accessScope: dto.accessScope,
+        institutionIds: requestedIds,
         permissions: toPermissionMap(dto.permissions),
       },
     );
@@ -390,19 +454,35 @@ export class UsersService {
       const requested = {
         role: target.role,
         accessScope: dto.accessScope,
+        institutionIds: requestedIds,
         permissions: toPermissionMap(dto.permissions),
       };
       if (
         !coversUser(actor, {
           role: target.role,
           accessScope: target.accessScope,
+          institutionIds: targetIds,
           permissions: toPermissionMap(target.permissions),
         }) ||
         !coversUser(actor, requested)
       )
         throw new ForbiddenException('Cannot grant more than you have');
     }
+    for (const institutionId of requestedIds) {
+      await findInstitution(this.prisma, institutionId, {
+        active: !targetIds.includes(institutionId),
+      });
+    }
     return this.prisma.$transaction(async (tx) => {
+      await tx.userInstitution.deleteMany({ where: { userId: id } });
+      if (requestedIds.length > 0) {
+        await tx.userInstitution.createMany({
+          data: requestedIds.map((institutionId) => ({
+            userId: id,
+            institutionId,
+          })),
+        });
+      }
       await tx.userPermission.deleteMany({ where: { userId: id } });
       await tx.userPermission.createMany({
         data: dto.permissions.map((p) => ({
@@ -417,7 +497,10 @@ export class UsersService {
       });
       const updated = await tx.user.findUnique({
         where: { id },
-        include: { permissions: permissionSelect },
+        include: {
+          permissions: permissionSelect,
+          institutions: institutionSelect,
+        },
         omit: { password: true, refreshToken: true },
       });
       if (updated) {
@@ -428,10 +511,10 @@ export class UsersService {
           action: AuditAction.update,
           before: userAudit(target),
           after: userAudit(updated),
-          fields: ['accessScope', 'permissions'],
+          fields: ['accessScope', 'institutionIds', 'permissions'],
         });
       }
-      return updated;
+      return updated ? withInstitutionIds(updated) : updated;
     });
   }
 }

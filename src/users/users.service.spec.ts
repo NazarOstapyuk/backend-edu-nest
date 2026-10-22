@@ -24,6 +24,8 @@ const mockPrisma = {
     delete: jest.fn(),
   },
   userPermission: { deleteMany: jest.fn(), createMany: jest.fn() },
+  userInstitution: { deleteMany: jest.fn(), createMany: jest.fn() },
+  institution: { findUnique: jest.fn() },
   $transaction: jest.fn(),
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
@@ -288,6 +290,7 @@ describe('UsersService', () => {
       )[0].data;
       expect(data).toMatchObject({
         permissions: { deleteMany: {} },
+        institutions: { deleteMany: {} },
         accessScope: AccessScope.all,
       });
     });
@@ -394,15 +397,27 @@ describe('UsersService', () => {
     it('gives staff created by a scoped actor the actor scope', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({ id: 'n' });
-      const scoped = { ...adminActor, accessScope: AccessScope.kindergarten };
+      const scoped = {
+        ...adminActor,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-a', 'inst-b'],
+      };
       await service.create(
         { login: 'n', password: 'pass123', role: Role.teacher },
         scoped,
       );
       const scopedCall = mockPrisma.user.create.mock.calls[0] as [
-        { data: { accessScope?: AccessScope } },
+        {
+          data: {
+            accessScope?: AccessScope;
+            institutions?: { create: { institutionId: string }[] };
+          };
+        },
       ];
-      expect(scopedCall[0].data.accessScope).toBe(AccessScope.kindergarten);
+      expect(scopedCall[0].data.accessScope).toBe(AccessScope.institutions);
+      expect(scopedCall[0].data.institutions).toEqual({
+        create: [{ institutionId: 'inst-a' }, { institutionId: 'inst-b' }],
+      });
       mockPrisma.user.create.mockClear();
       await service.create(
         { login: 'n', password: 'pass123', role: Role.teacher },
@@ -418,12 +433,25 @@ describe('UsersService', () => {
       mockPrisma.user.findUnique.mockResolvedValue(
         target({ role: Role.parent, permissions: [], phone: '+380' }),
       );
-      const scoped = { ...adminActor, accessScope: AccessScope.school_class };
+      const scoped = {
+        ...adminActor,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['inst-a'],
+      };
       await service.update('x1', { role: Role.teacher }, scoped);
       const call = mockPrisma.user.update.mock.calls[0] as [
-        { data: { accessScope?: AccessScope } },
+        {
+          data: {
+            accessScope?: AccessScope;
+            institutions?: unknown;
+          };
+        },
       ];
-      expect(call[0].data.accessScope).toBe(AccessScope.school_class);
+      expect(call[0].data.accessScope).toBe(AccessScope.institutions);
+      expect(call[0].data.institutions).toEqual({
+        deleteMany: {},
+        create: [{ institutionId: 'inst-a' }],
+      });
     });
 
     it('refuses to delete a staff user the actor does not cover', async () => {
@@ -776,7 +804,8 @@ describe('UsersService', () => {
 
     it('refuses changing access of a user the actor does not cover', async () => {
       const narrowTarget = targetRow({
-        accessScope: AccessScope.kindergarten,
+        accessScope: AccessScope.institutions,
+        institutions: [{ institutionId: 'inst-a' }],
         permissions: [
           { area: PermissionArea.finance, level: PermissionLevel.edit },
           { area: PermissionArea.payroll, level: PermissionLevel.edit },
@@ -806,7 +835,11 @@ describe('UsersService', () => {
       await expect(
         service.setAccess(
           't1',
-          { accessScope: AccessScope.kindergarten, permissions: [] },
+          {
+            accessScope: AccessScope.institutions,
+            institutionIds: ['inst-a'],
+            permissions: [],
+          },
           deputy,
         ),
       ).rejects.toThrow('Cannot grant more than you have');
@@ -834,6 +867,116 @@ describe('UsersService', () => {
         actor,
       );
       expect(mockPrisma.userPermission.deleteMany).toHaveBeenCalled();
+    });
+
+    describe('institutions', () => {
+      const scopedActor = (institutionIds: string[]) => ({
+        ...actor,
+        accessScope: AccessScope.institutions,
+        institutionIds,
+        scopeInstitutionIds: institutionIds,
+      });
+      const grant = (ids: string[]) => ({
+        accessScope: AccessScope.institutions,
+        institutionIds: ids,
+        permissions: [],
+      });
+      const inst = (isActive: boolean) => ({
+        id: 'a',
+        type: 'kindergarten',
+        isActive,
+        name: 'A',
+      });
+
+      it('refuses a granter holding [A] granting [A,B]', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+        await expect(
+          service.setAccess('t1', grant(['a', 'b']), scopedActor(['a'])),
+        ).rejects.toThrow('Cannot grant more than you have');
+        expect(mockPrisma.userInstitution.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it('lets a granter holding [A,B] grant [A] and replaces rows', async () => {
+        mockPrisma.user.findUnique
+          .mockResolvedValueOnce(
+            targetRow({
+              accessScope: AccessScope.institutions,
+              institutions: [{ institutionId: 'b' }],
+            }),
+          )
+          .mockResolvedValueOnce(
+            targetRow({
+              accessScope: AccessScope.institutions,
+              institutions: [{ institutionId: 'a' }],
+            }),
+          );
+        mockPrisma.institution.findUnique.mockResolvedValue(inst(true));
+        const view = await service.setAccess(
+          't1',
+          grant(['a']),
+          scopedActor(['a', 'b']),
+        );
+        expect(mockPrisma.userInstitution.deleteMany).toHaveBeenCalledWith({
+          where: { userId: 't1' },
+        });
+        expect(mockPrisma.userInstitution.createMany).toHaveBeenCalledWith({
+          data: [{ userId: 't1', institutionId: 'a' }],
+        });
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 't1' },
+          data: { accessScope: AccessScope.institutions },
+        });
+        expect(view?.institutionIds).toEqual(['a']);
+      });
+
+      it('clears institution rows when access becomes all', async () => {
+        mockPrisma.user.findUnique
+          .mockResolvedValueOnce(
+            targetRow({
+              accessScope: AccessScope.institutions,
+              institutions: [{ institutionId: 'a' }],
+            }),
+          )
+          .mockResolvedValueOnce(targetRow());
+        await service.setAccess(
+          't1',
+          { accessScope: AccessScope.all, permissions: [] },
+          actor,
+        );
+        expect(mockPrisma.userInstitution.deleteMany).toHaveBeenCalled();
+        expect(mockPrisma.userInstitution.createMany).not.toHaveBeenCalled();
+      });
+
+      it('refuses to newly grant an inactive institution', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+        mockPrisma.institution.findUnique.mockResolvedValue(inst(false));
+        await expect(
+          service.setAccess('t1', grant(['a']), actor),
+        ).rejects.toThrow('Institution is inactive');
+        expect(mockPrisma.userInstitution.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it('keeps an already granted inactive institution', async () => {
+        mockPrisma.user.findUnique
+          .mockResolvedValueOnce(
+            targetRow({
+              accessScope: AccessScope.institutions,
+              institutions: [{ institutionId: 'a' }],
+            }),
+          )
+          .mockResolvedValueOnce(targetRow());
+        mockPrisma.institution.findUnique.mockResolvedValue(inst(false));
+        await service.setAccess('t1', grant(['a']), actor);
+        expect(mockPrisma.userInstitution.createMany).toHaveBeenCalled();
+      });
+
+      it('answers 404 for an unknown institution', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+        mockPrisma.institution.findUnique.mockResolvedValue(null);
+        await expect(
+          service.setAccess('t1', grant(['zzz']), actor),
+        ).rejects.toThrow('Institution not found');
+      });
     });
 
     it('rejects duplicates and a missing user', async () => {
@@ -1009,8 +1152,23 @@ describe('UsersService', () => {
       mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
       mockPrisma.user.update.mockResolvedValue({});
       mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ ...row, permissions: [] })
-        .mockResolvedValueOnce(row);
+        .mockResolvedValueOnce({
+          ...row,
+          permissions: [],
+          accessScope: AccessScope.institutions,
+          institutions: [{ institutionId: 'b' }],
+        })
+        .mockResolvedValueOnce({
+          ...row,
+          accessScope: AccessScope.institutions,
+          institutions: [{ institutionId: 'a' }],
+        });
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'a',
+        type: 'kindergarten',
+        isActive: true,
+        name: 'A',
+      });
       const actor = {
         ...adminActor,
         id: 'g1',
@@ -1023,7 +1181,8 @@ describe('UsersService', () => {
       await service.setAccess(
         'u1',
         {
-          accessScope: AccessScope.all,
+          accessScope: AccessScope.institutions,
+          institutionIds: ['a'],
           permissions: [
             { area: PermissionArea.finance, level: PermissionLevel.view },
           ],
@@ -1035,13 +1194,19 @@ describe('UsersService', () => {
         unknown,
         {
           fields: string[];
-          before: { permissions: string[] };
-          after: { permissions: string[] };
+          before: { permissions: string[]; institutionIds: string[] };
+          after: { permissions: string[]; institutionIds: string[] };
         },
       ];
       expect(db).toBe(mockPrisma);
+      expect(input.before.institutionIds).toEqual(['b']);
+      expect(input.after.institutionIds).toEqual(['a']);
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(input.fields).toEqual(['accessScope', 'permissions']);
+      expect(input.fields).toEqual([
+        'accessScope',
+        'institutionIds',
+        'permissions',
+      ]);
       expect(input.before.permissions).toEqual([]);
       expect(input.after.permissions).toEqual(['finance:view']);
     });
