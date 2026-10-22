@@ -31,8 +31,7 @@ export class CreateChildDto {
   gender: Gender;
 
   @IsUUID('4')
-  @IsOptional()
-  groupId?: string;
+  groupId: string;
 
   @IsArray()
   @IsUUID('4', { each: true })

@@ -1,21 +1,23 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, Gender, Role } from '@prisma/client';
 import { scopeIds } from '../access/access-calc';
-import {
-  assertInstitutionInScope,
-  childScopeWhere,
-  OUTSIDE_SCOPE,
-} from '../access/scope';
+import { assertInstitutionInScope, childScopeWhere } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuditService } from '../audit/audit.service';
+import { findInstitution } from '../institutions/institution-checks';
+import { assertChildrenCanMove } from '../institutions/move-guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { kyivToday } from '../tariffs/dates';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
+
+const groupInclude = {
+  include: { institution: { select: { id: true, name: true, type: true } } },
+} as const;
 
 const CHILD_FIELDS = [
   'firstName',
@@ -91,15 +93,11 @@ export class ChildrenService {
 
   async create(dto: CreateChildDto, user: AuthenticatedUser) {
     const ids = scopeIds(user);
-    if (dto.groupId) {
-      const group = await this.prisma.group.findUnique({
-        where: { id: dto.groupId },
-      });
-      if (!group) throw new NotFoundException('Group not found');
-      assertInstitutionInScope(ids, group.institutionId);
-    } else if (ids) {
-      throw new ForbiddenException(OUTSIDE_SCOPE);
-    }
+    const group = await this.prisma.group.findUnique({
+      where: { id: dto.groupId },
+    });
+    if (!group) throw new NotFoundException('Group not found');
+    assertInstitutionInScope(ids, group.institutionId);
 
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
 
@@ -116,7 +114,7 @@ export class ChildrenService {
           : undefined,
       },
       include: {
-        group: true,
+        group: groupInclude,
         parents: { omit: { password: true, refreshToken: true } },
         subscriptions: {
           include: { subscriptionType: true },
@@ -140,7 +138,7 @@ export class ChildrenService {
     return this.prisma.child.findMany({
       where: childScopeWhere(scopeIds(user)),
       include: {
-        group: true,
+        group: groupInclude,
         parents: { omit: { password: true, refreshToken: true } },
         subscriptions: {
           include: { subscriptionType: true },
@@ -154,50 +152,74 @@ export class ChildrenService {
     const ids = scopeIds(user);
     const before = await this.loadScopedChild(id, ids);
 
+    if (dto.groupId === null)
+      throw new BadRequestException('Group is required');
+
+    let targetInstitutionId: string | null = null;
     if (dto.groupId) {
       const group = await this.prisma.group.findUnique({
         where: { id: dto.groupId },
       });
       if (!group) throw new NotFoundException('Group not found');
       assertInstitutionInScope(ids, group.institutionId);
-    } else if (ids && dto.groupId === null) {
-      throw new ForbiddenException(OUTSIDE_SCOPE);
+      if (group.institutionId !== before.group?.institutionId) {
+        targetInstitutionId = group.institutionId;
+      }
     }
 
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
 
-    const updated = await this.prisma.child.update({
-      where: { id },
-      data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        middleName: dto.middleName,
-        birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-        gender: dto.gender,
-        groupId: dto.groupId,
-        parents: dto.parentIds
-          ? { set: dto.parentIds.map((id) => ({ id })) }
-          : undefined,
-      },
-      include: {
-        group: true,
-        parents: { omit: { password: true, refreshToken: true } },
-        subscriptions: {
-          include: { subscriptionType: true },
-          orderBy: { createdAt: 'desc' },
+    return this.prisma.$transaction(async (tx) => {
+      if (targetInstitutionId) {
+        await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${targetInstitutionId} FOR SHARE`;
+        const target = await findInstitution(tx, targetInstitutionId, {
+          active: true,
+        });
+        assertInstitutionInScope(ids, target.id);
+        await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${id} FOR UPDATE`;
+        if (before.group?.institutionId) {
+          await assertChildrenCanMove(
+            tx,
+            [id],
+            before.group.institutionId,
+            kyivToday(),
+          );
+        }
+      }
+
+      const updated = await tx.child.update({
+        where: { id },
+        data: {
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          middleName: dto.middleName,
+          birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+          gender: dto.gender,
+          groupId: dto.groupId,
+          parents: dto.parentIds
+            ? { set: dto.parentIds.map((id) => ({ id })) }
+            : undefined,
         },
-      },
+        include: {
+          group: groupInclude,
+          parents: { omit: { password: true, refreshToken: true } },
+          subscriptions: {
+            include: { subscriptionType: true },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      });
+      await this.audit.recordChange(tx, {
+        actorId: user.id,
+        entityType: 'children',
+        entityId: id,
+        action: AuditAction.update,
+        before: childAudit(before),
+        after: childAudit(updated),
+        fields: CHILD_FIELDS,
+      });
+      return updated;
     });
-    await this.audit.recordChange(this.prisma, {
-      actorId: user.id,
-      entityType: 'children',
-      entityId: id,
-      action: AuditAction.update,
-      before: childAudit(before),
-      after: childAudit(updated),
-      fields: CHILD_FIELDS,
-    });
-    return updated;
   }
 
   async delete(id: string, user: AuthenticatedUser) {

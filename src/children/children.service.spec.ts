@@ -14,6 +14,10 @@ import { AuditService } from '../audit/audit.service';
 import { CreateChildDto } from './dto/create-child.dto';
 
 const mockPrisma = {
+  $transaction: jest.fn(),
+  $queryRaw: jest.fn(),
+  institution: { findUnique: jest.fn() },
+  mealOrder: { findFirst: jest.fn() },
   child: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -25,7 +29,7 @@ const mockPrisma = {
   group: { findUnique: jest.fn() },
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
-  enrollment: { count: jest.fn() },
+  enrollment: { count: jest.fn(), findFirst: jest.fn() },
   adaptationVisit: { count: jest.fn() },
   classGroupMember: { count: jest.fn() },
   lessonAttendance: { count: jest.fn() },
@@ -55,6 +59,9 @@ describe('ChildrenService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.$transaction.mockImplementation(
+      (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma),
+    );
     const module = await Test.createTestingModule({
       providers: [
         ChildrenService,
@@ -71,6 +78,7 @@ describe('ChildrenService', () => {
       lastName: 'Petrenko',
       birthDate: '2020-01-15',
       gender: Gender.male,
+      groupId: 'g1',
     };
 
     it('creates a child with required fields only', async () => {
@@ -86,6 +94,10 @@ describe('ChildrenService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
       mockPrisma.child.create.mockResolvedValue(created);
 
       const result = await service.create(baseDto, fullAdmin);
@@ -98,11 +110,15 @@ describe('ChildrenService', () => {
           birthDate: new Date('2020-01-15'),
           middleName: null,
           gender: Gender.male,
-          groupId: undefined,
+          groupId: 'g1',
           parents: undefined,
         },
         include: {
-          group: true,
+          group: {
+            include: {
+              institution: { select: { id: true, name: true, type: true } },
+            },
+          },
           parents: { omit: { password: true, refreshToken: true } },
           subscriptions: {
             include: { subscriptionType: true },
@@ -113,6 +129,10 @@ describe('ChildrenService', () => {
     });
 
     it('passes middleName into the created child', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
       mockPrisma.child.create.mockResolvedValue({ id: 'child-1' });
 
       await service.create({ ...baseDto, middleName: 'Petrivna' }, fullAdmin);
@@ -136,6 +156,10 @@ describe('ChildrenService', () => {
     });
 
     it('throws NotFoundException when a parentId does not exist', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
       mockPrisma.user.findMany.mockResolvedValue([]);
 
       await expect(
@@ -150,6 +174,10 @@ describe('ChildrenService', () => {
     });
 
     it('throws BadRequestException when user is not a parent', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
       mockPrisma.user.findMany.mockResolvedValue([
         { id: '00000000-0000-0000-0000-000000000001', role: Role.teacher },
       ]);
@@ -178,7 +206,11 @@ describe('ChildrenService', () => {
       expect(mockPrisma.child.findMany).toHaveBeenCalledWith({
         where: {},
         include: {
-          group: true,
+          group: {
+            include: {
+              institution: { select: { id: true, name: true, type: true } },
+            },
+          },
           parents: { omit: { password: true, refreshToken: true } },
           subscriptions: {
             include: { subscriptionType: true },
@@ -227,7 +259,11 @@ describe('ChildrenService', () => {
           parents: undefined,
         },
         include: {
-          group: true,
+          group: {
+            include: {
+              institution: { select: { id: true, name: true, type: true } },
+            },
+          },
           parents: { omit: { password: true, refreshToken: true } },
           subscriptions: {
             include: { subscriptionType: true },
@@ -237,21 +273,116 @@ describe('ChildrenService', () => {
       });
     });
 
-    it('disconnects group when groupId is null', async () => {
+    it('rejects an explicit null group', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue(existingChild);
+
+      await expect(
+        service.update('child-1', { groupId: null }, fullAdmin),
+      ).rejects.toThrow('Group is required');
+      expect(mockPrisma.child.update).not.toHaveBeenCalled();
+    });
+
+    describe('moving between institutions', () => {
+      const inGroup = {
+        ...existingChild,
+        groupId: 'g1',
+        group: { institutionId: 'i1' },
+        parents: [],
+      };
+
+      beforeEach(() => {
+        mockPrisma.child.findUnique.mockResolvedValue(inGroup);
+        mockPrisma.child.update.mockResolvedValue({ ...inGroup, parents: [] });
+        mockPrisma.enrollment.findFirst.mockResolvedValue(null);
+        mockPrisma.mealOrder.findFirst.mockResolvedValue(null);
+      });
+
+      it('refuses a move with an active enrollment on the old institution', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g2',
+          institutionId: 'i2',
+        });
+        mockPrisma.institution.findUnique.mockResolvedValue({
+          id: 'i2',
+          type: GroupKind.school_class,
+          isActive: true,
+          name: 'S',
+        });
+        mockPrisma.enrollment.findFirst.mockResolvedValue({ id: 'e1' });
+
+        await expect(
+          service.update('child-1', { groupId: 'g2' }, fullAdmin),
+        ).rejects.toThrow('Child has an active enrollment');
+        expect(mockPrisma.enrollment.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              tariff: { institutionId: 'i1' },
+            }) as unknown,
+          }),
+        );
+        expect(mockPrisma.child.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses a move into an inactive institution', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g2',
+          institutionId: 'i2',
+        });
+        mockPrisma.institution.findUnique.mockResolvedValue({
+          id: 'i2',
+          type: GroupKind.school_class,
+          isActive: false,
+          name: 'S',
+        });
+
+        await expect(
+          service.update('child-1', { groupId: 'g2' }, fullAdmin),
+        ).rejects.toThrow('Institution is inactive');
+        expect(mockPrisma.child.update).not.toHaveBeenCalled();
+      });
+
+      it('skips the guard for a move within the same institution', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g3',
+          institutionId: 'i1',
+        });
+
+        await service.update('child-1', { groupId: 'g3' }, fullAdmin);
+
+        expect(mockPrisma.enrollment.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.institution.findUnique).not.toHaveBeenCalled();
+        expect(mockPrisma.child.update).toHaveBeenCalled();
+      });
+
+      it('moves to another institution when nothing blocks it', async () => {
+        mockPrisma.group.findUnique.mockResolvedValue({
+          id: 'g2',
+          institutionId: 'i2',
+        });
+        mockPrisma.institution.findUnique.mockResolvedValue({
+          id: 'i2',
+          type: GroupKind.school_class,
+          isActive: true,
+          name: 'S',
+        });
+
+        await service.update('child-1', { groupId: 'g2' }, fullAdmin);
+
+        expect(mockPrisma.mealOrder.findFirst).toHaveBeenCalled();
+        expect(mockPrisma.child.update).toHaveBeenCalled();
+      });
+    });
+
+    it('keeps updating a legacy child without a group', async () => {
       mockPrisma.child.findUnique.mockResolvedValue(existingChild);
       mockPrisma.child.update.mockResolvedValue({
         ...existingChild,
-        group: null,
         parents: [],
       });
 
-      await service.update('child-1', { groupId: null }, fullAdmin);
+      await service.update('child-1', { firstName: 'Petro' }, fullAdmin);
 
-      expect(mockPrisma.child.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ groupId: null }),
-        }),
-      );
+      expect(mockPrisma.child.update).toHaveBeenCalled();
     });
 
     it('throws BadRequestException when child has enrollments', async () => {
@@ -447,6 +578,7 @@ describe('ChildrenService', () => {
       lastName: 'Petrenko',
       birthDate: '2020-01-15',
       gender: Gender.male,
+      groupId: 'g1',
     };
 
     it('lists only children of the scope', async () => {
@@ -470,12 +602,6 @@ describe('ChildrenService', () => {
       ).rejects.toThrow('Outside access scope');
     });
 
-    it('refuses a child without a group for a scoped user', async () => {
-      await expect(
-        service.create({ ...validDto, groupId: undefined }, kgAdmin),
-      ).rejects.toThrow('Outside access scope');
-    });
-
     it('hides a child of another institution on update and delete', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({
         id: 'c1',
@@ -490,7 +616,7 @@ describe('ChildrenService', () => {
       );
     });
 
-    it('refuses moving a child to another institution or out of groups', async () => {
+    it('refuses moving a child to another institution or clearing the group', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({
         id: 'c1',
         groupId: 'g1',
@@ -506,7 +632,7 @@ describe('ChildrenService', () => {
       ).rejects.toThrow('Outside access scope');
       await expect(
         service.update('c1', { groupId: null }, kgAdmin),
-      ).rejects.toThrow('Outside access scope');
+      ).rejects.toThrow('Group is required');
     });
   });
   describe('audit', () => {
