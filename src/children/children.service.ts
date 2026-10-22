@@ -98,6 +98,7 @@ export class ChildrenService {
     });
     if (!group) throw new NotFoundException('Group not found');
     assertInstitutionInScope(ids, group.institutionId);
+    await findInstitution(this.prisma, group.institutionId, { active: true });
 
     if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
 
@@ -177,13 +178,13 @@ export class ChildrenService {
         });
         assertInstitutionInScope(ids, target.id);
         await tx.$queryRaw`SELECT id FROM "Child" WHERE id = ${id} FOR UPDATE`;
-        if (before.group?.institutionId) {
-          await assertChildrenCanMove(
-            tx,
-            [id],
-            before.group.institutionId,
-            kyivToday(),
-          );
+        const current = await tx.child.findUnique({
+          where: { id },
+          select: { group: { select: { institutionId: true } } },
+        });
+        const fromInstitutionId = current?.group?.institutionId;
+        if (fromInstitutionId && fromInstitutionId !== targetInstitutionId) {
+          await assertChildrenCanMove(tx, [id], fromInstitutionId, kyivToday());
         }
       }
 

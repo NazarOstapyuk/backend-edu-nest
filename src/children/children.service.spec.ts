@@ -59,6 +59,12 @@ describe('ChildrenService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.institution.findUnique.mockResolvedValue({
+      id: 'i1',
+      type: GroupKind.kindergarten,
+      isActive: true,
+      name: 'K',
+    });
     mockPrisma.$transaction.mockImplementation(
       (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma),
     );
@@ -80,6 +86,24 @@ describe('ChildrenService', () => {
       gender: Gender.male,
       groupId: 'g1',
     };
+
+    it('refuses a group of an inactive institution', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'i1',
+        type: GroupKind.kindergarten,
+        isActive: false,
+        name: 'K',
+      });
+
+      await expect(service.create(baseDto, fullAdmin)).rejects.toThrow(
+        'Institution is inactive',
+      );
+      expect(mockPrisma.child.create).not.toHaveBeenCalled();
+    });
 
     it('creates a child with required fields only', async () => {
       const created = {
