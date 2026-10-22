@@ -16,6 +16,7 @@ export interface RegisterGroupInput {
   id: string;
   name: string;
   kind: GroupKind;
+  institutionId?: string | null;
   children: { marks: MarkLike[]; notices: NoticeLike[] }[];
 }
 

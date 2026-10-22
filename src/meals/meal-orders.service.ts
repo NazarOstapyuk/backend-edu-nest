@@ -71,6 +71,7 @@ export class MealOrdersService {
           select: {
             id: true,
             kind: true,
+            institutionId: true,
             mealPriceCategory: { select: { id: true, active: true } },
           },
         },

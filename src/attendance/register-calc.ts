@@ -21,6 +21,7 @@ export interface CalendarEntryLike {
   type: CalendarDayType;
   scope: CalendarScope;
   groupId: string | null;
+  institutionId?: string | null;
   title: string;
   voidedAt: Date | null;
 }
@@ -28,6 +29,7 @@ export interface CalendarEntryLike {
 export interface GroupLike {
   id: string;
   kind: GroupKind;
+  institutionId?: string | null;
 }
 
 export interface MarkLike {
@@ -73,7 +75,11 @@ const level = (
   if (entry.scope === CalendarScope.all) return 1;
   if (!group) return null;
   if (entry.scope === CalendarScope.group)
-    return entry.groupId === group.id ? 3 : null;
+    return entry.groupId === group.id ? 4 : null;
+  if (entry.scope === CalendarScope.institution)
+    return group.institutionId && entry.institutionId === group.institutionId
+      ? 3
+      : null;
   return String(entry.scope) === String(group.kind) ? 2 : null;
 };
 

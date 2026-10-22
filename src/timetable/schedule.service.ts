@@ -64,6 +64,7 @@ export class ScheduleService {
         id: true,
         name: true,
         kind: true,
+        institutionId: true,
         bellSchedule: { select: { periods: periodSelect } },
       },
     });
@@ -96,6 +97,7 @@ export class ScheduleService {
           id: true,
           name: true,
           kind: true,
+          institutionId: true,
           bellSchedule: { select: { periods: periodSelect } },
           timetables: {
             where: {

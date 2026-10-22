@@ -137,6 +137,7 @@ export class DashboardService {
         id: true,
         name: true,
         kind: true,
+        institutionId: true,
         children: {
           select: {
             dailyAttendances: {
@@ -172,6 +173,7 @@ export class DashboardService {
         id: group.id,
         name: group.name,
         kind: group.kind,
+        institutionId: group.institutionId,
         children: group.children.map((child) => ({
           marks: child.dailyAttendances,
           notices: child.absenceNotices,

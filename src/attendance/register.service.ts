@@ -91,7 +91,7 @@ export class RegisterService {
           : { teachers: { some: { id: user.id } } }),
         ...groupScopeWhere(scopeIds(user)),
       },
-      select: { id: true, name: true, kind: true },
+      select: { id: true, name: true, kind: true, institutionId: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -404,7 +404,9 @@ export class RegisterService {
 
   async childDays(childIds: string[], from: Date, to: Date) {
     const days = dayRange(from, to);
-    const groupSelect = { select: { id: true, kind: true } } as const;
+    const groupSelect = {
+      select: { id: true, kind: true, institutionId: true },
+    } as const;
     const [children, entries, marks, notices] = await Promise.all([
       this.prisma.child.findMany({
         where: { id: { in: childIds } },

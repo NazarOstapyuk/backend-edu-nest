@@ -16,7 +16,11 @@ import {
 } from './register-calc';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
-const kg = { id: 'g1', kind: GroupKind.kindergarten };
+const kg = {
+  id: 'g1',
+  kind: GroupKind.kindergarten,
+  institutionId: 'i1',
+};
 const school = { id: 'g2', kind: GroupKind.school_class };
 
 const entry = (over: Partial<CalendarEntryLike>): CalendarEntryLike => ({
@@ -25,9 +29,62 @@ const entry = (over: Partial<CalendarEntryLike>): CalendarEntryLike => ({
   type: CalendarDayType.non_working,
   scope: CalendarScope.all,
   groupId: null,
+  institutionId: null,
   title: 'Свято',
   voidedAt: null,
   ...over,
+});
+
+describe('dayInfo institution level', () => {
+  const kindOff = entry({ scope: CalendarScope.kindergarten, title: 'Вид' });
+  const instWorking = entry({
+    type: CalendarDayType.working,
+    scope: CalendarScope.institution,
+    institutionId: 'i1',
+    title: 'Заклад',
+  });
+  const date = day('2026-10-14');
+
+  it('lets an institution entry beat a kind entry', () => {
+    expect(dayInfo(date, kg, [kindOff, instWorking])).toEqual({
+      working: true,
+      title: 'Заклад',
+    });
+  });
+
+  it('lets a group entry beat an institution entry', () => {
+    const groupOff = entry({
+      scope: CalendarScope.group,
+      groupId: 'g1',
+      title: 'Група',
+    });
+    expect(dayInfo(date, kg, [instWorking, groupOff])).toEqual({
+      working: false,
+      title: 'Група',
+    });
+  });
+
+  it('lets non_working win a tie at institution level', () => {
+    const off = { ...instWorking, type: CalendarDayType.non_working };
+    expect(dayInfo(date, kg, [instWorking, off]).working).toBe(false);
+    expect(dayInfo(date, kg, [off, instWorking]).working).toBe(false);
+  });
+
+  it('ignores an institution entry of another institution', () => {
+    const other = { ...instWorking, institutionId: 'i2' };
+    expect(dayInfo(date, kg, [kindOff, other]).title).toBe('Вид');
+  });
+
+  it('ignores institution entries for a group without institutionId', () => {
+    const payrollGroup = { id: 'x', kind: GroupKind.kindergarten };
+    const nullEntry = { ...instWorking, institutionId: null };
+    expect(dayInfo(date, payrollGroup, [instWorking, nullEntry])).toEqual({
+      working: true,
+      title: null,
+    });
+    const off = { ...instWorking, type: CalendarDayType.non_working };
+    expect(dayInfo(date, payrollGroup, [off]).working).toBe(true);
+  });
 });
 
 describe('dayInfo', () => {

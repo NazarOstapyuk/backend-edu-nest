@@ -22,7 +22,7 @@ const mockPrisma = {
     update: jest.fn(),
   },
   group: { findUnique: jest.fn() },
-  institution: { findMany: jest.fn() },
+  institution: { findMany: jest.fn(), findUnique: jest.fn() },
 };
 
 const admin = {
@@ -74,6 +74,7 @@ describe('CalendarService', () => {
       type: CalendarDayType.non_working,
       scope: CalendarScope.all,
       groupId: null,
+      institutionId: null,
       title: 'Свято',
       createdById: 'a1',
     });
@@ -144,6 +145,7 @@ describe('CalendarService', () => {
     mockPrisma.group.findUnique.mockResolvedValue({
       id: 'g1',
       kind: GroupKind.school_class,
+      institutionId: 'inst-s',
     });
     mockPrisma.calendarDay.findMany.mockResolvedValue([]);
     await service.list('2026-10-01', '2026-10-31', 'g1', admin);
@@ -154,6 +156,7 @@ describe('CalendarService', () => {
       { scope: CalendarScope.all },
       { scope: CalendarScope.school_class },
       { scope: CalendarScope.group, groupId: 'g1' },
+      { scope: CalendarScope.institution, institutionId: 'inst-s' },
     ]);
   });
 
@@ -186,6 +189,96 @@ describe('CalendarService', () => {
         service.create({ ...base, scope: CalendarScope.school_class }, scoped),
       ).rejects.toThrow(outside);
       expect(mockPrisma.calendarDay.create).not.toHaveBeenCalled();
+    });
+
+    it('lets a global admin with the switcher header create all-level entries', async () => {
+      mockPrisma.calendarDay.create.mockResolvedValue({ id: 'c1' });
+      await service.create(
+        { ...base, scope: CalendarScope.all },
+        { ...admin, scopeInstitutionIds: ['inst-k'] },
+      );
+      expect(mockPrisma.calendarDay.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates an institution entry in scope and refuses one outside', async () => {
+      mockPrisma.calendarDay.create.mockResolvedValue({ id: 'c1' });
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-k',
+        type: GroupKind.kindergarten,
+        isActive: true,
+        name: 'Садок',
+      });
+      await service.create(
+        {
+          ...base,
+          scope: CalendarScope.institution,
+          institutionId: 'inst-k',
+        },
+        scoped,
+      );
+      expect(
+        firstArg<{ data: object }>(mockPrisma.calendarDay.create).data,
+      ).toMatchObject({
+        scope: CalendarScope.institution,
+        institutionId: 'inst-k',
+        groupId: null,
+      });
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        id: 'inst-s',
+        type: GroupKind.school_class,
+        isActive: false,
+        name: 'Школа',
+      });
+      await expect(
+        service.create(
+          {
+            ...base,
+            scope: CalendarScope.institution,
+            institutionId: 'inst-s',
+          },
+          scoped,
+        ),
+      ).rejects.toThrow(outside);
+    });
+
+    it('requires an institution exactly for institution scope', async () => {
+      const message = new BadRequestException(
+        'Institution is required for institution scope',
+      );
+      await expect(
+        service.create({ ...base, scope: CalendarScope.institution }, admin),
+      ).rejects.toThrow(message);
+      await expect(
+        service.create(
+          { ...base, scope: CalendarScope.all, institutionId: 'inst-k' },
+          admin,
+        ),
+      ).rejects.toThrow(message);
+    });
+
+    it('rejects an unknown institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(null);
+      await expect(
+        service.create(
+          {
+            ...base,
+            scope: CalendarScope.institution,
+            institutionId: 'nope',
+          },
+          admin,
+        ),
+      ).rejects.toThrow(new NotFoundException('Institution not found'));
+    });
+
+    it('refuses to void an institution entry outside the scope', async () => {
+      mockPrisma.calendarDay.findUnique.mockResolvedValue({
+        id: 'c1',
+        scope: CalendarScope.institution,
+        institutionId: 'inst-s',
+        voidedAt: null,
+        group: null,
+      });
+      await expect(service.void('c1', 'x', scoped)).rejects.toThrow(outside);
     });
 
     it('checks the institution of the group for group entries', async () => {
@@ -248,6 +341,7 @@ describe('CalendarService', () => {
       ).toEqual([
         { scope: CalendarScope.all },
         { scope: CalendarScope.kindergarten },
+        { scope: CalendarScope.institution, institutionId: { in: ['inst-k'] } },
         {
           scope: CalendarScope.group,
           group: { institutionId: { in: ['inst-k'] } },

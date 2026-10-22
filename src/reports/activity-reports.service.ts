@@ -55,7 +55,9 @@ export class ActivityReportsService {
         select: {
           firstName: true,
           lastName: true,
-          group: { select: { id: true, kind: true, name: true } },
+          group: {
+            select: { id: true, kind: true, name: true, institutionId: true },
+          },
           dailyAttendances: {
             where: {
               voidedAt: null,

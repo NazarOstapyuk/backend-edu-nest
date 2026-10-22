@@ -26,6 +26,10 @@ export class CreateCalendarDayDto {
   @IsOptional()
   groupId?: string;
 
+  @IsUUID('4')
+  @IsOptional()
+  institutionId?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)

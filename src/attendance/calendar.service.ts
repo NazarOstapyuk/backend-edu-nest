@@ -5,14 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CalendarScope } from '@prisma/client';
-import { scopeIds } from '../access/access-calc';
+import { baseScope, scopeIds } from '../access/access-calc';
 import { OUTSIDE_SCOPE } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseDay } from '../classes/access';
+import { findInstitution } from '../institutions/institution-checks';
 import { CreateCalendarDayDto } from './dto/create-calendar-day.dto';
 
-const withGroup = { group: { select: { id: true, name: true } } } as const;
+const withGroup = {
+  group: { select: { id: true, name: true } },
+  institution: { select: { id: true, name: true } },
+} as const;
 
 @Injectable()
 export class CalendarService {
@@ -25,15 +29,25 @@ export class CalendarService {
   }
 
   private entryInScope(
-    ids: string[] | null,
+    user: AuthenticatedUser,
     entry: {
       scope: CalendarScope;
+      institutionId?: string | null;
       group?: { institutionId: string | null } | null;
     },
   ) {
+    if (
+      entry.scope === CalendarScope.all ||
+      entry.scope === CalendarScope.kindergarten ||
+      entry.scope === CalendarScope.school_class
+    )
+      return baseScope(user) === null;
+    const ids = scopeIds(user);
     if (!ids) return true;
-    if (entry.scope !== CalendarScope.group) return false;
-    const institutionId = entry.group?.institutionId ?? null;
+    const institutionId =
+      entry.scope === CalendarScope.institution
+        ? (entry.institutionId ?? null)
+        : (entry.group?.institutionId ?? null);
     return institutionId !== null && ids.includes(institutionId);
   }
 
@@ -64,6 +78,10 @@ export class CalendarService {
           { scope: CalendarScope.all },
           { scope: CalendarScope[group.kind] },
           { scope: CalendarScope.group, groupId },
+          {
+            scope: CalendarScope.institution,
+            institutionId: group.institutionId,
+          },
         ],
       };
     } else if (ids) {
@@ -76,6 +94,10 @@ export class CalendarService {
         OR: [
           { scope: CalendarScope.all },
           ...kinds.map((k) => ({ scope: CalendarScope[k] })),
+          {
+            scope: CalendarScope.institution,
+            institutionId: { in: ids },
+          },
           {
             scope: CalendarScope.group,
             group: { institutionId: { in: ids } },
@@ -103,6 +125,13 @@ export class CalendarService {
     const isGroup = dto.scope === CalendarScope.group;
     if (isGroup !== Boolean(dto.groupId))
       throw new BadRequestException('Group is required for group scope');
+    const isInstitution = dto.scope === CalendarScope.institution;
+    if (isInstitution !== Boolean(dto.institutionId))
+      throw new BadRequestException(
+        'Institution is required for institution scope',
+      );
+    if (dto.institutionId)
+      await findInstitution(this.prisma, dto.institutionId);
     let group: { institutionId: string | null } | null = null;
     if (dto.groupId) {
       group = await this.prisma.group.findUnique({
@@ -111,7 +140,13 @@ export class CalendarService {
       });
       if (!group) throw new NotFoundException('Group not found');
     }
-    if (!this.entryInScope(scopeIds(user), { scope: dto.scope, group }))
+    if (
+      !this.entryInScope(user, {
+        scope: dto.scope,
+        institutionId: dto.institutionId,
+        group,
+      })
+    )
       throw new ForbiddenException(OUTSIDE_SCOPE);
     return this.prisma.calendarDay.create({
       data: {
@@ -120,6 +155,7 @@ export class CalendarService {
         type: dto.type,
         scope: dto.scope,
         groupId: dto.groupId ?? null,
+        institutionId: dto.institutionId ?? null,
         title: dto.title.trim(),
         createdById: user.id,
       },
@@ -133,7 +169,7 @@ export class CalendarService {
       include: { group: { select: { institutionId: true } } },
     });
     if (!entry) throw new NotFoundException('Calendar entry not found');
-    if (!this.entryInScope(scopeIds(user), entry))
+    if (!this.entryInScope(user, entry))
       throw new ForbiddenException(OUTSIDE_SCOPE);
     if (entry.voidedAt)
       throw new BadRequestException('Calendar entry is voided');
