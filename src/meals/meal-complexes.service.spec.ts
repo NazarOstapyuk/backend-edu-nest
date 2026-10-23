@@ -46,6 +46,7 @@ const mockPrisma = {
   mealComplexPrice: {
     findUnique: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
     delete: jest.fn(),
   },
   $transaction: jest.fn(),
@@ -240,18 +241,27 @@ describe('MealComplexesService', () => {
         id: 'p1',
         active: true,
       });
+    });
+
+    it('replaces the amount when a price for that date already exists', async () => {
+      mockPrisma.mealComplex.findUnique.mockResolvedValue(complexRow());
+      mockPrisma.mealPriceCategory.findUnique.mockResolvedValueOnce({
+        id: 'p1',
+        active: true,
+      });
       mockPrisma.mealComplexPrice.findUnique.mockResolvedValueOnce({
         id: 'pr1',
       });
-      await expect(
-        service.addPrice('x1', {
-          priceCategoryId: 'p1',
-          price: '10',
-          validFrom: '2026-09-01',
-        }),
-      ).rejects.toThrow(
-        new BadRequestException('Price for this date already exists'),
-      );
+      await service.addPrice('x1', {
+        priceCategoryId: 'p1',
+        price: '155.50',
+        validFrom: '2026-09-01',
+      });
+      expect(mockPrisma.mealComplexPrice.update).toHaveBeenCalledWith({
+        where: { id: 'pr1' },
+        data: { price: '155.50' },
+      });
+      expect(mockPrisma.mealComplexPrice.create).not.toHaveBeenCalled();
     });
 
     it('deletes only a future price', async () => {

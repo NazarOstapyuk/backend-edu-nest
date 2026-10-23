@@ -161,15 +161,19 @@ export class MealComplexesService {
       },
     });
     if (existing)
-      throw new BadRequestException('Price for this date already exists');
-    await this.prisma.mealComplexPrice.create({
-      data: {
-        complexId: id,
-        priceCategoryId: dto.priceCategoryId,
-        price: dto.price,
-        validFrom,
-      },
-    });
+      await this.prisma.mealComplexPrice.update({
+        where: { id: existing.id },
+        data: { price: dto.price },
+      });
+    else
+      await this.prisma.mealComplexPrice.create({
+        data: {
+          complexId: id,
+          priceCategoryId: dto.priceCategoryId,
+          price: dto.price,
+          validFrom,
+        },
+      });
     return this.view(id);
   }
 
