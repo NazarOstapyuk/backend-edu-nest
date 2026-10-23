@@ -163,26 +163,34 @@ describe('RoutineService', () => {
         }),
     );
   });
+
   describe('groups', () => {
     it('lists kindergarten groups in scope for a manager', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groups(user({ scopeInstitutionIds: ['i1'] }));
-      expect(mockPrisma.group.findMany.mock.calls[0][0].where).toEqual({
-        kind: GroupKind.kindergarten,
-        institutionId: { in: ['i1'] },
-      });
+      expect(mockPrisma.group.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            kind: GroupKind.kindergarten,
+            institutionId: { in: ['i1'] },
+          },
+        }),
+      );
     });
 
     it('limits a teacher without the permission to own groups', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groups(teacher());
-      expect(mockPrisma.group.findMany.mock.calls[0][0].where).toEqual({
-        kind: GroupKind.kindergarten,
-        teachers: { some: { id: 't1' } },
-      });
+      expect(mockPrisma.group.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            kind: GroupKind.kindergarten,
+            teachers: { some: { id: 't1' } },
+          },
+        }),
+      );
     });
   });
-
 
   describe('reads', () => {
     it('looks up the group within the scope and answers 404 outside', async () => {
