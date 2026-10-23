@@ -1,4 +1,4 @@
-import { FinanceCategory, Prisma } from '@prisma/client';
+import { FinanceCategory, GroupKind, Prisma } from '@prisma/client';
 import {
   ChargeLike,
   PaymentLike,
@@ -46,6 +46,13 @@ export const balanceChildSelect = {
   id: true,
   firstName: true,
   lastName: true,
+  group: {
+    select: {
+      id: true,
+      name: true,
+      institution: { select: { id: true, name: true, type: true } },
+    },
+  },
   charges: {
     select: {
       id: true,
@@ -94,6 +101,12 @@ export interface FinanceEvent {
   reason: string | null;
 }
 
+export interface BalanceGroup {
+  id: string;
+  name: string;
+  institution: { id: string; name: string; type: GroupKind };
+}
+
 export interface BalanceRow {
   childId: string;
   firstName: string;
@@ -102,6 +115,7 @@ export interface BalanceRow {
   debt: string;
   prepayment: string;
   unallocated: string;
+  group: BalanceGroup | null;
 }
 
 export const toChargeView = (charge: LoadedCharge) => {
@@ -243,7 +257,7 @@ export function buildHistory(
 }
 
 export function buildBalanceRow(
-  child: PersonRef,
+  child: PersonRef & { group?: BalanceGroup | null },
   charges: ChargeLike[],
   payments: PaymentLike[],
   category?: FinanceCategory,
@@ -266,5 +280,6 @@ export function buildBalanceRow(
     debt: formatMoney(debt),
     prepayment: formatMoney(prepayment),
     unallocated: summary.totals.unallocated,
+    group: child.group ?? null,
   };
 }

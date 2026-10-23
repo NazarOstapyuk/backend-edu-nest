@@ -1,6 +1,7 @@
 import {
   ChargeSource,
   FinanceCategory,
+  GroupKind,
   PaymentMethod,
   PaymentStatus,
   Prisma,
@@ -152,7 +153,19 @@ describe('buildBalanceRow', () => {
       debt: '40.00',
       prepayment: '20.00',
       unallocated: '0.00',
+      group: null,
     });
+  });
+
+  it('carries the group and its institution', () => {
+    const group = {
+      id: 'g-1',
+      name: '1–3',
+      institution: { id: 'i-1', name: 'Сонечко', type: GroupKind.kindergarten },
+    };
+    const row = buildBalanceRow({ ...child, group }, [], []);
+
+    expect(row.group).toEqual(group);
   });
 
   it('narrows debt, prepayment and total due to the category', () => {
