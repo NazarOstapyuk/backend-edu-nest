@@ -30,6 +30,7 @@ const TERMS_FIELDS = [
   'validFrom',
   'validTo',
   'monthlyRate',
+  'extraHourRate',
   'calendarKind',
   'note',
   'rates',
@@ -43,6 +44,7 @@ const termsAudit = (row: TermsRow) => ({
   validFrom: row.validFrom,
   validTo: row.validTo,
   monthlyRate: row.monthlyRate,
+  extraHourRate: row.extraHourRate,
   calendarKind: row.calendarKind,
   note: row.note,
   rates: row.rates.map(
@@ -95,6 +97,10 @@ export class SalaryTermsService {
     if (teacher.role !== Role.teacher)
       throw new BadRequestException('User is not a teacher');
     const validFrom = parseDay(dto.validFrom);
+    const extraHourRate =
+      dto.extraHourRate === undefined || dto.extraHourRate === null
+        ? null
+        : positiveAmount(dto.extraHourRate);
     const rates = await this.validateRates(dto.rates);
     const allowances = this.validateAllowances(dto.allowances);
     const id = await this.prisma.$transaction(async (tx) => {
@@ -134,6 +140,7 @@ export class SalaryTermsService {
           teacherId: teacher.id,
           validFrom,
           monthlyRate: new Prisma.Decimal(dto.monthlyRate),
+          extraHourRate,
           calendarKind: dto.calendarKind,
           note: dto.note?.trim() || null,
           createdById: user.id,
@@ -158,6 +165,10 @@ export class SalaryTermsService {
 
   async update(id: string, dto: UpdateSalaryTermsDto, userId: string) {
     await this.findNotStarted(this.prisma, id);
+    const extraHourRate =
+      dto.extraHourRate === undefined || dto.extraHourRate === null
+        ? dto.extraHourRate
+        : positiveAmount(dto.extraHourRate);
     const rates = dto.rates ? await this.validateRates(dto.rates) : null;
     const allowances = dto.allowances
       ? this.validateAllowances(dto.allowances)
@@ -184,6 +195,7 @@ export class SalaryTermsService {
             dto.monthlyRate === undefined
               ? undefined
               : new Prisma.Decimal(dto.monthlyRate),
+          extraHourRate,
           calendarKind: dto.calendarKind,
           note: dto.note === undefined ? undefined : dto.note.trim() || null,
         },

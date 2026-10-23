@@ -20,6 +20,7 @@ export const toTermsView = (row: TermsRow, today: Date) => ({
   validFrom: isoDay(row.validFrom),
   validTo: row.validTo ? isoDay(row.validTo) : null,
   monthlyRate: row.monthlyRate.toFixed(2),
+  extraHourRate: row.extraHourRate ? row.extraHourRate.toFixed(2) : null,
   calendarKind: row.calendarKind,
   note: row.note,
   started: row.validFrom.getTime() <= today.getTime(),

@@ -51,6 +51,11 @@ export class UpdateSalaryTermsDto {
   monthlyRate?: string;
 
   @IsOptional()
+  @IsString()
+  @Matches(AMOUNT_PATTERN)
+  extraHourRate?: string | null;
+
+  @IsOptional()
   @IsEnum(PayrollCalendar)
   calendarKind?: PayrollCalendar;
 
@@ -84,6 +89,11 @@ export class CreateSalaryTermsDto {
   @IsString()
   @Matches(AMOUNT_PATTERN)
   monthlyRate: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(AMOUNT_PATTERN)
+  extraHourRate?: string | null;
 
   @IsEnum(PayrollCalendar)
   calendarKind: PayrollCalendar;

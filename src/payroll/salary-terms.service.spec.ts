@@ -35,6 +35,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   validFrom: day('2099-01-01'),
   validTo: null,
   monthlyRate: dec('20000'),
+  extraHourRate: null,
   calendarKind: PayrollCalendar.all,
   note: null,
   createdById: 'a1',
@@ -147,6 +148,7 @@ describe('SalaryTermsService', () => {
           teacherId: 't1',
           validFrom: day('2026-11-01'),
           monthlyRate: dec('20000'),
+          extraHourRate: null,
           calendarKind: PayrollCalendar.all,
           note: null,
           createdById: 'a1',
@@ -159,6 +161,38 @@ describe('SalaryTermsService', () => {
       });
       expect(result.monthlyRate).toBe('20000.00');
       expect(result.started).toBe(false);
+    });
+
+    it('stores the extra hour rate and returns it', async () => {
+      mockPrisma.salaryTerms.create.mockResolvedValue(
+        row({ extraHourRate: dec('150') }),
+      );
+      mockPrisma.salaryTerms.findUnique.mockResolvedValue(
+        row({ extraHourRate: dec('150') }),
+      );
+      const result = await service.create(
+        createDto({ extraHourRate: '150' }),
+        admin,
+      );
+      expect(mockPrisma.salaryTerms.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            extraHourRate: dec('150'),
+          }) as unknown,
+        }),
+      );
+      expect(result.extraHourRate).toBe('150.00');
+    });
+
+    it('returns null extra hour rate when unset', async () => {
+      const result = await service.create(createDto(), admin);
+      expect(result.extraHourRate).toBeNull();
+    });
+
+    it('rejects a zero extra hour rate', async () => {
+      await expect(
+        service.create(createDto({ extraHourRate: '0' }), admin),
+      ).rejects.toThrow('Amount must be greater than 0');
     });
 
     it('rejects a version that overlaps a later open version', async () => {
@@ -326,6 +360,28 @@ describe('SalaryTermsService', () => {
       ).rejects.toThrow('Started salary terms cannot be changed');
     });
 
+    it('rejects a new extra hour rate on started terms', async () => {
+      mockPrisma.salaryTerms.findUnique.mockResolvedValue(
+        row({ validFrom: day('2020-01-01') }),
+      );
+      await expect(
+        service.update('st1', { extraHourRate: '150' }, 'a1'),
+      ).rejects.toThrow('Started salary terms cannot be changed');
+    });
+
+    it('sets and clears the extra hour rate on not started terms', async () => {
+      await service.update('st1', { extraHourRate: '150' }, 'a1');
+      expect(mockPrisma.salaryTerms.update).toHaveBeenLastCalledWith({
+        where: { id: 'st1' },
+        data: expect.objectContaining({ extraHourRate: dec('150') }) as unknown,
+      });
+      await service.update('st1', { extraHourRate: null }, 'a1');
+      expect(mockPrisma.salaryTerms.update).toHaveBeenLastCalledWith({
+        where: { id: 'st1' },
+        data: expect.objectContaining({ extraHourRate: null }) as unknown,
+      });
+    });
+
     it('replaces rates of not started terms and keeps allowances', async () => {
       await service.update(
         'st1',
@@ -357,6 +413,7 @@ describe('SalaryTermsService', () => {
         where: { id: 'st1' },
         data: {
           monthlyRate: dec('25000'),
+          extraHourRate: undefined,
           calendarKind: undefined,
           note: undefined,
         },
