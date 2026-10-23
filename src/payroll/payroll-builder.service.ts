@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AttendanceStatus,
   ClassFormat,
@@ -100,7 +104,7 @@ export class PayrollBuilder {
     private calendar: CalendarService,
   ) {}
 
-  async teacher(db: Db, id: string): Promise<TeacherRef> {
+  async teacher(db: Db, id: string, strict = false): Promise<TeacherRef> {
     const user = await db.user.findUnique({
       where: { id },
       select: {
@@ -111,8 +115,11 @@ export class PayrollBuilder {
         payrollDetailsVisible: true,
       },
     });
-    if (!user || user.role !== Role.teacher)
+    if (!user) throw new NotFoundException('Teacher not found');
+    if (user.role !== Role.teacher) {
+      if (strict) throw new BadRequestException('User is not a teacher');
       throw new NotFoundException('Teacher not found');
+    }
     return {
       id: user.id,
       firstName: user.firstName,
@@ -342,6 +349,13 @@ export class PayrollBuilder {
       .filter((record) => staff || record.voidedAt === null)
       .map((record) => {
         const used = extraItems.get(record.id);
+        if (!staff)
+          return {
+            date: record.date ? isoDay(record.date) : null,
+            hours: record.hours.toFixed(2),
+            amount: used?.amount ?? null,
+            comment: record.comment,
+          };
         return {
           id: record.id,
           date: record.date ? isoDay(record.date) : null,
@@ -351,7 +365,7 @@ export class PayrollBuilder {
           amount: used?.amount ?? null,
           comment: record.comment,
           createdAt: record.createdAt.toISOString(),
-          ...(staff ? { createdBy: record.createdBy } : {}),
+          createdBy: record.createdBy,
           voidedAt: record.voidedAt?.toISOString() ?? null,
           voidReason: record.voidReason,
         };

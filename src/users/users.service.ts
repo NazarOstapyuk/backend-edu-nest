@@ -215,6 +215,9 @@ export class UsersService {
     this.assertManageable(actor, user);
 
     const author = { OR: [{ createdById: id }, { voidedById: id }] };
+    const payrollRecord = {
+      OR: [{ teacherId: id }, { createdById: id }, { voidedById: id }],
+    };
     const counts = await Promise.all([
       this.prisma.charge.count({ where: author }),
       this.prisma.payment.count({ where: author }),
@@ -269,6 +272,8 @@ export class UsersService {
       }),
       this.prisma.payrollAdjustment.count({ where: author }),
       this.prisma.payrollPayment.count({ where: author }),
+      this.prisma.payrollExtraHours.count({ where: payrollRecord }),
+      this.prisma.teacherAbsence.count({ where: payrollRecord }),
       this.prisma.backupRun.count({ where: { createdById: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
@@ -313,10 +318,13 @@ export class UsersService {
       dto.role !== undefined &&
       dto.role !== Role.teacher
     ) {
-      const terms = await this.prisma.salaryTerms.count({
-        where: { teacherId: id },
-      });
-      if (terms > 0) throw new BadRequestException('User has salary terms');
+      const [terms, extraHours, absences] = await Promise.all([
+        this.prisma.salaryTerms.count({ where: { teacherId: id } }),
+        this.prisma.payrollExtraHours.count({ where: { teacherId: id } }),
+        this.prisma.teacherAbsence.count({ where: { teacherId: id } }),
+      ]);
+      if (terms + extraHours + absences > 0)
+        throw new BadRequestException('User has salary terms');
     }
 
     if (dto.login && dto.login !== user.login) {

@@ -10,6 +10,7 @@ export const termsInclude = {
     orderBy: [{ lessonType: 'asc' }, { id: 'asc' }],
   },
   allowances: { orderBy: [{ name: 'asc' }, { id: 'asc' }] },
+  teacher: { select: { payrollDetailsVisible: true } },
 } satisfies Prisma.SalaryTermsInclude;
 
 type TermsRow = Prisma.SalaryTermsGetPayload<{ include: typeof termsInclude }>;
@@ -17,6 +18,7 @@ type TermsRow = Prisma.SalaryTermsGetPayload<{ include: typeof termsInclude }>;
 export const toTermsView = (row: TermsRow, today: Date) => ({
   id: row.id,
   teacherId: row.teacherId,
+  payrollDetailsVisible: row.teacher.payrollDetailsVisible,
   validFrom: isoDay(row.validFrom),
   validTo: row.validTo ? isoDay(row.validTo) : null,
   monthlyRate: row.monthlyRate.toFixed(2),

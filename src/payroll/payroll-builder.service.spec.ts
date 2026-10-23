@@ -160,6 +160,20 @@ describe('PayrollBuilder', () => {
     );
   });
 
+  it('answers 400 for a non-teacher in strict mode and 404 for a missing user', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      ...teacher,
+      role: Role.parent,
+    });
+    await expect(builder.teacher(prisma, 't1', true)).rejects.toThrow(
+      'User is not a teacher',
+    );
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    await expect(builder.teacher(prisma, 't1', true)).rejects.toThrow(
+      'Teacher not found',
+    );
+  });
+
   it('computes a draft from terms and conducted lessons', async () => {
     mockPrisma.schoolLesson.findMany.mockResolvedValue([
       {
@@ -527,6 +541,12 @@ describe('PayrollBuilder', () => {
 
       expect(own.extraHours).toHaveLength(2);
       expect(own.extraHours?.[0]).not.toHaveProperty('createdBy');
+      expect(Object.keys(own.extraHours?.[0] ?? {}).sort()).toEqual([
+        'amount',
+        'comment',
+        'date',
+        'hours',
+      ]);
       expect(own.absences).toHaveLength(1);
       expect(own.absences?.[0]).not.toHaveProperty('createdBy');
       expect(own.absences?.[0].workingDays).toBe(2);

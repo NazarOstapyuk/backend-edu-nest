@@ -977,8 +977,10 @@ describe('PayrollService', () => {
         expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
       });
 
-      it('accepts an own rate without terms', async () => {
-        mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
+      it('accepts an own rate when terms cover the record', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([
+          { validFrom: day('2026-01-01'), validTo: null, extraHourRate: null },
+        ]);
         await service.addExtraHours(
           't1',
           '2026-10',
@@ -991,6 +993,24 @@ describe('PayrollService', () => {
             rate: new Prisma.Decimal('150.00'),
           }) as object,
         });
+      });
+
+      it('rejects an own rate without terms', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { hours: '2', rate: '150.00' },
+            admin,
+          ),
+        ).rejects.toThrow('Salary terms not found');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
+      });
+
+      it('asks the builder for a strict teacher check', async () => {
+        await service.addExtraHours('t1', '2026-10', { hours: '2' }, admin);
+        expect(mockBuilder.teacher).toHaveBeenCalledWith(prisma, 't1', true);
       });
 
       it('rejects when no terms cover the record', async () => {
@@ -1070,6 +1090,15 @@ describe('PayrollService', () => {
     });
 
     describe('addAbsence', () => {
+      it('asks the builder for a strict teacher check', async () => {
+        await service.addAbsence(
+          't1',
+          { startDate: '2026-10-05', paid: false, reason: 'x' },
+          admin,
+        );
+        expect(mockBuilder.teacher).toHaveBeenCalledWith(prisma, 't1', true);
+      });
+
       it('locks the teacher row before checking and inserting', async () => {
         const result = await service.addAbsence(
           't1',
@@ -1248,6 +1277,12 @@ describe('PayrollService', () => {
     });
 
     describe('listAbsences', () => {
+      it('asks the builder for a strict teacher check', async () => {
+        mockPrisma.teacherAbsence.findMany.mockResolvedValue([]);
+        await service.listAbsences('t1');
+        expect(mockBuilder.teacher).toHaveBeenCalledWith(prisma, 't1', true);
+      });
+
       it('filters by period and keeps voided ones', async () => {
         mockPrisma.teacherAbsence.findMany.mockResolvedValue([
           absenceRow({ voidedAt: new Date('2026-10-02T00:00:00Z') }),

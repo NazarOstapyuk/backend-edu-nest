@@ -421,7 +421,7 @@ export class PayrollService {
     dto: ExtraHoursDto,
     user: AuthenticatedUser,
   ) {
-    const { teacher, month } = await this.target(teacherId, monthValue);
+    const { teacher, month } = await this.target(teacherId, monthValue, true);
     const hours = new Prisma.Decimal(dto.hours);
     const date = dto.date ? parseDay(dto.date) : null;
     const today = kyivToday();
@@ -441,27 +441,25 @@ export class PayrollService {
     await this.prisma.$transaction(async (tx) => {
       const sheet = await this.lockSheet(tx, teacher.id, month);
       assertDraft(sheet.status);
-      if (!rate) {
-        const terms = await tx.salaryTerms.findMany({
-          where: {
-            teacherId: teacher.id,
-            validFrom: { lte: lastDayOfMonth(month) },
-            OR: [{ validTo: null }, { validTo: { gte: month } }],
-          },
-          select: { validFrom: true, validTo: true, extraHourRate: true },
-          orderBy: { validFrom: 'asc' },
-        });
-        const version = date
-          ? terms.find(
-              (t) =>
-                t.validFrom.getTime() <= date.getTime() &&
-                (t.validTo === null || t.validTo.getTime() >= date.getTime()),
-            )
-          : terms.at(-1);
-        if (!version) throw new BadRequestException('Salary terms not found');
-        if (!version.extraHourRate)
-          throw new BadRequestException('No extra hour rate');
-      }
+      const terms = await tx.salaryTerms.findMany({
+        where: {
+          teacherId: teacher.id,
+          validFrom: { lte: lastDayOfMonth(month) },
+          OR: [{ validTo: null }, { validTo: { gte: month } }],
+        },
+        select: { validFrom: true, validTo: true, extraHourRate: true },
+        orderBy: { validFrom: 'asc' },
+      });
+      const version = date
+        ? terms.find(
+            (t) =>
+              t.validFrom.getTime() <= date.getTime() &&
+              (t.validTo === null || t.validTo.getTime() >= date.getTime()),
+          )
+        : terms.at(-1);
+      if (!version) throw new BadRequestException('Salary terms not found');
+      if (!rate && !version.extraHourRate)
+        throw new BadRequestException('No extra hour rate');
       await tx.payrollExtraHours.create({
         data: {
           teacherId: teacher.id,
@@ -509,7 +507,7 @@ export class PayrollService {
     dto: AbsenceDto,
     user: AuthenticatedUser,
   ) {
-    const teacher = await this.builder.teacher(this.prisma, teacherId);
+    const teacher = await this.builder.teacher(this.prisma, teacherId, true);
     const startDate = parseDay(dto.startDate);
     const endDate = dto.endDate ? parseDay(dto.endDate) : startDate;
     if (
@@ -546,7 +544,7 @@ export class PayrollService {
   }
 
   async listAbsences(teacherId: string, from?: string, to?: string) {
-    const teacher = await this.builder.teacher(this.prisma, teacherId);
+    const teacher = await this.builder.teacher(this.prisma, teacherId, true);
     if (from && to && parseDay(from).getTime() > parseDay(to).getTime())
       throw new BadRequestException('Invalid period');
     const rows = await this.prisma.teacherAbsence.findMany({
@@ -640,9 +638,9 @@ export class PayrollService {
     }
   }
 
-  private async target(teacherId: string, monthValue: string) {
+  private async target(teacherId: string, monthValue: string, strict = false) {
     const { from } = parseMonth(monthValue);
-    const teacher = await this.builder.teacher(this.prisma, teacherId);
+    const teacher = await this.builder.teacher(this.prisma, teacherId, strict);
     return { teacher, month: from };
   }
 

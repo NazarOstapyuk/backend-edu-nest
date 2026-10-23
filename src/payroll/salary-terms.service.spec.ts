@@ -42,6 +42,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   createdAt: new Date('2026-10-01T10:00:00Z'),
   rates: [],
   allowances: [],
+  teacher: { payrollDetailsVisible: false },
   ...over,
 });
 
@@ -507,6 +508,8 @@ describe('SalaryTermsService', () => {
       ]);
 
       const [view] = await service.list('t1');
+
+      expect(view.payrollDetailsVisible).toBe(false);
 
       expect(view).toMatchObject({
         validFrom: '2020-01-01',

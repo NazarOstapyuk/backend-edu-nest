@@ -576,6 +576,30 @@ describe('unpaid absences', () => {
     expect(result.days.unpaidAbsenceDays).toBe(2);
   });
 
+  it('does not count a weekend-only absence', () => {
+    const result = novSheet(
+      [base],
+      [absence('a1', '2026-11-07', '2026-11-08')],
+    );
+    expect(result.days.unpaidAbsenceDays).toBe(0);
+    expect(result.days.workedDays).toBe(21);
+  });
+
+  it('does not count days in a gap between terms versions', () => {
+    const first = terms({
+      monthlyRate: dec('20000'),
+      validTo: day('2026-11-10'),
+    });
+    const second = terms({
+      monthlyRate: dec('20000'),
+      validFrom: day('2026-11-20'),
+    });
+    const segments = monthSegments(NOV, [first, second], []);
+    const a = absence('a1', '2026-11-12', '2026-11-16');
+    expect(unpaidAbsenceDays(NOV, segments, [a], [])).toBe(0);
+    expect(absenceWorkingDays(NOV, segments, a, [])).toBe(0);
+  });
+
   it('keeps the override and still reports unpaid days', () => {
     const result = novSheet(
       [base],

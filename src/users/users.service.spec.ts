@@ -55,6 +55,8 @@ const mockPrisma = {
   payrollSheet: { count: jest.fn() },
   payrollAdjustment: { count: jest.fn() },
   payrollPayment: { count: jest.fn() },
+  payrollExtraHours: { count: jest.fn() },
+  teacherAbsence: { count: jest.fn() },
 };
 
 const mockAudit = { recordChange: jest.fn() };
@@ -280,6 +282,8 @@ describe('UsersService', () => {
         phone: '+380671234567',
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
 
       await service.update('p1', { role: Role.parent }, adminActor);
 
@@ -499,6 +503,44 @@ describe('UsersService', () => {
       mockPrisma.payrollSheet.count.mockResolvedValue(0);
       mockPrisma.payrollAdjustment.count.mockResolvedValue(0);
       mockPrisma.payrollPayment.count.mockResolvedValue(0);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+    });
+
+    it('throws BadRequestException when user has extra hours records', async () => {
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.payrollExtraHours.count).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { teacherId: 'u1' },
+            { createdById: 'u1' },
+            { voidedById: 'u1' },
+          ],
+        },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user has teacher absences', async () => {
+      mockPrisma.teacherAbsence.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.teacherAbsence.count).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { teacherId: 'u1' },
+            { createdById: 'u1' },
+            { voidedById: 'u1' },
+          ],
+        },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when user has salary terms', async () => {
@@ -649,6 +691,31 @@ describe('UsersService', () => {
       expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
         where: { teacherId: 't1' },
       });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects changing the role away from teacher with absences or extra hours', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 't1',
+        login: 'teacher',
+        role: Role.teacher,
+        accessScope: AccessScope.all,
+        permissions: [],
+        phone: null,
+      });
+      mockPrisma.salaryTerms.count.mockResolvedValue(0);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(1);
+
+      await expect(
+        service.update('t1', { role: Role.admin }, rootActor),
+      ).rejects.toThrow('User has salary terms');
+
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(1);
+      await expect(
+        service.update('t1', { role: Role.admin }, rootActor),
+      ).rejects.toThrow('User has salary terms');
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
@@ -1125,6 +1192,8 @@ describe('UsersService', () => {
         'payrollSheet',
         'payrollAdjustment',
         'payrollPayment',
+        'payrollExtraHours',
+        'teacherAbsence',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }
