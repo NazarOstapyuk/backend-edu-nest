@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -61,4 +62,57 @@ export class PayrollPaymentDto {
   @IsString()
   @MaxLength(500)
   comment?: string;
+}
+
+export class ExtraHoursDto {
+  @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsString()
+  @Matches(/^\d{1,3}(\.\d{1,2})?$/)
+  hours: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(AMOUNT_PATTERN)
+  rate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  comment?: string;
+}
+
+export class AbsenceDto {
+  @IsDateString()
+  startDate: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
+  @IsBoolean()
+  paid: boolean;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/\S/)
+  @MaxLength(200)
+  reason: string;
+}
+
+export class AbsenceListQueryDto {
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  to?: string;
+}
+
+export class DetailsVisibilityDto {
+  @IsBoolean()
+  visible: boolean;
 }

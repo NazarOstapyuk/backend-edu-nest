@@ -1,16 +1,35 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PayrollLineType, PayrollStatus, Prisma, Role } from '@prisma/client';
+import {
+  AuditAction,
+  PayrollLineType,
+  PayrollStatus,
+  Prisma,
+  Role,
+} from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { parseMonth } from '../attendance/register-calc';
 import { parseDay } from '../classes/access';
-import { firstDayOfMonth, kyivToday, lastDayOfMonth } from '../tariffs/dates';
+import {
+  dayCount,
+  firstDayOfMonth,
+  isoDay,
+  kyivToday,
+  lastDayOfMonth,
+} from '../tariffs/dates';
 import { positiveAmount } from './amount';
-import { PayrollAdjustmentDto, PayrollPaymentDto } from './dto/payroll.dto';
+import {
+  AbsenceDto,
+  ExtraHoursDto,
+  PayrollAdjustmentDto,
+  PayrollPaymentDto,
+} from './dto/payroll.dto';
 import { PayrollBuilder, toSummary } from './payroll-builder.service';
 
 const ZERO = new Prisma.Decimal(0);
@@ -22,11 +41,40 @@ const assertDraft = (status: PayrollStatus) => {
     throw new BadRequestException('Payroll is approved');
 };
 
+const absencePerson = {
+  select: { id: true, firstName: true, lastName: true, login: true },
+};
+
+const absenceView = (row: {
+  id: string;
+  teacherId: string;
+  startDate: Date;
+  endDate: Date;
+  paid: boolean;
+  reason: string;
+  createdAt: Date;
+  createdBy: { id: string; firstName: string; lastName: string; login: string };
+  voidedAt: Date | null;
+  voidReason: string | null;
+}) => ({
+  id: row.id,
+  teacherId: row.teacherId,
+  startDate: isoDay(row.startDate),
+  endDate: isoDay(row.endDate),
+  paid: row.paid,
+  reason: row.reason,
+  createdAt: row.createdAt.toISOString(),
+  createdBy: row.createdBy,
+  voidedAt: row.voidedAt?.toISOString() ?? null,
+  voidReason: row.voidReason,
+});
+
 @Injectable()
 export class PayrollService {
   constructor(
     private prisma: PrismaService,
     private builder: PayrollBuilder,
+    private audit: AuditService,
   ) {}
 
   async list(monthValue: string) {
@@ -365,6 +413,229 @@ export class PayrollService {
       });
     });
     return this.builder.detail(this.prisma, teacher, month, true);
+  }
+
+  async addExtraHours(
+    teacherId: string,
+    monthValue: string,
+    dto: ExtraHoursDto,
+    user: AuthenticatedUser,
+  ) {
+    const { teacher, month } = await this.target(teacherId, monthValue);
+    const hours = new Prisma.Decimal(dto.hours);
+    const date = dto.date ? parseDay(dto.date) : null;
+    const today = kyivToday();
+    if (date) {
+      if (
+        date.getTime() < month.getTime() ||
+        date.getTime() > lastDayOfMonth(month).getTime()
+      )
+        throw new BadRequestException('Invalid date range');
+      if (date.getTime() > today.getTime())
+        throw new BadRequestException('Date is in the future');
+    } else if (month.getTime() > firstDayOfMonth(today).getTime())
+      throw new BadRequestException('Date is in the future');
+    if (hours.lte(0) || hours.gt(date ? 24 : 400))
+      throw new BadRequestException('Invalid hours');
+    const rate = dto.rate ? positiveAmount(dto.rate) : null;
+    await this.prisma.$transaction(async (tx) => {
+      const sheet = await this.lockSheet(tx, teacher.id, month);
+      assertDraft(sheet.status);
+      if (!rate) {
+        const terms = await tx.salaryTerms.findMany({
+          where: {
+            teacherId: teacher.id,
+            validFrom: { lte: lastDayOfMonth(month) },
+            OR: [{ validTo: null }, { validTo: { gte: month } }],
+          },
+          select: { validFrom: true, validTo: true, extraHourRate: true },
+          orderBy: { validFrom: 'asc' },
+        });
+        const version = date
+          ? terms.find(
+              (t) =>
+                t.validFrom.getTime() <= date.getTime() &&
+                (t.validTo === null || t.validTo.getTime() >= date.getTime()),
+            )
+          : terms.at(-1);
+        if (!version) throw new BadRequestException('Salary terms not found');
+        if (!version.extraHourRate)
+          throw new BadRequestException('No extra hour rate');
+      }
+      await tx.payrollExtraHours.create({
+        data: {
+          teacherId: teacher.id,
+          month,
+          date,
+          hours,
+          rate,
+          comment: dto.comment?.trim() || null,
+          createdById: user.id,
+        },
+      });
+    });
+    return this.builder.detail(this.prisma, teacher, month, true);
+  }
+
+  async voidExtraHours(id: string, reason: string, user: AuthenticatedUser) {
+    const found = await this.prisma.payrollExtraHours.findUnique({
+      where: { id },
+      select: { teacherId: true, month: true },
+    });
+    if (!found) throw new NotFoundException('Extra hours not found');
+    await this.prisma.$transaction(async (tx) => {
+      const sheet = await this.lockSheet(tx, found.teacherId, found.month);
+      assertDraft(sheet.status);
+      const record = await tx.payrollExtraHours.findUniqueOrThrow({
+        where: { id },
+        select: { voidedAt: true },
+      });
+      if (record.voidedAt)
+        throw new BadRequestException('Extra hours are voided');
+      await tx.payrollExtraHours.update({
+        where: { id },
+        data: {
+          voidedAt: new Date(),
+          voidedById: user.id,
+          voidReason: reason.trim(),
+        },
+      });
+    });
+    return this.sheetDetail(found);
+  }
+
+  async addAbsence(
+    teacherId: string,
+    dto: AbsenceDto,
+    user: AuthenticatedUser,
+  ) {
+    const teacher = await this.builder.teacher(this.prisma, teacherId);
+    const startDate = parseDay(dto.startDate);
+    const endDate = dto.endDate ? parseDay(dto.endDate) : startDate;
+    if (
+      endDate.getTime() < startDate.getTime() ||
+      dayCount(startDate, endDate) > 92
+    )
+      throw new BadRequestException('Invalid date range');
+    const created = await this.prisma.$transaction(async (tx) => {
+      await this.lockTeacher(tx, teacher.id);
+      await this.assertNoApproved(tx, teacher.id, startDate, endDate);
+      const overlap = await tx.teacherAbsence.count({
+        where: {
+          teacherId: teacher.id,
+          voidedAt: null,
+          startDate: { lte: endDate },
+          endDate: { gte: startDate },
+        },
+      });
+      if (overlap > 0)
+        throw new ConflictException('Absence overlaps another absence');
+      return tx.teacherAbsence.create({
+        data: {
+          teacherId: teacher.id,
+          startDate,
+          endDate,
+          paid: dto.paid,
+          reason: dto.reason.trim(),
+          createdById: user.id,
+        },
+        include: { createdBy: absencePerson },
+      });
+    });
+    return absenceView(created);
+  }
+
+  async listAbsences(teacherId: string, from?: string, to?: string) {
+    const teacher = await this.builder.teacher(this.prisma, teacherId);
+    const rows = await this.prisma.teacherAbsence.findMany({
+      where: {
+        teacherId: teacher.id,
+        ...(to ? { startDate: { lte: parseDay(to) } } : {}),
+        ...(from ? { endDate: { gte: parseDay(from) } } : {}),
+      },
+      include: { createdBy: absencePerson },
+      orderBy: [{ startDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(absenceView);
+  }
+
+  async voidAbsence(id: string, reason: string, user: AuthenticatedUser) {
+    const found = await this.prisma.teacherAbsence.findUnique({
+      where: { id },
+      select: { teacherId: true },
+    });
+    if (!found) throw new NotFoundException('Absence not found');
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.lockTeacher(tx, found.teacherId);
+      const absence = await tx.teacherAbsence.findUniqueOrThrow({
+        where: { id },
+      });
+      if (absence.voidedAt) throw new BadRequestException('Absence is voided');
+      await this.assertNoApproved(
+        tx,
+        found.teacherId,
+        absence.startDate,
+        absence.endDate,
+      );
+      return tx.teacherAbsence.update({
+        where: { id },
+        data: {
+          voidedAt: new Date(),
+          voidedById: user.id,
+          voidReason: reason.trim(),
+        },
+        include: { createdBy: absencePerson },
+      });
+    });
+    return absenceView(updated);
+  }
+
+  async setDetailsVisibility(
+    teacherId: string,
+    visible: boolean,
+    user: AuthenticatedUser,
+  ) {
+    const found = await this.prisma.user.findUnique({
+      where: { id: teacherId },
+      select: { id: true, role: true, payrollDetailsVisible: true },
+    });
+    if (!found) throw new NotFoundException('Teacher not found');
+    if (found.role !== Role.teacher)
+      throw new BadRequestException('User is not a teacher');
+    await this.prisma.user.update({
+      where: { id: teacherId },
+      data: { payrollDetailsVisible: visible },
+    });
+    await this.audit.recordChange(this.prisma, {
+      actorId: user.id,
+      entityType: 'users',
+      entityId: teacherId,
+      action: AuditAction.update,
+      before: { payrollDetailsVisible: found.payrollDetailsVisible },
+      after: { payrollDetailsVisible: visible },
+      fields: ['payrollDetailsVisible'],
+    });
+    return { visible };
+  }
+
+  private async lockTeacher(tx: Tx, teacherId: string) {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${teacherId} FOR UPDATE`;
+  }
+
+  private async assertNoApproved(
+    tx: Tx,
+    teacherId: string,
+    start: Date,
+    end: Date,
+  ) {
+    const approved = await tx.payrollSheet.count({
+      where: {
+        teacherId,
+        status: PayrollStatus.approved,
+        month: { gte: firstDayOfMonth(start), lte: end },
+      },
+    });
+    if (approved > 0) throw new BadRequestException('Payroll is approved');
   }
 
   private async target(teacherId: string, monthValue: string) {

@@ -17,6 +17,10 @@ import type { AuthenticatedUser } from '../common/types/authenticated-user.type'
 import { VoidDto } from '../finance/dto/void.dto';
 import { PayrollService } from './payroll.service';
 import {
+  AbsenceDto,
+  AbsenceListQueryDto,
+  DetailsVisibilityDto,
+  ExtraHoursDto,
   PayrollAdjustmentDto,
   PayrollListQueryDto,
   PayrollPaymentDto,
@@ -110,5 +114,64 @@ export class PayrollController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.payroll.reopen(teacherId, month, dto.reason, user);
+  }
+
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
+  @Post('payroll/:teacherId/:month/extra-hours')
+  addExtraHours(
+    @Param('teacherId') teacherId: string,
+    @Param('month') month: string,
+    @Body() dto: ExtraHoursDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.addExtraHours(teacherId, month, dto, user);
+  }
+
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
+  @Post('payroll-extra-hours/:id/void')
+  voidExtraHours(
+    @Param('id') id: string,
+    @Body() dto: VoidDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.voidExtraHours(id, dto.reason, user);
+  }
+
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
+  @Post('teachers/:teacherId/absences')
+  addAbsence(
+    @Param('teacherId') teacherId: string,
+    @Body() dto: AbsenceDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.addAbsence(teacherId, dto, user);
+  }
+
+  @Get('teachers/:teacherId/absences')
+  listAbsences(
+    @Param('teacherId') teacherId: string,
+    @Query() query: AbsenceListQueryDto,
+  ) {
+    return this.payroll.listAbsences(teacherId, query.from, query.to);
+  }
+
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
+  @Post('teacher-absences/:id/void')
+  voidAbsence(
+    @Param('id') id: string,
+    @Body() dto: VoidDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.voidAbsence(id, dto.reason, user);
+  }
+
+  @Permission(PermissionArea.payroll, PermissionLevel.edit)
+  @Patch('payroll/teachers/:teacherId/details-visibility')
+  detailsVisibility(
+    @Param('teacherId') teacherId: string,
+    @Body() dto: DetailsVisibilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.setDetailsVisibility(teacherId, dto.visible, user);
   }
 }

@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   PayrollAdjustmentKind,
@@ -10,6 +11,7 @@ import {
   Role,
   AccessScope,
 } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayrollBuilder } from './payroll-builder.service';
 import { PayrollService } from './payroll.service';
@@ -50,7 +52,21 @@ const detailOf = (
 });
 
 const mockPrisma = {
-  user: { findMany: jest.fn() },
+  user: { findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  payrollExtraHours: {
+    findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  teacherAbsence: {
+    findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
   salaryTerms: { findMany: jest.fn() },
   payrollSheet: {
     findMany: jest.fn(),
@@ -58,6 +74,7 @@ const mockPrisma = {
     findUniqueOrThrow: jest.fn(),
     createMany: jest.fn(),
     update: jest.fn(),
+    count: jest.fn(),
   },
   payrollLine: {
     createMany: jest.fn(),
@@ -80,6 +97,7 @@ const mockPrisma = {
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
+const mockAudit = { recordChange: jest.fn() };
 const mockBuilder = {
   teacher: jest.fn(),
   detail: jest.fn(),
@@ -105,6 +123,7 @@ describe('PayrollService', () => {
         PayrollService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PayrollBuilder, useValue: mockBuilder },
+        { provide: AuditService, useValue: mockAudit },
       ],
     }).compile();
     service = module.get(PayrollService);
@@ -740,6 +759,513 @@ describe('PayrollService', () => {
             reopenReason: 'Помилка в ставці',
           },
         });
+      });
+    });
+  });
+
+  describe('extra hours and absences', () => {
+    const admin = {
+      id: 'a1',
+      role: Role.admin,
+      login: 'admin',
+      mustChangePassword: false,
+      accessScope: AccessScope.all,
+      institutionIds: [] as string[],
+      scopeInstitutionIds: null as string[] | null,
+      permissions: {},
+    };
+    const sheet = (over: Record<string, unknown> = {}) => ({
+      id: 'ps1',
+      teacherId: 't1',
+      month: OCT,
+      status: PayrollStatus.draft,
+      workedDays: null,
+      adjustments: [],
+      ...over,
+    });
+    const terms = (rate: string | null) => [
+      {
+        validFrom: day('2026-01-01'),
+        validTo: null,
+        extraHourRate: rate ? new Prisma.Decimal(rate) : null,
+      },
+    ];
+    const person = { id: 'a1', firstName: 'А', lastName: 'Б', login: 'admin' };
+    const absenceRow = (over: Record<string, unknown> = {}) => ({
+      id: 'ab1',
+      teacherId: 't1',
+      startDate: day('2026-10-05'),
+      endDate: day('2026-10-07'),
+      paid: false,
+      reason: 'Лікарняний',
+      createdAt: new Date('2026-10-01T10:00:00Z'),
+      createdBy: person,
+      voidedAt: null,
+      voidReason: null,
+      ...over,
+    });
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-10-23T09:00:00Z') });
+      mockPrisma.payrollSheet.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(sheet());
+      mockPrisma.salaryTerms.findMany.mockResolvedValue(terms('100.00'));
+      mockPrisma.payrollSheet.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.create.mockResolvedValue(absenceRow());
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    describe('addExtraHours', () => {
+      it('stores a dated record under the locked sheet and returns the card', async () => {
+        await service.addExtraHours(
+          't1',
+          '2026-10',
+          { date: '2026-10-20', hours: '1.5', comment: ' зам ' },
+          admin,
+        );
+
+        expect(mockPrisma.payrollExtraHours.create).toHaveBeenCalledWith({
+          data: {
+            teacherId: 't1',
+            month: OCT,
+            date: day('2026-10-20'),
+            hours: new Prisma.Decimal('1.5'),
+            rate: null,
+            comment: 'зам',
+            createdById: 'a1',
+          },
+        });
+        expect(mockBuilder.detail).toHaveBeenCalledWith(
+          prisma,
+          teacher,
+          OCT,
+          true,
+        );
+      });
+
+      it('stores a monthly record without a date', async () => {
+        await service.addExtraHours('t1', '2026-10', { hours: '10' }, admin);
+
+        expect(mockPrisma.payrollExtraHours.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ date: null }) as object,
+        });
+      });
+
+      it('rejects a date outside the month', async () => {
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { date: '2026-09-30', hours: '1' },
+            admin,
+          ),
+        ).rejects.toThrow('Invalid date range');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
+      });
+
+      it('rejects tomorrow', async () => {
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { date: '2026-10-24', hours: '1' },
+            admin,
+          ),
+        ).rejects.toThrow('Date is in the future');
+      });
+
+      it('rejects a monthly record for a future month', async () => {
+        await expect(
+          service.addExtraHours('t1', '2026-11', { hours: '5' }, admin),
+        ).rejects.toThrow('Date is in the future');
+      });
+
+      it('rejects more than 24 hours on a day and more than 400 monthly', async () => {
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { date: '2026-10-20', hours: '25' },
+            admin,
+          ),
+        ).rejects.toThrow('Invalid hours');
+        await expect(
+          service.addExtraHours('t1', '2026-10', { hours: '401' }, admin),
+        ).rejects.toThrow('Invalid hours');
+        await expect(
+          service.addExtraHours('t1', '2026-10', { hours: '0' }, admin),
+        ).rejects.toThrow('Invalid hours');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
+      });
+
+      it('rejects a missing rate when the record has none of its own', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue(terms(null));
+        await expect(
+          service.addExtraHours('t1', '2026-10', { hours: '2' }, admin),
+        ).rejects.toThrow('No extra hour rate');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
+      });
+
+      it('accepts an own rate without terms', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
+        await service.addExtraHours(
+          't1',
+          '2026-10',
+          { hours: '2', rate: '150.00' },
+          admin,
+        );
+
+        expect(mockPrisma.payrollExtraHours.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            rate: new Prisma.Decimal('150.00'),
+          }) as object,
+        });
+      });
+
+      it('rejects when no terms cover the record', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
+        await expect(
+          service.addExtraHours('t1', '2026-10', { hours: '2' }, admin),
+        ).rejects.toThrow('Salary terms not found');
+      });
+
+      it('rejects an approved month', async () => {
+        mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved }),
+        );
+        await expect(
+          service.addExtraHours('t1', '2026-10', { hours: '2' }, admin),
+        ).rejects.toThrow('Payroll is approved');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('voidExtraHours', () => {
+      it('voids with a reason and returns the card', async () => {
+        mockPrisma.payrollExtraHours.findUnique.mockResolvedValue({
+          teacherId: 't1',
+          month: OCT,
+        });
+        mockPrisma.payrollExtraHours.findUniqueOrThrow.mockResolvedValue({
+          voidedAt: null,
+        });
+
+        await service.voidExtraHours('eh1', ' помилка ', admin);
+
+        expect(mockPrisma.payrollExtraHours.update).toHaveBeenCalledWith({
+          where: { id: 'eh1' },
+          data: {
+            voidedAt: expect.any(Date) as Date,
+            voidedById: 'a1',
+            voidReason: 'помилка',
+          },
+        });
+        expect(mockBuilder.detail).toHaveBeenCalled();
+      });
+
+      it('throws when missing', async () => {
+        mockPrisma.payrollExtraHours.findUnique.mockResolvedValue(null);
+        await expect(service.voidExtraHours('eh1', 'x', admin)).rejects.toThrow(
+          'Extra hours not found',
+        );
+      });
+
+      it('refuses a second void', async () => {
+        mockPrisma.payrollExtraHours.findUnique.mockResolvedValue({
+          teacherId: 't1',
+          month: OCT,
+        });
+        mockPrisma.payrollExtraHours.findUniqueOrThrow.mockResolvedValue({
+          voidedAt: new Date(),
+        });
+        await expect(service.voidExtraHours('eh1', 'x', admin)).rejects.toThrow(
+          'Extra hours are voided',
+        );
+        expect(mockPrisma.payrollExtraHours.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses an approved month', async () => {
+        mockPrisma.payrollExtraHours.findUnique.mockResolvedValue({
+          teacherId: 't1',
+          month: OCT,
+        });
+        mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved }),
+        );
+        await expect(service.voidExtraHours('eh1', 'x', admin)).rejects.toThrow(
+          'Payroll is approved',
+        );
+      });
+    });
+
+    describe('addAbsence', () => {
+      it('locks the teacher row before checking and inserting', async () => {
+        const result = await service.addAbsence(
+          't1',
+          {
+            startDate: '2026-10-05',
+            endDate: '2026-10-07',
+            paid: false,
+            reason: ' Лікарняний ',
+          },
+          admin,
+        );
+
+        const sql = (
+          mockPrisma.$queryRaw.mock.calls[0] as [TemplateStringsArray]
+        )[0].join('?');
+        expect(sql).toContain('"User"');
+        expect(sql).toContain('FOR UPDATE');
+        expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          mockPrisma.teacherAbsence.count.mock.invocationCallOrder[0],
+        );
+        expect(mockPrisma.teacherAbsence.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: {
+              teacherId: 't1',
+              startDate: day('2026-10-05'),
+              endDate: day('2026-10-07'),
+              paid: false,
+              reason: 'Лікарняний',
+              createdById: 'a1',
+            },
+          }),
+        );
+        expect(result).toEqual(
+          expect.objectContaining({
+            id: 'ab1',
+            startDate: '2026-10-05',
+            endDate: '2026-10-07',
+            voidedAt: null,
+          }),
+        );
+      });
+
+      it('defaults the end date to the start date', async () => {
+        await service.addAbsence(
+          't1',
+          { startDate: '2026-10-05', paid: true, reason: 'x' },
+          admin,
+        );
+        expect(mockPrisma.teacherAbsence.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              endDate: day('2026-10-05'),
+            }) as object,
+          }),
+        );
+      });
+
+      it('rejects an end before the start and a period over 92 days', async () => {
+        await expect(
+          service.addAbsence(
+            't1',
+            {
+              startDate: '2026-10-05',
+              endDate: '2026-10-04',
+              paid: true,
+              reason: 'x',
+            },
+            admin,
+          ),
+        ).rejects.toThrow('Invalid date range');
+        await expect(
+          service.addAbsence(
+            't1',
+            {
+              startDate: '2026-01-01',
+              endDate: '2026-04-03',
+              paid: true,
+              reason: 'x',
+            },
+            admin,
+          ),
+        ).rejects.toThrow('Invalid date range');
+      });
+
+      it('accepts exactly 92 days', async () => {
+        await service.addAbsence(
+          't1',
+          {
+            startDate: '2026-01-01',
+            endDate: '2026-04-02',
+            paid: true,
+            reason: 'x',
+          },
+          admin,
+        );
+        expect(mockPrisma.teacherAbsence.create).toHaveBeenCalled();
+      });
+
+      it('answers 409 on an overlap with an active absence', async () => {
+        mockPrisma.teacherAbsence.count.mockResolvedValue(1);
+        await expect(
+          service.addAbsence(
+            't1',
+            { startDate: '2026-10-06', paid: true, reason: 'x' },
+            admin,
+          ),
+        ).rejects.toThrow(ConflictException);
+        expect(mockPrisma.teacherAbsence.count).toHaveBeenCalledWith({
+          where: {
+            teacherId: 't1',
+            voidedAt: null,
+            startDate: { lte: day('2026-10-06') },
+            endDate: { gte: day('2026-10-06') },
+          },
+        });
+        expect(mockPrisma.teacherAbsence.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses a period spanning an approved month without inserting', async () => {
+        mockPrisma.payrollSheet.count.mockResolvedValue(1);
+        await expect(
+          service.addAbsence(
+            't1',
+            {
+              startDate: '2026-09-28',
+              endDate: '2026-10-02',
+              paid: true,
+              reason: 'x',
+            },
+            admin,
+          ),
+        ).rejects.toThrow('Payroll is approved');
+        expect(mockPrisma.payrollSheet.count).toHaveBeenCalledWith({
+          where: {
+            teacherId: 't1',
+            status: PayrollStatus.approved,
+            month: { gte: day('2026-09-01'), lte: day('2026-10-02') },
+          },
+        });
+        expect(mockPrisma.teacherAbsence.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('listAbsences', () => {
+      it('filters by period and keeps voided ones', async () => {
+        mockPrisma.teacherAbsence.findMany.mockResolvedValue([
+          absenceRow({ voidedAt: new Date('2026-10-02T00:00:00Z') }),
+        ]);
+        const result = await service.listAbsences(
+          't1',
+          '2026-10-01',
+          '2026-10-31',
+        );
+
+        expect(mockPrisma.teacherAbsence.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              teacherId: 't1',
+              startDate: { lte: day('2026-10-31') },
+              endDate: { gte: day('2026-10-01') },
+            },
+          }),
+        );
+        expect(result).toHaveLength(1);
+        expect(result[0].voidedAt).not.toBeNull();
+      });
+    });
+
+    describe('voidAbsence', () => {
+      it('locks the teacher, voids and returns the view', async () => {
+        mockPrisma.teacherAbsence.findUnique.mockResolvedValue({
+          teacherId: 't1',
+        });
+        mockPrisma.teacherAbsence.findUniqueOrThrow.mockResolvedValue(
+          absenceRow(),
+        );
+        mockPrisma.teacherAbsence.update.mockResolvedValue(
+          absenceRow({ voidedAt: new Date(), voidReason: 'помилка' }),
+        );
+
+        const result = await service.voidAbsence('ab1', ' помилка ', admin);
+
+        expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+        expect(mockPrisma.teacherAbsence.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: {
+              voidedAt: expect.any(Date) as Date,
+              voidedById: 'a1',
+              voidReason: 'помилка',
+            },
+          }),
+        );
+        expect(result.voidReason).toBe('помилка');
+      });
+
+      it('throws when missing, voided or in an approved month', async () => {
+        mockPrisma.teacherAbsence.findUnique.mockResolvedValue(null);
+        await expect(service.voidAbsence('ab1', 'x', admin)).rejects.toThrow(
+          'Absence not found',
+        );
+
+        mockPrisma.teacherAbsence.findUnique.mockResolvedValue({
+          teacherId: 't1',
+        });
+        mockPrisma.teacherAbsence.findUniqueOrThrow.mockResolvedValue(
+          absenceRow({ voidedAt: new Date() }),
+        );
+        await expect(service.voidAbsence('ab1', 'x', admin)).rejects.toThrow(
+          'Absence is voided',
+        );
+
+        mockPrisma.teacherAbsence.findUniqueOrThrow.mockResolvedValue(
+          absenceRow(),
+        );
+        mockPrisma.payrollSheet.count.mockResolvedValue(1);
+        await expect(service.voidAbsence('ab1', 'x', admin)).rejects.toThrow(
+          'Payroll is approved',
+        );
+        expect(mockPrisma.teacherAbsence.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('setDetailsVisibility', () => {
+      it('updates the flag and records the change', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({
+          id: 't1',
+          role: Role.teacher,
+          payrollDetailsVisible: false,
+        });
+
+        const result = await service.setDetailsVisibility('t1', true, admin);
+
+        expect(result).toEqual({ visible: true });
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 't1' },
+          data: { payrollDetailsVisible: true },
+        });
+        expect(mockAudit.recordChange).toHaveBeenCalledWith(
+          prisma,
+          expect.objectContaining({
+            actorId: 'a1',
+            entityType: 'users',
+            entityId: 't1',
+            before: { payrollDetailsVisible: false },
+            after: { payrollDetailsVisible: true },
+            fields: ['payrollDetailsVisible'],
+          }),
+        );
+      });
+
+      it('refuses a non-teacher and a missing user', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({
+          id: 'p1',
+          role: Role.parent,
+          payrollDetailsVisible: false,
+        });
+        await expect(
+          service.setDetailsVisibility('p1', true, admin),
+        ).rejects.toThrow('User is not a teacher');
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+
+        mockPrisma.user.findUnique.mockResolvedValue(null);
+        await expect(
+          service.setDetailsVisibility('x', true, admin),
+        ).rejects.toThrow('Teacher not found');
       });
     });
   });
