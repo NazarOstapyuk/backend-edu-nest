@@ -303,7 +303,10 @@ export class PayrollBuilder {
     const records = await this.records(db, teacher.id, month);
     if (sheet?.status === PayrollStatus.approved) {
       lines = sheet.lines.map(storedLine);
-      days = (sheet.approvedDays as unknown as SheetDays | null) ?? EMPTY_DAYS;
+      days = {
+        ...EMPTY_DAYS,
+        ...(sheet.approvedDays as unknown as Partial<SheetDays> | null),
+      };
       warnings = {
         noRate: lines.filter((line) => line.meta?.noRate).length,
         lessonsWithoutTerms: 0,
@@ -392,8 +395,13 @@ export class PayrollBuilder {
     delete daysRest.unpaidAbsenceDays;
     const accrued = sumAmounts(lines);
     const paid = sumAmounts(activePayments);
+    const teacherPublic = {
+      id: teacher.id,
+      firstName: teacher.firstName,
+      lastName: teacher.lastName,
+    };
     return {
-      teacher,
+      teacher: staff ? teacher : teacherPublic,
       month: monthKey(month),
       status: sheet?.status ?? PayrollStatus.draft,
       approvedAt: sheet?.approvedAt?.toISOString() ?? null,
@@ -427,7 +435,9 @@ export class PayrollBuilder {
         voidedAt: p.voidedAt?.toISOString() ?? null,
         voidReason: p.voidReason,
       })),
-      warnings,
+      warnings: showDetails
+        ? warnings
+        : { ...warnings, lessonsOnAbsenceDays: [] },
       lessons,
       totals: {
         accrued: money(accrued),

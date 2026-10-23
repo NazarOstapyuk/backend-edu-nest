@@ -304,6 +304,7 @@ describe('PayrollBuilder', () => {
       normDays: 22,
       defaultDays: 22,
       workedDays: 22,
+      unpaidAbsenceDays: 0,
       override: false,
     });
     expect(detail.lessons).toBe(1);
@@ -508,6 +509,8 @@ describe('PayrollBuilder', () => {
       expect(own).not.toHaveProperty('extraHours');
       expect(own).not.toHaveProperty('absences');
       expect(own).not.toHaveProperty('payrollDetailsVisible');
+      expect(own.teacher).not.toHaveProperty('payrollDetailsVisible');
+      expect(own.warnings.lessonsOnAbsenceDays).toEqual([]);
       expect(own.days).not.toHaveProperty('unpaidAbsenceDays');
       expect(
         own.lines.find((l) => l.type === PayrollLineType.extra_hours)?.amount,
@@ -528,6 +531,55 @@ describe('PayrollBuilder', () => {
       expect(own.absences?.[0]).not.toHaveProperty('createdBy');
       expect(own.absences?.[0].workingDays).toBe(2);
       expect(own.days.unpaidAbsenceDays).toBe(2);
+    });
+
+    it('hides lessons on absence days from a teacher with the switch off', async () => {
+      mockPrisma.schoolLesson.findMany.mockResolvedValue([
+        {
+          id: 'sl1',
+          date: day('2026-10-01'),
+          subjectId: 's1',
+          subject: { name: 'Математика' },
+        },
+      ]);
+
+      const staff = await builder.detail(prisma, teacher, OCT, true);
+      const hidden = await builder.detail(prisma, teacher, OCT, false);
+      const shown = await builder.detail(
+        prisma,
+        { ...teacher, payrollDetailsVisible: true },
+        OCT,
+        false,
+      );
+
+      expect(staff.warnings.lessonsOnAbsenceDays).toHaveLength(1);
+      expect(hidden.warnings.lessonsOnAbsenceDays).toEqual([]);
+      expect(shown.warnings.lessonsOnAbsenceDays).toHaveLength(1);
+    });
+
+    it('defaults unpaid absence days for old approved snapshots', async () => {
+      mockPrisma.payrollSheet.findUnique.mockResolvedValue({
+        id: 'ps1',
+        teacherId: 't1',
+        month: OCT,
+        status: PayrollStatus.approved,
+        workedDays: null,
+        approvedDays: {
+          normDays: 22,
+          defaultDays: 22,
+          workedDays: 22,
+          override: false,
+        },
+        approvedAt: new Date('2026-11-01T10:00:00Z'),
+        reopenReason: null,
+        lines: [],
+        adjustments: [],
+        payments: [],
+      });
+
+      const detail = await builder.detail(prisma, teacher, OCT, true);
+
+      expect(detail.days.unpaidAbsenceDays).toBe(0);
     });
 
     it('reads absence days of an approved sheet from stored days', async () => {

@@ -506,6 +506,61 @@ describe('PayrollService', () => {
       expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
+    it('snapshots the extra hours line and unpaid absence days', async () => {
+      const days = {
+        normDays: 22,
+        defaultDays: 22,
+        workedDays: 20,
+        unpaidAbsenceDays: 2,
+        override: false,
+      };
+      const meta = {
+        extraHours: [
+          {
+            id: 'eh1',
+            date: '2026-10-12',
+            hours: '2.00',
+            rate: '200.00',
+            amount: '400.00',
+          },
+        ],
+      };
+      mockBuilder.compute.mockResolvedValue({
+        days,
+        lines: [
+          {
+            type: PayrollLineType.extra_hours,
+            sourceType: null,
+            sourceId: null,
+            lessonType: null,
+            date: null,
+            refMonth: null,
+            title: 'Додаткові години: 2 год',
+            amount: dec('400'),
+            meta,
+          },
+        ],
+        warnings: { noRate: 0, lessonsWithoutTerms: 0 },
+        lessons: 0,
+      });
+
+      await service.approve('t1', '2026-10', admin);
+
+      expect(mockPrisma.payrollLine.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            type: PayrollLineType.extra_hours,
+            amount: dec('400'),
+            meta,
+          }) as object,
+        ],
+      });
+      expect(mockPrisma.payrollSheet.update).toHaveBeenCalledWith({
+        where: { id: 'ps1' },
+        data: expect.objectContaining({ approvedDays: days }) as object,
+      });
+    });
+
     it('snapshots computed lines on approval after locking approved sheets', async () => {
       const days = {
         normDays: 22,
