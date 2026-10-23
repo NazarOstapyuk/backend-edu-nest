@@ -235,6 +235,19 @@ describe('FinanceService', () => {
 
       expect(rows.map((r) => r.childId)).toEqual(['payer']);
     });
+
+    it('filters children of one group within the scope', async () => {
+      mockPrisma.child.findMany.mockResolvedValue([]);
+      await service.getBalances({ groupId: 'g-1' }, kgAccountant);
+      expect(mockPrisma.child.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            group: { institutionId: { in: ['inst-k'] } },
+            groupId: 'g-1',
+          },
+        }),
+      );
+    });
   });
 
   describe('scope', () => {

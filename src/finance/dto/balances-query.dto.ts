@@ -1,5 +1,5 @@
 import { FinanceCategory } from '@prisma/client';
-import { IsEnum, IsIn, IsOptional } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsUUID } from 'class-validator';
 
 export class BalancesQueryDto {
   @IsEnum(FinanceCategory)
@@ -13,4 +13,8 @@ export class BalancesQueryDto {
   @IsIn(['true', 'false'])
   @IsOptional()
   hasUnallocated?: 'true' | 'false';
+
+  @IsUUID('4')
+  @IsOptional()
+  groupId?: string;
 }

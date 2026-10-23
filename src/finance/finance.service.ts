@@ -94,7 +94,10 @@ export class FinanceService {
 
   async getBalances(query: BalancesQueryDto, user: AuthenticatedUser) {
     const children = await this.prisma.child.findMany({
-      where: childScopeWhere(scopeIds(user)),
+      where: {
+        ...childScopeWhere(scopeIds(user)),
+        ...(query.groupId ? { groupId: query.groupId } : {}),
+      },
       select: balanceChildSelect,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
