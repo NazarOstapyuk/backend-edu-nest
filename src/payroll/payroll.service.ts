@@ -623,7 +623,7 @@ export class PayrollService {
   }
 
   private async lockTeacher(tx: Tx, teacherId: string) {
-    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${teacherId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${teacherId} FOR NO KEY UPDATE`;
   }
 
   private async lockMonths(tx: Tx, teacherId: string, start: Date, end: Date) {

@@ -1086,7 +1086,7 @@ describe('PayrollService', () => {
           mockPrisma.$queryRaw.mock.calls[0] as [TemplateStringsArray]
         )[0].join('?');
         expect(sql).toContain('"User"');
-        expect(sql).toContain('FOR UPDATE');
+        expect(sql).toContain('FOR NO KEY UPDATE');
         expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
           mockPrisma.teacherAbsence.count.mock.invocationCallOrder[0],
         );
