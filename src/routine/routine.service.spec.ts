@@ -65,6 +65,7 @@ const mockPrisma = {
   routineTemplate: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -82,6 +83,19 @@ const mockPrisma = {
   $transaction: jest.fn(),
 };
 const mockCalendar = { entriesBetween: jest.fn() };
+
+const sqlOf = (call: number) =>
+  (mockPrisma.$queryRaw.mock.calls[call] as [TemplateStringsArray])[0].join(
+    '?',
+  );
+
+const lockedFirst = (read: jest.Mock) => {
+  expect(sqlOf(0)).toContain('FOR UPDATE');
+  expect(sqlOf(0)).toContain('"Group"');
+  expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    read.mock.invocationCallOrder[0],
+  );
+};
 
 type CreatedVersion = {
   validTo: Date | null;
@@ -435,6 +449,7 @@ describe('RoutineService', () => {
         id: 'v1',
         groupId: 'g1',
       });
+      mockPrisma.routineTemplate.findUnique.mockResolvedValue({ id: 'v1' });
 
       await service.updateTemplate(user(), 'v1', {
         note: 'Перекус може зміститися',
@@ -444,6 +459,7 @@ describe('RoutineService', () => {
       expect(mockPrisma.routineTemplate.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'v1', group: {} } }),
       );
+      lockedFirst(mockPrisma.routineTemplate.findUnique);
       expect(mockPrisma.routineTemplateItem.deleteMany).toHaveBeenCalledWith({
         where: { templateId: 'v1' },
       });
@@ -469,6 +485,78 @@ describe('RoutineService', () => {
       await expect(service.deleteTemplate(user(), 'v9')).rejects.toThrow(
         new NotFoundException('Routine template not found'),
       );
+    });
+
+    it('answers 404 when the version is deleted before the lock is taken', async () => {
+      mockPrisma.routineTemplate.findFirst.mockResolvedValue({
+        id: 'v2',
+        groupId: 'g1',
+      });
+      mockPrisma.routineTemplate.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.updateTemplate(user(), 'v2', { items: [] }),
+      ).rejects.toThrow(new NotFoundException('Routine template not found'));
+      expect(mockPrisma.routineTemplateItem.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.routineTemplate.update).not.toHaveBeenCalled();
+    });
+
+    it('hides versions of groups outside the scope from writers', async () => {
+      mockPrisma.routineTemplate.findFirst.mockResolvedValue(null);
+      const scoped = user({ scopeInstitutionIds: ['i2'] });
+
+      await expect(
+        service.updateTemplate(scoped, 'v1', { items: [] }),
+      ).rejects.toThrow(new NotFoundException('Routine template not found'));
+      await expect(service.deleteTemplate(scoped, 'v1')).rejects.toThrow(
+        new NotFoundException('Routine template not found'),
+      );
+      expect(mockPrisma.routineTemplate.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'v1', group: { institutionId: { in: ['i2'] } } },
+        }),
+      );
+      expect(mockPrisma.routineTemplate.update).not.toHaveBeenCalled();
+      expect(mockPrisma.routineTemplate.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to create a version in a group outside the scope', async () => {
+      mockPrisma.group.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createTemplate(user({ scopeInstitutionIds: ['i2'] }), 'g1', {
+          validFrom: '2026-11-01',
+          items: [],
+        }),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+      expect(mockPrisma.group.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'g1', institutionId: { in: ['i2'] } },
+        }),
+      );
+      expect(mockPrisma.routineTemplate.create).not.toHaveBeenCalled();
+    });
+
+    it('deletes the last open version and reopens the previous one', async () => {
+      mockPrisma.routineTemplate.findFirst.mockResolvedValue({
+        id: 'v2',
+        groupId: 'g1',
+      });
+      mockPrisma.routineTemplate.findMany.mockResolvedValue([
+        version('v1', '2026-09-01', '2026-10-31'),
+        version('v2', '2026-11-01', null),
+      ]);
+
+      await service.deleteTemplate(user(), 'v2');
+
+      lockedFirst(mockPrisma.routineTemplate.findMany);
+      expect(mockPrisma.routineTemplate.update).toHaveBeenCalledWith({
+        where: { id: 'v1' },
+        data: { validTo: null },
+      });
+      expect(mockPrisma.routineTemplate.delete).toHaveBeenCalledWith({
+        where: { id: 'v2' },
+      });
     });
 
     it('deletes a version and reopens the previous one', async () => {
@@ -570,6 +658,7 @@ describe('RoutineService', () => {
           },
         }),
       );
+      lockedFirst(mockPrisma.routineTemplate.findMany);
       const data = createdData();
       expect(data).toMatchObject({
         groupId: 'g1',
@@ -595,6 +684,25 @@ describe('RoutineService', () => {
           validFrom: '2026-11-01',
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('hides a source group outside the scope', async () => {
+      mockPrisma.group.findFirst
+        .mockResolvedValueOnce(kgGroup({ institutionId: 'i2' }))
+        .mockResolvedValueOnce(null);
+
+      await expect(
+        service.copy(user({ scopeInstitutionIds: ['i2'] }), 'g1', {
+          sourceGroupId: 'g2',
+          validFrom: '2026-11-01',
+        }),
+      ).rejects.toThrow(new NotFoundException('Group not found'));
+      expect(mockPrisma.group.findFirst).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: { id: 'g2', institutionId: { in: ['i2'] } },
+        }),
+      );
+      expect(mockPrisma.routineTemplate.create).not.toHaveBeenCalled();
     });
   });
 
@@ -642,6 +750,7 @@ describe('RoutineService', () => {
         items: [],
       });
 
+      lockedFirst(mockPrisma.routineDay.findUnique);
       expect(mockPrisma.routineDayItem.deleteMany).toHaveBeenCalledWith({
         where: { dayId: 'day1' },
       });
@@ -655,6 +764,7 @@ describe('RoutineService', () => {
     it('deletes an override and returns the template day', async () => {
       const result = await service.deleteDay(user(), 'g1', '2026-11-03');
 
+      lockedFirst(mockPrisma.routineDay.deleteMany);
       expect(mockPrisma.routineDay.deleteMany).toHaveBeenCalledWith({
         where: { groupId: 'g1', date: d('2026-11-03') },
       });

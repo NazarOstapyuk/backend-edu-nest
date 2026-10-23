@@ -297,6 +297,11 @@ export class RoutineService {
       const template = await this.findTemplate(tx, user, id);
       await this.writableGroup(tx, user, template.groupId);
       await this.lockGroup(tx, template.groupId);
+      const current = await tx.routineTemplate.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!current) throw new NotFoundException('Routine template not found');
       await tx.routineTemplateItem.deleteMany({ where: { templateId: id } });
       const updated = await tx.routineTemplate.update({
         where: { id },
