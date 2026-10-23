@@ -790,6 +790,10 @@ describe('PayrollService', () => {
         extraHourRate: rate ? new Prisma.Decimal(rate) : null,
       },
     ];
+    const sqlAt = (index: number) =>
+      (
+        mockPrisma.$queryRaw.mock.calls[index] as [TemplateStringsArray]
+      )[0].join('?');
     const person = { id: 'a1', firstName: 'А', lastName: 'Б', login: 'admin' };
     const absenceRow = (over: Record<string, unknown> = {}) => ({
       id: 'ab1',
@@ -810,7 +814,6 @@ describe('PayrollService', () => {
       mockPrisma.payrollSheet.createMany.mockResolvedValue({ count: 1 });
       mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(sheet());
       mockPrisma.salaryTerms.findMany.mockResolvedValue(terms('100.00'));
-      mockPrisma.payrollSheet.count.mockResolvedValue(0);
       mockPrisma.teacherAbsence.count.mockResolvedValue(0);
       mockPrisma.teacherAbsence.create.mockResolvedValue(absenceRow());
     });
@@ -843,6 +846,72 @@ describe('PayrollService', () => {
           OCT,
           true,
         );
+      });
+
+      it('locks the sheet before the terms query and the insert', async () => {
+        await service.addExtraHours('t1', '2026-10', { hours: '2' }, admin);
+
+        const lock = mockPrisma.$queryRaw.mock.invocationCallOrder[0];
+        expect(lock).toBeLessThan(
+          mockPrisma.salaryTerms.findMany.mock.invocationCallOrder[0],
+        );
+        expect(lock).toBeLessThan(
+          mockPrisma.payrollExtraHours.create.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('uses the terms version valid on the date, not the latest', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([
+          {
+            validFrom: day('2026-01-01'),
+            validTo: day('2026-10-10'),
+            extraHourRate: null,
+          },
+          {
+            validFrom: day('2026-10-11'),
+            validTo: null,
+            extraHourRate: new Prisma.Decimal('100.00'),
+          },
+        ]);
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { date: '2026-10-05', hours: '1' },
+            admin,
+          ),
+        ).rejects.toThrow('No extra hour rate');
+        await service.addExtraHours(
+          't1',
+          '2026-10',
+          { date: '2026-10-15', hours: '1' },
+          admin,
+        );
+        expect(mockPrisma.payrollExtraHours.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('rejects a date in a gap between versions', async () => {
+        mockPrisma.salaryTerms.findMany.mockResolvedValue([
+          {
+            validFrom: day('2026-01-01'),
+            validTo: day('2026-10-10'),
+            extraHourRate: new Prisma.Decimal('100.00'),
+          },
+          {
+            validFrom: day('2026-10-15'),
+            validTo: null,
+            extraHourRate: new Prisma.Decimal('100.00'),
+          },
+        ]);
+        await expect(
+          service.addExtraHours(
+            't1',
+            '2026-10',
+            { date: '2026-10-12', hours: '1' },
+            admin,
+          ),
+        ).rejects.toThrow('Salary terms not found');
+        expect(mockPrisma.payrollExtraHours.create).not.toHaveBeenCalled();
       });
 
       it('stores a monthly record without a date', async () => {
@@ -1120,7 +1189,21 @@ describe('PayrollService', () => {
       });
 
       it('refuses a period spanning an approved month without inserting', async () => {
-        mockPrisma.payrollSheet.count.mockResolvedValue(1);
+        mockPrisma.payrollSheet.findUniqueOrThrow.mockImplementation(
+          (args: {
+            where: { id?: string; teacherId_month?: { month: Date } };
+          }) => {
+            if (args.where.teacherId_month)
+              return Promise.resolve({
+                id: 'ps-' + args.where.teacherId_month.month.toISOString(),
+              });
+            return Promise.resolve(
+              args.where.id === 'ps-2026-10-01T00:00:00.000Z'
+                ? sheet({ status: PayrollStatus.approved })
+                : sheet(),
+            );
+          },
+        );
         await expect(
           service.addAbsence(
             't1',
@@ -1133,14 +1216,34 @@ describe('PayrollService', () => {
             admin,
           ),
         ).rejects.toThrow('Payroll is approved');
-        expect(mockPrisma.payrollSheet.count).toHaveBeenCalledWith({
-          where: {
-            teacherId: 't1',
-            status: PayrollStatus.approved,
-            month: { gte: day('2026-09-01'), lte: day('2026-10-02') },
-          },
-        });
         expect(mockPrisma.teacherAbsence.create).not.toHaveBeenCalled();
+      });
+
+      it('locks the user then every touched month sheet in ascending order', async () => {
+        await service.addAbsence(
+          't1',
+          {
+            startDate: '2026-09-28',
+            endDate: '2026-11-02',
+            paid: true,
+            reason: 'x',
+          },
+          admin,
+        );
+
+        const months = mockPrisma.payrollSheet.createMany.mock.calls.map(
+          (call: [{ data: { month: Date }[] }]) => call[0].data[0].month,
+        );
+        expect(months).toEqual([
+          day('2026-09-01'),
+          day('2026-10-01'),
+          day('2026-11-01'),
+        ]);
+        expect(sqlAt(0)).toContain('"User"');
+        expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(4);
+        expect(mockPrisma.$queryRaw.mock.invocationCallOrder[3]).toBeLessThan(
+          mockPrisma.teacherAbsence.count.mock.invocationCallOrder[0],
+        );
       });
     });
 
@@ -1166,6 +1269,15 @@ describe('PayrollService', () => {
         );
         expect(result).toHaveLength(1);
         expect(result[0].voidedAt).not.toBeNull();
+      });
+    });
+
+    describe('listAbsences range', () => {
+      it('rejects from after to', async () => {
+        await expect(
+          service.listAbsences('t1', '2026-10-31', '2026-10-01'),
+        ).rejects.toThrow('Invalid period');
+        expect(mockPrisma.teacherAbsence.findMany).not.toHaveBeenCalled();
       });
     });
 
@@ -1215,7 +1327,9 @@ describe('PayrollService', () => {
         mockPrisma.teacherAbsence.findUniqueOrThrow.mockResolvedValue(
           absenceRow(),
         );
-        mockPrisma.payrollSheet.count.mockResolvedValue(1);
+        mockPrisma.payrollSheet.findUniqueOrThrow.mockResolvedValue(
+          sheet({ status: PayrollStatus.approved }),
+        );
         await expect(service.voidAbsence('ab1', 'x', admin)).rejects.toThrow(
           'Payroll is approved',
         );
@@ -1232,6 +1346,8 @@ describe('PayrollService', () => {
         });
 
         const result = await service.setDetailsVisibility('t1', true, admin);
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
 
         expect(result).toEqual({ visible: true });
         expect(mockPrisma.user.update).toHaveBeenCalledWith({

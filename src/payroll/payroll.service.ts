@@ -519,7 +519,7 @@ export class PayrollService {
       throw new BadRequestException('Invalid date range');
     const created = await this.prisma.$transaction(async (tx) => {
       await this.lockTeacher(tx, teacher.id);
-      await this.assertNoApproved(tx, teacher.id, startDate, endDate);
+      await this.lockMonths(tx, teacher.id, startDate, endDate);
       const overlap = await tx.teacherAbsence.count({
         where: {
           teacherId: teacher.id,
@@ -547,6 +547,8 @@ export class PayrollService {
 
   async listAbsences(teacherId: string, from?: string, to?: string) {
     const teacher = await this.builder.teacher(this.prisma, teacherId);
+    if (from && to && parseDay(from).getTime() > parseDay(to).getTime())
+      throw new BadRequestException('Invalid period');
     const rows = await this.prisma.teacherAbsence.findMany({
       where: {
         teacherId: teacher.id,
@@ -571,7 +573,7 @@ export class PayrollService {
         where: { id },
       });
       if (absence.voidedAt) throw new BadRequestException('Absence is voided');
-      await this.assertNoApproved(
+      await this.lockMonths(
         tx,
         found.teacherId,
         absence.startDate,
@@ -602,18 +604,20 @@ export class PayrollService {
     if (!found) throw new NotFoundException('Teacher not found');
     if (found.role !== Role.teacher)
       throw new BadRequestException('User is not a teacher');
-    await this.prisma.user.update({
-      where: { id: teacherId },
-      data: { payrollDetailsVisible: visible },
-    });
-    await this.audit.recordChange(this.prisma, {
-      actorId: user.id,
-      entityType: 'users',
-      entityId: teacherId,
-      action: AuditAction.update,
-      before: { payrollDetailsVisible: found.payrollDetailsVisible },
-      after: { payrollDetailsVisible: visible },
-      fields: ['payrollDetailsVisible'],
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: teacherId },
+        data: { payrollDetailsVisible: visible },
+      });
+      await this.audit.recordChange(tx, {
+        actorId: user.id,
+        entityType: 'users',
+        entityId: teacherId,
+        action: AuditAction.update,
+        before: { payrollDetailsVisible: found.payrollDetailsVisible },
+        after: { payrollDetailsVisible: visible },
+        fields: ['payrollDetailsVisible'],
+      });
     });
     return { visible };
   }
@@ -622,20 +626,18 @@ export class PayrollService {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${teacherId} FOR UPDATE`;
   }
 
-  private async assertNoApproved(
-    tx: Tx,
-    teacherId: string,
-    start: Date,
-    end: Date,
-  ) {
-    const approved = await tx.payrollSheet.count({
-      where: {
-        teacherId,
-        status: PayrollStatus.approved,
-        month: { gte: firstDayOfMonth(start), lte: end },
-      },
-    });
-    if (approved > 0) throw new BadRequestException('Payroll is approved');
+  private async lockMonths(tx: Tx, teacherId: string, start: Date, end: Date) {
+    const last = firstDayOfMonth(end);
+    for (
+      let month = firstDayOfMonth(start);
+      month.getTime() <= last.getTime();
+      month = new Date(
+        Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1),
+      )
+    ) {
+      const sheet = await this.lockSheet(tx, teacherId, month);
+      assertDraft(sheet.status);
+    }
   }
 
   private async target(teacherId: string, monthValue: string) {
