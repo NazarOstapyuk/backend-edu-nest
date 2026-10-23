@@ -210,6 +210,24 @@ export class RoutineService {
     return this.build(group, range.from, range.to);
   }
 
+  groups(user: AuthenticatedUser) {
+    return this.prisma.group.findMany({
+      where: {
+        kind: GroupKind.kindergarten,
+        ...groupScopeWhere(scopeIds(user)),
+        ...(isTimetableManager(user)
+          ? {}
+          : { teachers: { some: { id: user.id } } }),
+      },
+      select: {
+        id: true,
+        name: true,
+        institution: { select: { id: true, name: true } },
+      },
+      orderBy: [{ institution: { name: 'asc' } }, { name: 'asc' }],
+    });
+  }
+
   async templates(user: AuthenticatedUser, id: string) {
     const group = await this.readableGroup(user, id);
     const rows = await this.prisma.routineTemplate.findMany({

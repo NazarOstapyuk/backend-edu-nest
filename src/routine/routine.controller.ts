@@ -32,6 +32,13 @@ export class RoutineController {
 
   @Roles(Role.teacher)
   @Permission(PermissionArea.timetable, PermissionLevel.view)
+  @Get('routine/groups')
+  groups(@CurrentUser() user: AuthenticatedUser) {
+    return this.routine.groups(user);
+  }
+
+  @Roles(Role.teacher)
+  @Permission(PermissionArea.timetable, PermissionLevel.view)
   @Get('groups/:id/routine')
   read(
     @CurrentUser() user: AuthenticatedUser,

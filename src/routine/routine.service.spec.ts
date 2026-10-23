@@ -59,7 +59,7 @@ const version = (
 });
 
 const mockPrisma = {
-  group: { findFirst: jest.fn() },
+  group: { findFirst: jest.fn(), findMany: jest.fn() },
   institution: { findUnique: jest.fn() },
   child: { findFirst: jest.fn(), findUnique: jest.fn() },
   routineTemplate: {
@@ -163,6 +163,26 @@ describe('RoutineService', () => {
         }),
     );
   });
+  describe('groups', () => {
+    it('lists kindergarten groups in scope for a manager', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.groups(user({ scopeInstitutionIds: ['i1'] }));
+      expect(mockPrisma.group.findMany.mock.calls[0][0].where).toEqual({
+        kind: GroupKind.kindergarten,
+        institutionId: { in: ['i1'] },
+      });
+    });
+
+    it('limits a teacher without the permission to own groups', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([]);
+      await service.groups(teacher());
+      expect(mockPrisma.group.findMany.mock.calls[0][0].where).toEqual({
+        kind: GroupKind.kindergarten,
+        teachers: { some: { id: 't1' } },
+      });
+    });
+  });
+
 
   describe('reads', () => {
     it('looks up the group within the scope and answers 404 outside', async () => {
