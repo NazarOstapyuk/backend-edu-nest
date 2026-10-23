@@ -275,6 +275,8 @@ export class UsersService {
       this.prisma.payrollExtraHours.count({ where: payrollRecord }),
       this.prisma.teacherAbsence.count({ where: payrollRecord }),
       this.prisma.backupRun.count({ where: { createdById: id } }),
+      this.prisma.routineTemplate.count({ where: { createdById: id } }),
+      this.prisma.routineDay.count({ where: { createdById: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

@@ -51,6 +51,8 @@ const mockPrisma = {
   lessonMark: { count: jest.fn() },
   mealOrder: { count: jest.fn() },
   backupRun: { count: jest.fn() },
+  routineTemplate: { count: jest.fn() },
+  routineDay: { count: jest.fn() },
   salaryTerms: { count: jest.fn() },
   payrollSheet: { count: jest.fn() },
   payrollAdjustment: { count: jest.fn() },
@@ -499,6 +501,8 @@ describe('UsersService', () => {
       mockPrisma.lessonMark.count.mockResolvedValue(0);
       mockPrisma.mealOrder.count.mockResolvedValue(0);
       mockPrisma.backupRun.count.mockResolvedValue(0);
+      mockPrisma.routineTemplate.count.mockResolvedValue(0);
+      mockPrisma.routineDay.count.mockResolvedValue(0);
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
       mockPrisma.payrollSheet.count.mockResolvedValue(0);
       mockPrisma.payrollAdjustment.count.mockResolvedValue(0);
@@ -671,6 +675,21 @@ describe('UsersService', () => {
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
+
+    it.each(['routineTemplate', 'routineDay'] as const)(
+      'throws BadRequestException when user created %s rows',
+      async (model) => {
+        mockPrisma[model].count.mockResolvedValue(1);
+
+        await expect(service.delete('u1', rootActor)).rejects.toThrow(
+          'Cannot delete: user has financial records, deactivate instead',
+        );
+        expect(mockPrisma[model].count).toHaveBeenCalledWith({
+          where: { createdById: 'u1' },
+        });
+        expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('update role of a teacher with salary terms', () => {
@@ -1188,6 +1207,8 @@ describe('UsersService', () => {
         'lessonMark',
         'mealOrder',
         'backupRun',
+        'routineTemplate',
+        'routineDay',
         'salaryTerms',
         'payrollSheet',
         'payrollAdjustment',

@@ -25,6 +25,8 @@ const mockPrisma = {
   lessonChange: { count: jest.fn() },
   schoolLesson: { count: jest.fn() },
   subgroup: { count: jest.fn() },
+  routineTemplate: { count: jest.fn() },
+  routineDay: { count: jest.fn() },
   bellSchedule: { findUnique: jest.fn() },
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
@@ -107,6 +109,8 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(0);
     mockPrisma.subgroup.count.mockResolvedValue(0);
+    mockPrisma.routineTemplate.count.mockResolvedValue(0);
+    mockPrisma.routineDay.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
@@ -121,11 +125,40 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(1);
     mockPrisma.subgroup.count.mockResolvedValue(0);
+    mockPrisma.routineTemplate.count.mockResolvedValue(0);
+    mockPrisma.routineDay.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
     expect(mockPrisma.group.delete).not.toHaveBeenCalled();
   });
+
+  it.each(['routineTemplate', 'routineDay'] as const)(
+    'refuses to delete a group with %s rows',
+    async (model) => {
+      mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
+      for (const m of [
+        'dailyAttendance',
+        'calendarDay',
+        'timetable',
+        'lessonChange',
+        'schoolLesson',
+        'subgroup',
+        'routineTemplate',
+        'routineDay',
+      ] as const) {
+        mockPrisma[m].count.mockResolvedValue(0);
+      }
+      mockPrisma[model].count.mockResolvedValue(1);
+      await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
+        new BadRequestException('Cannot delete: group has attendance records'),
+      );
+      expect(mockPrisma[model].count).toHaveBeenCalledWith({
+        where: { groupId: 'g1' },
+      });
+      expect(mockPrisma.group.delete).not.toHaveBeenCalled();
+    },
+  );
 
   it('deletes a group without attendance records', async () => {
     mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
@@ -135,6 +168,8 @@ describe('GroupsService', () => {
     mockPrisma.lessonChange.count.mockResolvedValue(0);
     mockPrisma.schoolLesson.count.mockResolvedValue(0);
     mockPrisma.subgroup.count.mockResolvedValue(0);
+    mockPrisma.routineTemplate.count.mockResolvedValue(0);
+    mockPrisma.routineDay.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).resolves.toEqual({
       message: 'Group deleted',
     });
@@ -554,6 +589,8 @@ describe('GroupsService', () => {
         'lessonChange',
         'schoolLesson',
         'subgroup',
+        'routineTemplate',
+        'routineDay',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }

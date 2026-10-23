@@ -283,6 +283,8 @@ export class GroupsService {
       this.prisma.lessonChange.count({ where: { groupId: id } }),
       this.prisma.schoolLesson.count({ where: { groupId: id } }),
       this.prisma.subgroup.count({ where: { groupId: id } }),
+      this.prisma.routineTemplate.count({ where: { groupId: id } }),
+      this.prisma.routineDay.count({ where: { groupId: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
