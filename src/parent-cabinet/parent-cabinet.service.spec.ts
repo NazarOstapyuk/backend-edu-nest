@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import {
   AttendanceStatus,
   FinanceCategory,
+  GroupKind,
   PaymentMethod,
   PaymentStatus,
   Prisma,
@@ -87,6 +88,7 @@ describe('ParentCabinetService', () => {
       group: {
         id: 'g1',
         name: 'Сонечка',
+        kind: GroupKind.kindergarten,
         institution: { id: 'i1', name: 'Садок' },
       },
     };
@@ -97,9 +99,14 @@ describe('ParentCabinetService', () => {
 
     const family = await service.family('parent-1', TODAY);
 
-    expect(family.children[0]).toMatchObject({
-      group: { id: 'g1', name: 'Сонечка' },
-      institution: { id: 'i1', name: 'Садок' },
+    expect(family.children[0].group).toEqual({
+      id: 'g1',
+      name: 'Сонечка',
+      kind: GroupKind.kindergarten,
+    });
+    expect(family.children[0].institution).toEqual({
+      id: 'i1',
+      name: 'Садок',
     });
     expect(family.children[0].group).not.toHaveProperty('institution');
     expect(family.children[1].institution).toBeNull();

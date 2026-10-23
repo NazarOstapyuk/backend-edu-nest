@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AdjustmentType, PaymentStatus } from '@prisma/client';
+import { AdjustmentType, GroupKind, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertOwnChild } from '../common/ownership';
 import {
@@ -45,6 +45,7 @@ const moneyPayment = {
 const groupSelect = {
   id: true,
   name: true,
+  kind: true,
   institution: { select: { id: true, name: true } },
 } as const;
 
@@ -52,12 +53,13 @@ const splitGroup = (
   group: {
     id: string;
     name: string;
+    kind: GroupKind;
     institution: { id: string; name: string };
   } | null,
 ) =>
   group
     ? {
-        group: { id: group.id, name: group.name },
+        group: { id: group.id, name: group.name, kind: group.kind },
         institution: group.institution,
       }
     : { group: null, institution: null };
