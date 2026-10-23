@@ -46,7 +46,12 @@ export class PayrollService {
           { payrollSheets: { some: { month: from } } },
         ],
       },
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        payrollDetailsVisible: true,
+      },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
     const rows: ReturnType<typeof toSummary>[] = [];

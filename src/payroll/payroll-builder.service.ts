@@ -26,16 +26,21 @@ import {
   type LessonSource,
   type LineMeta,
   type SheetDays,
+  absenceWorkingDays,
   computeSheet,
+  monthSegments,
   sumAmounts,
 } from './payroll-calc';
 
 type Db = Prisma.TransactionClient;
 
+type Records = Awaited<ReturnType<PayrollBuilder['records']>>;
+
 export interface TeacherRef {
   id: string;
   firstName: string;
   lastName: string;
+  payrollDetailsVisible: boolean;
 }
 
 const person = { select: { id: true, firstName: true, lastName: true } };
@@ -98,11 +103,22 @@ export class PayrollBuilder {
   async teacher(db: Db, id: string): Promise<TeacherRef> {
     const user = await db.user.findUnique({
       where: { id },
-      select: { id: true, firstName: true, lastName: true, role: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        payrollDetailsVisible: true,
+      },
     });
     if (!user || user.role !== Role.teacher)
       throw new NotFoundException('Teacher not found');
-    return { id: user.id, firstName: user.firstName, lastName: user.lastName };
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      payrollDetailsVisible: user.payrollDetailsVisible,
+    };
   }
 
   async lessons(
@@ -162,15 +178,36 @@ export class PayrollBuilder {
     ];
   }
 
+  async records(db: Db, teacherId: string, month: Date) {
+    const [absences, extraHours] = await Promise.all([
+      db.teacherAbsence.findMany({
+        where: {
+          teacherId,
+          startDate: { lte: lastDayOfMonth(month) },
+          endDate: { gte: month },
+        },
+        include: { createdBy: person },
+        orderBy: [{ startDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      }),
+      db.payrollExtraHours.findMany({
+        where: { teacherId, month },
+        include: { createdBy: person },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+    ]);
+    return { absences, extraHours };
+  }
+
   async compute(
     db: Db,
     teacherId: string,
     month: Date,
     workedDays: number | null,
     adjustments: AdjustmentLike[],
+    loaded?: Records,
   ): Promise<ComputedSheet> {
     const to = lastDayOfMonth(month);
-    const [terms, entries, lessons, approved] = await Promise.all([
+    const [terms, entries, lessons, approved, records] = await Promise.all([
       db.salaryTerms.findMany({
         where: { teacherId },
         include: { rates: true, allowances: true },
@@ -187,6 +224,7 @@ export class PayrollBuilder {
         select: { month: true },
         orderBy: { month: 'asc' },
       }),
+      loaded ?? this.records(db, teacherId, month),
     ]);
     let past: LessonSource[] = [];
     let booked: BookedLine[] = [];
@@ -238,8 +276,14 @@ export class PayrollBuilder {
       past,
       booked,
       adjustments,
-      absences: [],
-      extraHours: [],
+      absences: records.absences,
+      extraHours: records.extraHours.map((record) => ({
+        id: record.id,
+        date: record.date,
+        hours: record.hours,
+        rate: record.rate,
+        voidedAt: record.voidedAt,
+      })),
     });
   }
 
@@ -256,6 +300,7 @@ export class PayrollBuilder {
       lessonsOnAbsenceDays: string[];
     };
     let lessons: number;
+    const records = await this.records(db, teacher.id, month);
     if (sheet?.status === PayrollStatus.approved) {
       lines = sheet.lines.map(storedLine);
       days = (sheet.approvedDays as unknown as SheetDays | null) ?? EMPTY_DAYS;
@@ -274,6 +319,7 @@ export class PayrollBuilder {
         month,
         sheet?.workedDays ?? null,
         sheet?.adjustments ?? [],
+        records,
       );
       lines = computed.lines;
       days = computed.days;
@@ -283,6 +329,67 @@ export class PayrollBuilder {
     const activePayments = (sheet?.payments ?? []).filter(
       (p) => p.voidedAt === null,
     );
+    const showDetails = staff || teacher.payrollDetailsVisible;
+    const extraItems = new Map(
+      lines
+        .flatMap((line) => line.meta?.extraHours ?? [])
+        .map((item) => [item.id, item]),
+    );
+    const extraHours = records.extraHours
+      .filter((record) => staff || record.voidedAt === null)
+      .map((record) => {
+        const used = extraItems.get(record.id);
+        return {
+          id: record.id,
+          date: record.date ? isoDay(record.date) : null,
+          hours: record.hours.toFixed(2),
+          rate: used?.rate ?? null,
+          ownRate: record.rate ? money(record.rate) : null,
+          amount: used?.amount ?? null,
+          comment: record.comment,
+          createdAt: record.createdAt.toISOString(),
+          ...(staff ? { createdBy: record.createdBy } : {}),
+          voidedAt: record.voidedAt?.toISOString() ?? null,
+          voidReason: record.voidReason,
+        };
+      });
+    const visibleAbsences = records.absences.filter(
+      (absence) => staff || absence.voidedAt === null,
+    );
+    let absenceDays = new Map<string, number>();
+    if (showDetails && visibleAbsences.length > 0) {
+      const [terms, entries] = await Promise.all([
+        db.salaryTerms.findMany({
+          where: { teacherId: teacher.id },
+          include: { rates: true, allowances: true },
+          orderBy: { validFrom: 'asc' },
+        }),
+        this.calendar.entriesBetween(month, lastDayOfMonth(month)),
+      ]);
+      const segments = monthSegments(month, terms, entries);
+      absenceDays = new Map(
+        visibleAbsences.map((absence) => [
+          absence.id,
+          absenceWorkingDays(month, segments, absence, entries),
+        ]),
+      );
+    }
+    const absences = visibleAbsences.map((absence) => ({
+      id: absence.id,
+      startDate: isoDay(absence.startDate),
+      endDate: isoDay(absence.endDate),
+      paid: absence.paid,
+      reason: absence.reason,
+      workingDays: absenceDays.get(absence.id) ?? 0,
+      createdAt: absence.createdAt.toISOString(),
+      ...(staff ? { createdBy: absence.createdBy } : {}),
+      voidedAt: absence.voidedAt?.toISOString() ?? null,
+      voidReason: absence.voidReason,
+    }));
+    const daysRest: Omit<SheetDays, 'unpaidAbsenceDays'> & {
+      unpaidAbsenceDays?: number;
+    } = { ...days };
+    delete daysRest.unpaidAbsenceDays;
     const accrued = sumAmounts(lines);
     const paid = sumAmounts(activePayments);
     return {
@@ -291,7 +398,11 @@ export class PayrollBuilder {
       status: sheet?.status ?? PayrollStatus.draft,
       approvedAt: sheet?.approvedAt?.toISOString() ?? null,
       reopenReason: sheet?.reopenReason ?? null,
-      days,
+      days: showDetails ? days : daysRest,
+      ...(staff
+        ? { payrollDetailsVisible: teacher.payrollDetailsVisible }
+        : {}),
+      ...(showDetails ? { extraHours, absences } : {}),
       lines: lines.map(lineView),
       adjustments: (sheet?.adjustments ?? [])
         .filter((a) => staff || a.voidedAt === null)

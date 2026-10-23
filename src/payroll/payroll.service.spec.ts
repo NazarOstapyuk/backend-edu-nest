@@ -138,7 +138,12 @@ describe('PayrollService', () => {
             { payrollSheets: { some: { month: OCT } } },
           ],
         },
-        select: { id: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          payrollDetailsVisible: true,
+        },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       });
       expect(mockBuilder.detail).toHaveBeenCalledWith(
