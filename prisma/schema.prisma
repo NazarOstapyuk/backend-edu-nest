@@ -93,6 +93,13 @@ model User {
   payrollAdjVoided         PayrollAdjustment[]    @relation("PayrollAdjustmentVoidedBy")
   payrollPayCreated        PayrollPayment[]       @relation("PayrollPaymentCreatedBy")
   payrollPayVoided         PayrollPayment[]       @relation("PayrollPaymentVoidedBy")
+  payrollDetailsVisible    Boolean                @default(false)
+  extraHoursTeacher        PayrollExtraHours[]    @relation("PayrollExtraHoursTeacher")
+  extraHoursCreated        PayrollExtraHours[]    @relation("PayrollExtraHoursCreatedBy")
+  extraHoursVoided         PayrollExtraHours[]    @relation("PayrollExtraHoursVoidedBy")
+  teacherAbsences          TeacherAbsence[]       @relation("TeacherAbsenceTeacher")
+  teacherAbsencesCreated   TeacherAbsence[]       @relation("TeacherAbsenceCreatedBy")
+  teacherAbsencesVoided    TeacherAbsence[]       @relation("TeacherAbsenceVoidedBy")
   backupRunsCreated        BackupRun[]            @relation("BackupRunCreatedBy")
   permissions              UserPermission[]
   auditEvents              AuditEvent[]           @relation("AuditEventActor")
@@ -1109,6 +1116,7 @@ enum PayrollLineType {
   lesson
   correction
   adjustment
+  extra_hours
 }
 
 enum PayrollSourceType {
@@ -1127,19 +1135,20 @@ enum PayrollPaymentMethod {
 }
 
 model SalaryTerms {
-  id           String            @id @default(uuid())
-  teacherId    String
-  teacher      User              @relation("SalaryTermsTeacher", fields: [teacherId], references: [id])
-  validFrom    DateTime          @db.Date
-  validTo      DateTime?         @db.Date
-  monthlyRate  Decimal           @db.Decimal(12, 2)
-  calendarKind PayrollCalendar   @default(all)
-  note         String?
-  createdById  String
-  createdBy    User              @relation("SalaryTermsCreatedBy", fields: [createdById], references: [id])
-  createdAt    DateTime          @default(now())
-  rates        SalaryRate[]
-  allowances   SalaryAllowance[]
+  id            String            @id @default(uuid())
+  teacherId     String
+  teacher       User              @relation("SalaryTermsTeacher", fields: [teacherId], references: [id])
+  validFrom     DateTime          @db.Date
+  validTo       DateTime?         @db.Date
+  monthlyRate   Decimal           @db.Decimal(12, 2)
+  calendarKind  PayrollCalendar   @default(all)
+  extraHourRate Decimal?          @db.Decimal(12, 2)
+  note          String?
+  createdById   String
+  createdBy     User              @relation("SalaryTermsCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime          @default(now())
+  rates         SalaryRate[]
+  allowances    SalaryAllowance[]
 
   @@index([teacherId, validFrom])
 }
@@ -1473,4 +1482,42 @@ model UserInstitution {
   institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict)
 
   @@id([userId, institutionId])
+}
+
+model PayrollExtraHours {
+  id          String    @id @default(uuid())
+  teacherId   String
+  teacher     User      @relation("PayrollExtraHoursTeacher", fields: [teacherId], references: [id])
+  month       DateTime  @db.Date
+  date        DateTime? @db.Date
+  hours       Decimal   @db.Decimal(6, 2)
+  comment     String?
+  createdById String
+  createdBy   User      @relation("PayrollExtraHoursCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?     @relation("PayrollExtraHoursVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([teacherId, month])
+}
+
+model TeacherAbsence {
+  id          String    @id @default(uuid())
+  teacherId   String
+  teacher     User      @relation("TeacherAbsenceTeacher", fields: [teacherId], references: [id])
+  startDate   DateTime  @db.Date
+  endDate     DateTime  @db.Date
+  paid        Boolean
+  reason      String
+  createdById String
+  createdBy   User      @relation("TeacherAbsenceCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  voidedAt    DateTime?
+  voidedById  String?
+  voidedBy    User?     @relation("TeacherAbsenceVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason  String?
+
+  @@index([teacherId, startDate])
 }
