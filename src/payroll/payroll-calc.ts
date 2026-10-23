@@ -42,9 +42,25 @@ export interface TermsLike {
   validFrom: Date;
   validTo: Date | null;
   monthlyRate: Decimal;
+  extraHourRate: Decimal | null;
   calendarKind: PayrollCalendar;
   rates: RateLike[];
   allowances: AllowanceLike[];
+}
+
+export interface AbsenceLike {
+  id: string;
+  startDate: Date;
+  endDate: Date;
+  paid: boolean;
+  voidedAt: Date | null;
+}
+
+export interface ExtraHoursLike {
+  id: string;
+  date: Date | null;
+  hours: Decimal;
+  voidedAt: Date | null;
 }
 
 export interface LessonSource {
@@ -78,6 +94,13 @@ export type LineMeta = {
   normDays?: number;
   defaultDays?: number;
   workedDays?: number;
+  extraHours?: {
+    id: string;
+    date: string | null;
+    hours: string;
+    rate: string | null;
+    amount: string;
+  }[];
 };
 
 export interface ComputedLine {
@@ -96,6 +119,7 @@ export type SheetDays = {
   normDays: number;
   defaultDays: number;
   workedDays: number;
+  unpaidAbsenceDays: number;
   override: boolean;
 };
 
@@ -114,12 +138,18 @@ export interface SheetInput {
   past: LessonSource[];
   booked: BookedLine[];
   adjustments: AdjustmentLike[];
+  absences: AbsenceLike[];
+  extraHours: ExtraHoursLike[];
 }
 
 export interface ComputedSheet {
   days: SheetDays;
   lines: ComputedLine[];
-  warnings: { noRate: number; lessonsWithoutTerms: number };
+  warnings: {
+    noRate: number;
+    lessonsWithoutTerms: number;
+    lessonsOnAbsenceDays: string[];
+  };
   lessons: number;
 }
 
@@ -199,16 +229,64 @@ export function monthSegments(
     }));
 }
 
+const isoDay = (day: Date) => day.toISOString().slice(0, 10);
+
+const absenceDayTimes = (
+  month: Date,
+  segments: Segment[],
+  absences: AbsenceLike[],
+  entries: CalendarEntryLike[],
+): Set<number> => {
+  const monthFrom = firstDayOfMonth(month);
+  const monthTo = lastDayOfMonth(month);
+  const counted = new Set<number>();
+  for (const segment of segments) {
+    const { terms } = segment;
+    const group = calendarGroup(terms.calendarKind);
+    const from = maxDay(monthFrom, terms.validFrom);
+    const to = terms.validTo ? minDay(monthTo, terms.validTo) : monthTo;
+    for (const absence of absences) {
+      const start = maxDay(from, absence.startDate);
+      const end = minDay(to, absence.endDate);
+      for (let day = start; time(day) <= time(end); day = addDays(day, 1)) {
+        if (dayInfo(day, group, entries).working) counted.add(time(day));
+      }
+    }
+  }
+  return counted;
+};
+
+export function absenceWorkingDays(
+  month: Date,
+  segments: Segment[],
+  absence: AbsenceLike,
+  entries: CalendarEntryLike[],
+): number {
+  return absenceDayTimes(month, segments, [absence], entries).size;
+}
+
+export function unpaidAbsenceDays(
+  month: Date,
+  segments: Segment[],
+  absences: AbsenceLike[],
+  entries: CalendarEntryLike[],
+): number {
+  const unpaid = absences.filter((a) => !a.paid && a.voidedAt === null);
+  return absenceDayTimes(month, segments, unpaid, entries).size;
+}
+
 export function sheetDays(
   segments: Segment[],
   override: number | null,
+  unpaidDays = 0,
 ): SheetDays {
   const defaultDays = segments.reduce((sum, s) => sum + s.days, 0);
   const normDays = segments.length ? segments[segments.length - 1].norm : 0;
   return {
     normDays,
     defaultDays,
-    workedDays: override ?? defaultDays,
+    workedDays: override ?? Math.max(0, defaultDays - unpaidDays),
+    unpaidAbsenceDays: unpaidDays,
     override: override !== null,
   };
 }
@@ -400,15 +478,83 @@ export function adjustmentLines(adjustments: AdjustmentLike[]): ComputedLine[] {
     );
 }
 
+export function extraHoursLine(
+  month: Date,
+  terms: TermsLike[],
+  records: ExtraHoursLike[],
+): ComputedLine | null {
+  const active = records.filter((r) => r.voidedAt === null);
+  if (active.length === 0) return null;
+  const monthEnd = lastDayOfMonth(month);
+  const last = monthSegments(month, terms, []).at(-1)?.terms ?? null;
+  const monthlyRate = last
+    ? (termsOn(terms, last.validTo ? minDay(monthEnd, last.validTo) : monthEnd)
+        ?.extraHourRate ?? null)
+    : null;
+  let noRate = false;
+  let total = ZERO;
+  let hours = ZERO;
+  const items: NonNullable<LineMeta['extraHours']> = [];
+  for (const record of active) {
+    const rate = record.date
+      ? (termsOn(terms, record.date)?.extraHourRate ?? null)
+      : monthlyRate;
+    if (rate === null) noRate = true;
+    const amount = rate === null ? ZERO : record.hours.mul(rate);
+    total = total.add(amount);
+    hours = hours.add(record.hours);
+    items.push({
+      id: record.id,
+      date: record.date ? isoDay(record.date) : null,
+      hours: record.hours.toFixed(2),
+      rate: rate === null ? null : rate.toFixed(2),
+      amount: round(amount).toFixed(2),
+    });
+  }
+  const label = hours.toDecimalPlaces(2).toFixed().replace('.', ',');
+  const meta: LineMeta = { extraHours: items };
+  if (noRate) meta.noRate = true;
+  return plainLine(
+    PayrollLineType.extra_hours,
+    'Додаткові години: ' + label + ' год',
+    round(total),
+    meta,
+  );
+}
+
+export function lessonsOnAbsenceDays(
+  lessons: LessonSource[],
+  absences: AbsenceLike[],
+): string[] {
+  const active = absences.filter((a) => a.voidedAt === null);
+  const dates = lessons
+    .filter((l) =>
+      active.some(
+        (a) =>
+          time(a.startDate) <= time(l.date) && time(l.date) <= time(a.endDate),
+      ),
+    )
+    .map((l) => isoDay(l.date));
+  return [...new Set(dates)].sort();
+}
+
 export const sumAmounts = (items: { amount: Decimal }[]): Decimal =>
   items.reduce((sum, item) => sum.add(item.amount), ZERO);
 
 export function computeSheet(input: SheetInput): ComputedSheet {
   const segments = monthSegments(input.month, input.terms, input.entries);
-  const days = sheetDays(segments, input.workedDays);
+  const unpaid = unpaidAbsenceDays(
+    input.month,
+    segments,
+    input.absences,
+    input.entries,
+  );
+  const days = sheetDays(segments, input.workedDays, unpaid);
   const lessons = lessonLines(input.lessons, input.terms);
+  const extra = extraHoursLine(input.month, input.terms, input.extraHours);
   const lines = [
     ...baseLines(segments, days),
+    ...(extra ? [extra] : []),
     ...lessons.lines,
     ...correctionLines(input.past, input.booked, input.terms),
     ...adjustmentLines(input.adjustments),
@@ -419,6 +565,7 @@ export function computeSheet(input: SheetInput): ComputedSheet {
     warnings: {
       noRate: lines.filter((l) => l.meta?.noRate).length,
       lessonsWithoutTerms: lessons.withoutTerms,
+      lessonsOnAbsenceDays: lessonsOnAbsenceDays(input.lessons, input.absences),
     },
     lessons: lessons.lines.length,
   };

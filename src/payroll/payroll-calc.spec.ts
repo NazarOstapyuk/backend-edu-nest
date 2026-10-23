@@ -10,13 +10,19 @@ import {
 } from '@prisma/client';
 import type { CalendarEntryLike } from '../attendance/register-calc';
 import {
+  type AbsenceLike,
   type BookedLine,
+  type ExtraHoursLike,
   type LessonSource,
   type TermsLike,
   adjustmentLines,
   baseLines,
   computeSheet,
   correctionLines,
+  absenceWorkingDays,
+  extraHoursLine,
+  lessonsOnAbsenceDays,
+  unpaidAbsenceDays,
   lessonLines,
   monthSegments,
   rateFor,
@@ -47,6 +53,7 @@ const terms = (over: Partial<TermsLike> = {}): TermsLike => ({
   validFrom: day('2026-09-01'),
   validTo: null,
   monthlyRate: dec('22000'),
+  extraHourRate: null,
   calendarKind: PayrollCalendar.all,
   rates: [],
   allowances: [],
@@ -134,6 +141,7 @@ describe('base and allowances', () => {
       normDays: 21,
       defaultDays: 21,
       workedDays: 21,
+      unpaidAbsenceDays: 0,
       override: false,
     });
     expect(amounts(baseLines(segments, days))).toEqual(['22000.00']);
@@ -185,6 +193,7 @@ describe('base and allowances', () => {
       normDays: 22,
       defaultDays: 22,
       workedDays: 7,
+      unpaidAbsenceDays: 0,
       override: true,
     });
     expect(amounts(baseLines(segments, days))).toEqual(['3181.82']);
@@ -413,6 +422,8 @@ describe('computeSheet', () => {
           voidedAt: null,
         },
       ],
+      absences: [],
+      extraHours: [],
     });
     expect(result.lines.map((l) => l.type)).toEqual([
       PayrollLineType.base,
@@ -422,7 +433,11 @@ describe('computeSheet', () => {
     ]);
     expect(sumAmounts(result.lines).toFixed(2)).toBe('22800.00');
     expect(result.lessons).toBe(1);
-    expect(result.warnings).toEqual({ noRate: 0, lessonsWithoutTerms: 0 });
+    expect(result.warnings).toEqual({
+      noRate: 0,
+      lessonsWithoutTerms: 0,
+      lessonsOnAbsenceDays: [],
+    });
     expect(result.days.normDays).toBe(22);
   });
 
@@ -436,14 +451,276 @@ describe('computeSheet', () => {
       past: [],
       booked: [],
       adjustments: [],
+      absences: [],
+      extraHours: [],
     });
     expect(result.lines).toEqual([]);
     expect(result.days).toEqual({
       normDays: 0,
       defaultDays: 0,
       workedDays: 0,
+      unpaidAbsenceDays: 0,
       override: false,
     });
     expect(result.warnings.lessonsWithoutTerms).toBe(1);
+  });
+});
+
+const NOV = day('2026-11-01');
+
+const absence = (
+  id: string,
+  from: string,
+  to: string,
+  over: Partial<AbsenceLike> = {},
+): AbsenceLike => ({
+  id,
+  startDate: day(from),
+  endDate: day(to),
+  paid: false,
+  voidedAt: null,
+  ...over,
+});
+
+const hoursRec = (
+  id: string,
+  date: string | null,
+  hours: string,
+  over: Partial<ExtraHoursLike> = {},
+): ExtraHoursLike => ({
+  id,
+  date: date ? day(date) : null,
+  hours: dec(hours),
+  voidedAt: null,
+  ...over,
+});
+
+const novSheet = (
+  t: TermsLike[],
+  absences: AbsenceLike[],
+  workedDays: number | null = null,
+  entries: CalendarEntryLike[] = [],
+) =>
+  computeSheet({
+    month: NOV,
+    terms: t,
+    entries,
+    workedDays,
+    lessons: [],
+    past: [],
+    booked: [],
+    adjustments: [],
+    absences,
+    extraHours: [],
+  });
+
+describe('unpaid absences', () => {
+  const base = terms({ monthlyRate: dec('20000') });
+
+  it('lowers worked days and the base for an unpaid absence', () => {
+    const result = novSheet(
+      [base],
+      [absence('a1', '2026-11-09', '2026-11-11')],
+    );
+    expect(result.days.defaultDays).toBe(21);
+    expect(result.days.workedDays).toBe(18);
+    expect(result.days.unpaidAbsenceDays).toBe(3);
+    expect(result.lines[0].amount.toFixed(2)).toBe(
+      dec('20000').mul(18).div(21).toFixed(2),
+    );
+  });
+
+  it('ignores paid and voided absences', () => {
+    const result = novSheet(
+      [base],
+      [
+        absence('a1', '2026-11-09', '2026-11-11', { paid: true }),
+        absence('a2', '2026-11-16', '2026-11-17', {
+          voidedAt: day('2026-11-02'),
+        }),
+      ],
+    );
+    expect(result.days.workedDays).toBe(21);
+    expect(result.lines[0].amount.toFixed(2)).toBe('20000.00');
+  });
+
+  it('counts only the days inside the month', () => {
+    const segments = monthSegments(NOV, [base], []);
+    const a = absence('a1', '2026-10-30', '2026-11-03');
+    expect(unpaidAbsenceDays(NOV, segments, [a], [])).toBe(2);
+    expect(absenceWorkingDays(NOV, segments, a, [])).toBe(2);
+  });
+
+  it('skips holidays', () => {
+    const result = novSheet(
+      [base],
+      [absence('a1', '2026-11-09', '2026-11-11')],
+      null,
+      [holiday('2026-11-10')],
+    );
+    expect(result.days.unpaidAbsenceDays).toBe(2);
+    expect(result.days.defaultDays).toBe(20);
+    expect(result.days.workedDays).toBe(18);
+  });
+
+  it('ignores days before the terms start', () => {
+    const late = terms({
+      monthlyRate: dec('20000'),
+      validFrom: day('2026-11-10'),
+    });
+    const result = novSheet(
+      [late],
+      [absence('a1', '2026-11-02', '2026-11-11')],
+    );
+    expect(result.days.unpaidAbsenceDays).toBe(2);
+  });
+
+  it('keeps the override and still reports unpaid days', () => {
+    const result = novSheet(
+      [base],
+      [absence('a1', '2026-11-09', '2026-11-11')],
+      15,
+    );
+    expect(result.days.workedDays).toBe(15);
+    expect(result.days.override).toBe(true);
+    expect(result.days.unpaidAbsenceDays).toBe(3);
+  });
+
+  it('scales allowances like the rate', () => {
+    const withAllowance = terms({
+      monthlyRate: dec('21000'),
+      allowances: [{ name: 'Класне керівництво', amount: dec('2100') }],
+    });
+    const result = novSheet(
+      [withAllowance],
+      [absence('a1', '2026-11-09', '2026-11-11')],
+    );
+    expect(amounts(result.lines)).toEqual(['18000.00', '1800.00']);
+  });
+
+  it('never goes below zero', () => {
+    expect(sheetDays(monthSegments(NOV, [base], []), null, 99).workedDays).toBe(
+      0,
+    );
+  });
+});
+
+describe('extraHoursLine', () => {
+  const priced = terms({ extraHourRate: dec('150') });
+
+  it('returns null without active records', () => {
+    expect(extraHoursLine(NOV, [priced], [])).toBeNull();
+    expect(
+      extraHoursLine(
+        NOV,
+        [priced],
+        [hoursRec('h1', null, '2', { voidedAt: day('2026-11-02') })],
+      ),
+    ).toBeNull();
+  });
+
+  it('sums dated and monthly hours at the rate', () => {
+    const line = extraHoursLine(
+      NOV,
+      [priced],
+      [
+        hoursRec('h1', '2026-11-05', '1.5'),
+        hoursRec('h2', null, '12'),
+        hoursRec('h3', null, '3', { voidedAt: day('2026-11-02') }),
+      ],
+    );
+    expect(line?.type).toBe(PayrollLineType.extra_hours);
+    expect(line?.amount.toFixed(2)).toBe('2025.00');
+    expect(line?.title).toBe('Додаткові години: 13,5 год');
+    expect(line?.meta?.noRate).toBeUndefined();
+    expect(line?.meta?.extraHours).toEqual([
+      {
+        id: 'h1',
+        date: '2026-11-05',
+        hours: '1.50',
+        rate: '150.00',
+        amount: '225.00',
+      },
+      {
+        id: 'h2',
+        date: null,
+        hours: '12.00',
+        rate: '150.00',
+        amount: '1800.00',
+      },
+    ]);
+  });
+
+  it('uses the rate valid on the last day for monthly records', () => {
+    const early = terms({
+      id: 't1',
+      validTo: day('2026-11-15'),
+      extraHourRate: dec('150'),
+    });
+    const later = terms({
+      id: 't2',
+      validFrom: day('2026-11-16'),
+      extraHourRate: dec('200'),
+    });
+    const line = extraHoursLine(
+      NOV,
+      [early, later],
+      [hoursRec('h1', null, '2'), hoursRec('h2', '2026-11-10', '1')],
+    );
+    expect(line?.amount.toFixed(2)).toBe('550.00');
+  });
+
+  it('contributes 0 and flags noRate when there is no rate', () => {
+    const line = extraHoursLine(NOV, [terms()], [hoursRec('h1', null, '2')]);
+    expect(line?.amount.toFixed(2)).toBe('0.00');
+    expect(line?.meta?.noRate).toBe(true);
+    expect(line?.meta?.extraHours?.[0].rate).toBeNull();
+  });
+
+  it('flags noRate when no terms cover the month', () => {
+    const line = extraHoursLine(NOV, [], [hoursRec('h1', '2026-11-05', '2')]);
+    expect(line?.meta?.noRate).toBe(true);
+  });
+});
+
+describe('lessonsOnAbsenceDays', () => {
+  it('returns lesson dates inside active absences', () => {
+    const lessons = [
+      school('l1', '2026-11-10'),
+      school('l2', '2026-11-10'),
+      school('l3', '2026-11-12'),
+    ];
+    expect(
+      lessonsOnAbsenceDays(lessons, [
+        absence('a1', '2026-11-09', '2026-11-11', { paid: true }),
+        absence('a2', '2026-11-12', '2026-11-12', {
+          voidedAt: day('2026-11-02'),
+        }),
+      ]),
+    ).toEqual(['2026-11-10']);
+  });
+});
+
+describe('computeSheet with extra hours and absences', () => {
+  it('adds the extra hours line after base lines and counts its noRate', () => {
+    const result = computeSheet({
+      month: NOV,
+      terms: [terms({ monthlyRate: dec('21000') })],
+      entries: [],
+      workedDays: null,
+      lessons: [school('l1', '2026-11-10')],
+      past: [],
+      booked: [],
+      adjustments: [],
+      absences: [absence('a1', '2026-11-09', '2026-11-11')],
+      extraHours: [hoursRec('h1', null, '2')],
+    });
+    expect(result.lines.map((l) => l.type)).toEqual([
+      PayrollLineType.base,
+      PayrollLineType.extra_hours,
+      PayrollLineType.lesson,
+    ]);
+    expect(result.warnings.noRate).toBe(2);
+    expect(result.warnings.lessonsOnAbsenceDays).toEqual(['2026-11-10']);
   });
 });

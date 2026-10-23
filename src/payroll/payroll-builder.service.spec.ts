@@ -186,7 +186,11 @@ describe('PayrollBuilder', () => {
         sourceId: 'cl1',
       },
     ]);
-    expect(detail.warnings).toEqual({ noRate: 1, lessonsWithoutTerms: 0 });
+    expect(detail.warnings).toEqual({
+      noRate: 1,
+      lessonsWithoutTerms: 0,
+      lessonsOnAbsenceDays: [],
+    });
     expect(detail.lessons).toBe(2);
     expect(detail.totals).toEqual({
       accrued: '22300.00',
@@ -258,7 +262,11 @@ describe('PayrollBuilder', () => {
       override: false,
     });
     expect(detail.lessons).toBe(1);
-    expect(detail.warnings).toEqual({ noRate: 1, lessonsWithoutTerms: 0 });
+    expect(detail.warnings).toEqual({
+      noRate: 1,
+      lessonsWithoutTerms: 0,
+      lessonsOnAbsenceDays: [],
+    });
     expect(detail.totals).toEqual({
       accrued: '1000.00',
       paid: '400.00',

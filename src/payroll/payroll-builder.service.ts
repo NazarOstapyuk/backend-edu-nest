@@ -56,6 +56,7 @@ const EMPTY_DAYS: SheetDays = {
   normDays: 0,
   defaultDays: 0,
   workedDays: 0,
+  unpaidAbsenceDays: 0,
   override: false,
 };
 
@@ -237,6 +238,8 @@ export class PayrollBuilder {
       past,
       booked,
       adjustments,
+      absences: [],
+      extraHours: [],
     });
   }
 
@@ -247,7 +250,11 @@ export class PayrollBuilder {
     });
     let days: SheetDays;
     let lines: ComputedLine[];
-    let warnings: { noRate: number; lessonsWithoutTerms: number };
+    let warnings: {
+      noRate: number;
+      lessonsWithoutTerms: number;
+      lessonsOnAbsenceDays: string[];
+    };
     let lessons: number;
     if (sheet?.status === PayrollStatus.approved) {
       lines = sheet.lines.map(storedLine);
@@ -255,6 +262,7 @@ export class PayrollBuilder {
       warnings = {
         noRate: lines.filter((line) => line.meta?.noRate).length,
         lessonsWithoutTerms: 0,
+        lessonsOnAbsenceDays: [],
       };
       lessons = lines.filter(
         (line) => line.type === PayrollLineType.lesson,
