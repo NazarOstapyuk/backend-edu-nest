@@ -22,6 +22,7 @@ Today this works only by hand: extra hours as a bonus adjustment computed manual
 | Who records | Admins only (payroll `edit`), never the teacher |
 | Extra hours entry | A dated record ("5 листопада — 1,5 год") or a monthly record without a date ("12 год за листопад"); both may be mixed |
 | Fractions | Allowed (0.5, 1.5, 0.25) |
+| Rate per record | A record may set its own hourly rate (for example 300 on a holiday); without it the teacher's default rate applies |
 | Absence entry | One day or a period (3–7 листопада), with a reason and a "paid" checkbox |
 | Unpaid absence | Reduces worked days automatically |
 | Paid absence | Recorded, does not change pay |
@@ -30,7 +31,7 @@ Today this works only by hand: extra hours as a bonus adjustment computed manual
 ## Data model
 
 - `SalaryTerms.extraHourRate Decimal(12,2)?` — null means no extra hours for this version. Versioned with the terms like `monthlyRate` (started versions are never edited; a new version carries the new rate).
-- `PayrollExtraHours`: `id`, `teacherId` (User), `month Date` (first day of the month), `date Date?` (inside `month` when set), `hours Decimal(6,2)` (> 0; ≤ 24 when dated, ≤ 400 for a monthly record), `comment String?`, `createdById`, `createdAt`, `voidedAt/voidedById/voidReason`. Never edited.
+- `PayrollExtraHours`: `id`, `teacherId` (User), `month Date` (first day of the month), `date Date?` (inside `month` when set), `hours Decimal(6,2)` (> 0; ≤ 24 when dated, ≤ 400 for a monthly record), `rate Decimal(12,2)?` (own hourly rate; null = teacher's default), `comment String?`, `createdById`, `createdAt`, `voidedAt/voidedById/voidReason`. Never edited.
 - `TeacherAbsence`: `id`, `teacherId`, `startDate Date`, `endDate Date` (≥ start, ≤ 92 days long), `paid Boolean`, `reason String` (required, ≤ 200), `createdById`, `createdAt`, `voidedAt/voidedById/voidReason`. Never edited. Active absences of one teacher never overlap.
 - `User.payrollDetailsVisible Boolean @default(false)` — the per-teacher cabinet switch.
 - `PayrollLineType` gains `extra_hours`.
@@ -40,7 +41,7 @@ Today this works only by hand: extra hours as a bonus adjustment computed manual
 Pure rules go into `payroll-calc.ts` and are tested without mocks.
 
 - **Worked days.** Today `sheetDays` uses `defaultDays` (working days covered by terms in the month) unless the manual `workedDays` override is set. New: `defaultDays` minus the unpaid absence days, where an unpaid absence day is a day inside an active unpaid absence that is a working day by the terms' calendar (`dayInfo` with the terms' `calendarKind`, the same rule as `defaultDays`). Weekends and holidays inside a period are not counted. Paid absences change nothing. The manual override still wins when set (kept for special cases).
-- **Extra hours line.** One `extra_hours` line per sheet: total active hours of the month × rate. Rate: for a dated record, the `extraHourRate` of the terms valid on that date; for a monthly record, the rate of the terms valid on the last day of the month that the teacher has terms in. Records whose rate is null are refused at creation (see errors), so the line never has a null rate. If rates differ inside the month, the line amount is the sum per record; the line `meta` keeps the per-record breakdown (`{ hours, rate, amount, date | null }[]`).
+- **Extra hours line.** One `extra_hours` line per sheet: total active hours of the month × rate. Rate: the record's own `rate` when set; otherwise for a dated record, the `extraHourRate` of the terms valid on that date; for a monthly record, the rate of the terms valid on the last day of the month that the teacher has terms in. Records whose rate is null are refused at creation (see errors), so the line never has a null rate. If rates differ inside the month, the line amount is the sum per record; the line `meta` keeps the per-record breakdown (`{ hours, rate, amount, date | null }[]`).
 - Approve snapshots the `extra_hours` line and the absence-adjusted `approvedDays` like the other lines. An approved sheet never changes.
 
 ## Rules
@@ -48,7 +49,7 @@ Pure rules go into `payroll-calc.ts` and are tested without mocks.
 - Records belong to the month of their date (dated hours, absence days). A period absence can span months; each month counts only its own days.
 - Creating or voiding extra hours or an absence that touches an approved month → 400 `Payroll is approved` (reopen first). Months in the future: absences may be planned ahead (allowed); extra hours only up to today (400 `Date is in the future`).
 - Absence overlap with another active absence of the teacher → 409 `Absence overlaps another absence`.
-- Extra hours when the terms have no rate → 400 `No extra hour rate`. No terms at all on the date / in the month → 400 `Salary terms not found` (existing message).
+- Extra hours without an own rate when the terms have no rate → 400 `No extra hour rate`. No terms at all on the date / in the month → 400 `Salary terms not found` (existing message).
 - Voiding needs a reason (≤ 200) like adjustments; voiding twice → 400 `Extra hours are voided` / `Absence is voided`.
 - Teacher must have role teacher (existing `User is not a teacher`).
 - Audit: the global middleware already logs the requests; no field-level `recordChange` needed (same as adjustments). The visibility switch is recorded with `recordChange` on users (`payrollDetailsVisible`).
