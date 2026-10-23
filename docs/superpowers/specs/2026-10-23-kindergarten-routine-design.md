@@ -72,6 +72,7 @@ Error messages (English, translated on the frontend): `Routine is for kindergart
 - **Copy.** No source version on `validFrom` → 404 `Routine template not found`; target already has a version starting on that date → 409 `Routine version already starts on this date`; `workingHours` and `note` are copied; source = target → 400 `Cannot copy to the same group`.
 - **Version dates.** `validFrom` cannot be edited (delete and recreate). A version created earlier than an existing later one gets `validTo` = next start − 1. Group row locked `FOR UPDATE` for template create/delete/copy.
 - **Scope.** `X-Institution-Id` narrows the picker and routes via the existing group scope helpers; writes into an inactive institution → 400 `Institution is inactive`.
+- **Group picker.** `GET /routine/groups` lists the kindergarten groups the user may read (scope; teachers without the permission: own groups) as `[{ id, name, institution {id, name} }]`.
 - **Validation.** `HH:MM` 00:00–23:59, end > start (`Invalid time range`, also for day overrides), title trimmed and non-empty, ≤ 60 items per weekday or day.
 
 ## Non-goals
