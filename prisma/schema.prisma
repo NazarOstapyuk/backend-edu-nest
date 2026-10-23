@@ -66,6 +66,8 @@ model User {
   attendancesVoided        LessonAttendance[]     @relation("AttendanceVoidedBy")
   usagesVoided             SessionUsage[]         @relation("UsageVoidedBy")
   dailyMarked              DailyAttendance[]      @relation("DailyMarkedBy")
+  routineTemplatesCreated  RoutineTemplate[]      @relation("RoutineTemplateCreatedBy")
+  routineDaysCreated       RoutineDay[]           @relation("RoutineDayCreatedBy")
   dailyVoided              DailyAttendance[]      @relation("DailyVoidedBy")
   calendarCreated          CalendarDay[]          @relation("CalendarCreatedBy")
   calendarVoided           CalendarDay[]          @relation("CalendarVoidedBy")
@@ -123,6 +125,8 @@ model Group {
   timetables          Timetable[]
   lessonChanges       LessonChange[]
   schoolLessons       SchoolLesson[]
+  routineTemplates    RoutineTemplate[]
+  routineDays         RoutineDay[]
   mealPriceCategoryId String?
   mealPriceCategory   MealPriceCategory? @relation(fields: [mealPriceCategoryId], references: [id], onDelete: Restrict)
   createdAt           DateTime           @default(now())
@@ -1521,4 +1525,58 @@ model TeacherAbsence {
   voidReason  String?
 
   @@index([teacherId, startDate])
+}
+
+model RoutineTemplate {
+  id           String                @id @default(uuid())
+  groupId      String
+  group        Group                 @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  validFrom    DateTime              @db.Date
+  validTo      DateTime?             @db.Date
+  workingHours String?
+  note         String?
+  createdById  String
+  createdBy    User                  @relation("RoutineTemplateCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  items        RoutineTemplateItem[]
+
+  @@unique([groupId, validFrom])
+  @@index([groupId, validFrom])
+}
+
+model RoutineTemplateItem {
+  id         String          @id @default(uuid())
+  templateId String
+  template   RoutineTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  weekday    Int
+  startTime  String
+  endTime    String
+  title      String
+  sortOrder  Int
+}
+
+model RoutineDay {
+  id          String           @id @default(uuid())
+  groupId     String
+  group       Group            @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  date        DateTime         @db.Date
+  note        String?
+  createdById String
+  createdBy   User             @relation("RoutineDayCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  items       RoutineDayItem[]
+
+  @@unique([groupId, date])
+}
+
+model RoutineDayItem {
+  id        String     @id @default(uuid())
+  dayId     String
+  day       RoutineDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  startTime String
+  endTime   String
+  title     String
+  sortOrder Int
 }
