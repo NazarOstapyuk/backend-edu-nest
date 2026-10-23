@@ -491,6 +491,7 @@ const hoursRec = (
   id,
   date: date ? day(date) : null,
   hours: dec(hours),
+  rate: null,
   voidedAt: null,
   ...over,
 });
@@ -668,6 +669,32 @@ describe('extraHoursLine', () => {
       [hoursRec('h1', null, '2'), hoursRec('h2', '2026-11-10', '1')],
     );
     expect(line?.amount.toFixed(2)).toBe('550.00');
+  });
+
+  it('prefers the record rate over the terms rate', () => {
+    const line = extraHoursLine(
+      NOV,
+      [priced],
+      [
+        hoursRec('h1', '2026-11-05', '2', { rate: dec('300') }),
+        hoursRec('h2', null, '4'),
+      ],
+    );
+    expect(line?.amount.toFixed(2)).toBe('1200.00');
+    expect(line?.meta?.extraHours?.map((i) => i.rate)).toEqual([
+      '300.00',
+      '150.00',
+    ]);
+  });
+
+  it('uses the record rate even without terms rate', () => {
+    const line = extraHoursLine(
+      NOV,
+      [terms()],
+      [hoursRec('h1', null, '2', { rate: dec('100') })],
+    );
+    expect(line?.amount.toFixed(2)).toBe('200.00');
+    expect(line?.meta?.noRate).toBeUndefined();
   });
 
   it('contributes 0 and flags noRate when there is no rate', () => {

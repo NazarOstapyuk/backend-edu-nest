@@ -60,6 +60,7 @@ export interface ExtraHoursLike {
   id: string;
   date: Date | null;
   hours: Decimal;
+  rate: Decimal | null;
   voidedAt: Date | null;
 }
 
@@ -496,9 +497,11 @@ export function extraHoursLine(
   let hours = ZERO;
   const items: NonNullable<LineMeta['extraHours']> = [];
   for (const record of active) {
-    const rate = record.date
-      ? (termsOn(terms, record.date)?.extraHourRate ?? null)
-      : monthlyRate;
+    const rate =
+      record.rate ??
+      (record.date
+        ? (termsOn(terms, record.date)?.extraHourRate ?? null)
+        : monthlyRate);
     if (rate === null) noRate = true;
     const amount = rate === null ? ZERO : record.hours.mul(rate);
     total = total.add(amount);
