@@ -12,6 +12,7 @@ import { SubscriptionTypesModule } from './subscription-types/subscription-types
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { FinanceModule } from './finance/finance.module';
 import { TariffsModule } from './tariffs/tariffs.module';
+import { PositionsModule } from './positions/positions.module';
 import { ClassesModule } from './classes/classes.module';
 import { ParentCabinetModule } from './parent-cabinet/parent-cabinet.module';
 import { AttendanceModule } from './attendance/attendance.module';
@@ -42,6 +43,7 @@ import { RoutineModule } from './routine/routine.module';
     SubscriptionsModule,
     FinanceModule,
     TariffsModule,
+    PositionsModule,
     ClassesModule,
     ParentCabinetModule,
     AttendanceModule,
