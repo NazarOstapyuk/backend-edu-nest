@@ -104,6 +104,8 @@ model User {
   teacherAbsencesVoided    TeacherAbsence[]       @relation("TeacherAbsenceVoidedBy")
   backupRunsCreated        BackupRun[]            @relation("BackupRunCreatedBy")
   permissions              UserPermission[]
+  positionId               String?
+  position                 Position?              @relation(fields: [positionId], references: [id], onDelete: Restrict)
   auditEvents              AuditEvent[]           @relation("AuditEventActor")
   auditChanges             AuditChange[]          @relation("AuditChangeActor")
   authEvents               AuthEvent[]            @relation("AuthEventUser")
@@ -1579,4 +1581,24 @@ model RoutineDayItem {
   endTime   String
   title     String
   sortOrder Int
+}
+
+model Position {
+  id          String               @id @default(uuid())
+  name        String               @unique
+  teaching    Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  permissions PositionPermission[]
+  users       User[]
+}
+
+model PositionPermission {
+  id         String          @id @default(uuid())
+  positionId String
+  position   Position       @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  area       PermissionArea
+  level      PermissionLevel
+
+  @@unique([positionId, area])
 }
