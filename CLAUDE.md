@@ -88,7 +88,7 @@ Spec: `docs/superpowers/specs/2026-10-11-finance-design.md`. Per-child ledger in
 
 Spec: `docs/superpowers/specs/2026-10-11-tariffs-design.md`. Code in `src/tariffs/`:
 
-- `Tariff` (unit month/hour/session/package, default billing mode) with dated `TariffPrice` history; a period uses the price effective on its start date.
+- `Tariff` (unit month/hour/session/package, default billing mode) with dated `TariffPrice` history; a period uses the price effective on its start date. `POST /tariffs/:id/prices` for a date that already has a price replaces its amount (existing charges keep their amounts; billed periods change only on recalculation).
 - `Enrollment` (child on a monthly tariff, start/end date, optional own billing mode) with `EnrollmentAdjustment` conditions (`custom_price`, `discount_percent`, `discount_amount`, `pause`); conditions are voided, never edited.
 - `billing-engine.ts` is pure (periods, proration, discounts, pauses); `dates.ts` handles UTC-midnight days and `kyivToday()`. Keep business logic there and test it without mocks.
 - `BilledPeriod` is unique per `(enrollmentId, periodStart)`; billing creates the Part 1 `Charge` (`sourceType = monthly`) and the billed period in one transaction; a unique violation means "already billed".

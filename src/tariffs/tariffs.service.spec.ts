@@ -31,6 +31,7 @@ const mockPrisma = {
   tariffPrice: {
     findUnique: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
     deleteMany: jest.fn(),
   },
   enrollment: { count: jest.fn() },
@@ -335,17 +336,21 @@ describe('TariffsService', () => {
   });
 
   describe('addPrice', () => {
-    it('rejects a second price on the same date', async () => {
+    it('replaces the amount of a price on the same date', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
       mockPrisma.tariffPrice.findUnique.mockResolvedValue({ id: 'p1' });
 
-      await expect(
-        service.addPrice(
-          't1',
-          { price: '17000.00', effectiveFrom: '2026-09-01' },
-          admin,
-        ),
-      ).rejects.toThrow('Price for this date already exists');
+      await service.addPrice(
+        't1',
+        { price: '17000.00', effectiveFrom: '2026-09-01' },
+        admin,
+      );
+
+      expect(mockPrisma.tariffPrice.update).toHaveBeenCalledWith({
+        where: { id: 'p1' },
+        data: { price: '17000.00' },
+      });
+      expect(mockPrisma.tariffPrice.create).not.toHaveBeenCalled();
     });
 
     it('adds a dated price', async () => {

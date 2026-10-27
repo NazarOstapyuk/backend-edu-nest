@@ -252,17 +252,21 @@ export class TariffsService {
     const existing = await this.prisma.tariffPrice.findUnique({
       where: { tariffId_effectiveFrom: { tariffId: id, effectiveFrom } },
     });
-    if (existing)
-      throw new BadRequestException('Price for this date already exists');
-
-    await this.prisma.tariffPrice.create({
-      data: {
-        tariffId: id,
-        price: dto.price,
-        effectiveFrom,
-        createdById: userId,
-      },
-    });
+    if (existing) {
+      await this.prisma.tariffPrice.update({
+        where: { id: existing.id },
+        data: { price: dto.price },
+      });
+    } else {
+      await this.prisma.tariffPrice.create({
+        data: {
+          tariffId: id,
+          price: dto.price,
+          effectiveFrom,
+          createdById: userId,
+        },
+      });
+    }
     const after = await this.get(id, user);
     await this.audit.recordChange(this.prisma, {
       actorId: userId,
