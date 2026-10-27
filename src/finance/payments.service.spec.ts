@@ -293,6 +293,23 @@ describe('PaymentsService', () => {
       expect(mockPrisma.charge.findMany).not.toHaveBeenCalled();
     });
 
+    it('stores an empty reference when none is given', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockPrisma.payment.create.mockResolvedValue(payment());
+
+      await service.create(
+        'child-1',
+        { ...dto, reference: undefined },
+        'u1',
+        fullAdmin,
+      );
+
+      const [[args]] = mockPrisma.payment.create.mock.calls as [
+        [{ data: { reference: string } }],
+      ];
+      expect(args.data.reference).toBe('');
+    });
+
     it('applies given allocations in the same transaction', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.payment.create.mockResolvedValue(payment());

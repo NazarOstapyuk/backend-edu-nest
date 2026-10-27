@@ -64,6 +64,14 @@ describe('paymentsReport', () => {
     expect(r.totals).toMatchObject({ child: 'Разом', amount: '100.30' });
   });
 
+  it('shows only the note when a payment has no reference', () => {
+    const r = paymentsReport(period, [
+      { ...rows[1], reference: '' },
+      { ...rows[0], reference: '' },
+    ]);
+    expect(r.rows.map((x) => x.reference)).toEqual(['аванс', '']);
+  });
+
   it('splits totals by method and category', () => {
     const r = paymentsReport(period, rows);
     expect(r.sheets.map((s) => s.name)).toEqual([

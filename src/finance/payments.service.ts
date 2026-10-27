@@ -39,7 +39,7 @@ export class PaymentsService {
           category: dto.category,
           method: dto.method,
           status: PaymentStatus.confirmed,
-          reference: dto.reference,
+          reference: dto.reference?.trim() ?? '',
           receivedAt: new Date(dto.receivedAt),
           note: dto.note,
           createdById: userId,

@@ -33,9 +33,18 @@ describe('finance DTO text fields', () => {
     expect(await errorProps(CreateChargeDto, validCharge)).toEqual([]);
   });
 
-  it('CreatePaymentDto rejects whitespace-only reference', async () => {
+  it('CreatePaymentDto accepts a missing reference and limits its length', async () => {
     expect(
-      await errorProps(CreatePaymentDto, { ...validPayment, reference: '   ' }),
+      await errorProps(CreatePaymentDto, {
+        ...validPayment,
+        reference: undefined,
+      }),
+    ).toEqual([]);
+    expect(
+      await errorProps(CreatePaymentDto, {
+        ...validPayment,
+        reference: 'x'.repeat(256),
+      }),
     ).toContain('reference');
     expect(await errorProps(CreatePaymentDto, validPayment)).toEqual([]);
   });

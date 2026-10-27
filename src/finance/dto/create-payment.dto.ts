@@ -5,7 +5,6 @@ import {
   IsDateString,
   IsEnum,
   IsIn,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
@@ -23,11 +22,10 @@ export class CreatePaymentDto {
   @IsIn([PaymentMethod.cash, PaymentMethod.bank_transfer, PaymentMethod.card])
   method: PaymentMethod;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  @Matches(/\S/)
   @MaxLength(255)
-  reference: string;
+  reference?: string;
 
   @IsDateString()
   receivedAt: string;

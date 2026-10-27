@@ -211,12 +211,13 @@ export function buildHistory(
 
   for (const payment of payments) {
     const amount = formatMoney(payment.amount);
+    const title = payment.reference || 'Оплата';
     events.push({
       type: 'payment_recorded',
       at: payment.createdAt,
       by: payment.createdBy,
       amount,
-      description: payment.reference,
+      description: title,
       reason: null,
     });
     if (payment.voidedAt) {
@@ -225,12 +226,12 @@ export function buildHistory(
         at: payment.voidedAt,
         by: payment.voidedBy,
         amount,
-        description: payment.reference,
+        description: title,
         reason: payment.voidReason,
       });
     }
     for (const allocation of payment.allocations) {
-      const description = `${payment.reference} → ${allocation.charge.description}`;
+      const description = `${title} → ${allocation.charge.description}`;
       const allocated = formatMoney(allocation.amount);
       events.push({
         type: 'allocation_created',

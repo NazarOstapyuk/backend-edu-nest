@@ -154,7 +154,7 @@ export function paymentsReport(period: PeriodRef, rows: PaymentRow[]): Report {
     category: categoryLabel(p.category),
     method: METHOD_LABELS[p.method],
     amount: formatMoney(p.amount),
-    reference: p.note ? `${p.reference} · ${p.note}` : p.reference,
+    reference: [p.reference, p.note].filter(Boolean).join(' · '),
   }));
   return {
     title: 'Оплати',
