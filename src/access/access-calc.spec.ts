@@ -10,6 +10,7 @@ import {
   coversUser,
   grantDenial,
   hasPermission,
+  holdsAll,
   levelSatisfies,
   baseScope,
   effectiveScope,
@@ -357,5 +358,33 @@ describe('coversUser', () => {
     expect(coversUser(granter, { ...base, institutionIds: ['b', 'c'] })).toBe(
       false,
     );
+  });
+});
+
+describe('holdsAll', () => {
+  it('passes root for any map and parents for none', () => {
+    expect(holdsAll(user(Role.root), { finance: PermissionLevel.edit })).toBe(
+      true,
+    );
+    expect(
+      holdsAll(user(Role.parent, allPermissions(PermissionLevel.edit)), {
+        finance: PermissionLevel.view,
+      }),
+    ).toBe(false);
+  });
+
+  it('requires every area at the level', () => {
+    const admin = user(Role.admin, { finance: PermissionLevel.edit });
+    expect(holdsAll(admin, { finance: PermissionLevel.view })).toBe(true);
+    expect(
+      holdsAll(admin, {
+        finance: PermissionLevel.edit,
+        users: PermissionLevel.view,
+      }),
+    ).toBe(false);
+  });
+
+  it('holds an empty map', () => {
+    expect(holdsAll(user(Role.admin), {})).toBe(true);
   });
 });

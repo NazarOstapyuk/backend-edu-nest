@@ -144,3 +144,11 @@ export function coversUser(
     );
   });
 }
+
+export function holdsAll(actor: AccessUser, map: PermissionMap): boolean {
+  if (actor.role === Role.root) return true;
+  if (actor.role === Role.parent) return false;
+  return Object.entries(map).every(([area, level]) =>
+    levelSatisfies(actor.permissions[area as PermissionArea], level),
+  );
+}

@@ -414,12 +414,13 @@ describe('AuthService', () => {
         id: 'r1',
         role: 'root',
         accessScope: 'all',
-        permissions: [],
+        position: null,
         institutions: [],
       });
 
       const profile = await service.getProfile('r1');
 
+      expect(profile.position).toBeNull();
       expect(profile.permissions.payroll).toBe('edit');
       expect(profile.permissions.settings).toBe('edit');
     });
@@ -429,14 +430,25 @@ describe('AuthService', () => {
         id: 'a1',
         role: 'admin',
         accessScope: 'institutions',
-        permissions: [
-          { area: 'finance', level: 'view' },
-          { area: 'children', level: 'edit' },
-        ],
+        position: {
+          id: 'p1',
+          name: 'Manager',
+          teaching: false,
+          permissions: [
+            { area: 'finance', level: 'view' },
+            { area: 'children', level: 'edit' },
+          ],
+        },
         institutions: [{ institutionId: 'inst-k' }],
       });
 
       const profile = await service.getProfile('a1');
+
+      expect(profile.position).toEqual({
+        id: 'p1',
+        name: 'Manager',
+        teaching: false,
+      });
 
       expect(profile.permissions).toEqual({
         finance: 'view',
@@ -473,7 +485,7 @@ describe('AuthService', () => {
         id: 'u1',
         role: 'parent',
         phone: '+380671234567',
-        permissions: [],
+        position: null,
         institutions: [],
       });
       mockPrisma.user.update.mockResolvedValue({});

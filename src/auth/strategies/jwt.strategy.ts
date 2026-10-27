@@ -16,6 +16,7 @@ import {
 import { OUTSIDE_SCOPE } from '../../access/scope';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.type';
 import { findInstitution } from '../../institutions/institution-checks';
+import { positionSelect } from '../../positions/position-select';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const selectedInstitution = (req: Request): string | null => {
@@ -53,7 +54,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: {
-        permissions: { select: { area: true, level: true } },
+        position: positionSelect,
         institutions: { select: { institutionId: true } },
       },
     });
@@ -75,11 +76,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: user.id,
       role: user.role,
       login: user.login,
+      positionId: user.positionId,
       mustChangePassword: user.mustChangePassword,
       accessScope: user.accessScope,
       institutionIds,
       scopeInstitutionIds: scope,
-      permissions: toPermissionMap(user.permissions),
+      permissions: toPermissionMap(user.position?.permissions ?? []),
     };
   }
 }

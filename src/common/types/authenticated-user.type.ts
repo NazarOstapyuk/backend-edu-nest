@@ -5,6 +5,7 @@ export type AuthenticatedUser = {
   id: string;
   role: Role;
   login: string;
+  positionId: string | null;
   mustChangePassword: boolean;
   accessScope: AccessScope;
   institutionIds: string[];

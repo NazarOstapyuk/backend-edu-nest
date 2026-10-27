@@ -2,6 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { positionSelect } from '../../positions/position-select';
 import { JwtStrategy } from './jwt.strategy';
 
 describe('JwtStrategy', () => {
@@ -28,7 +29,13 @@ describe('JwtStrategy', () => {
     isActive: true,
     mustChangePassword: false,
     accessScope: 'institutions',
-    permissions: [{ area: 'finance', level: 'view' }],
+    positionId: 'pos1',
+    position: {
+      id: 'pos1',
+      name: 'Accountant',
+      teaching: false,
+      permissions: [{ area: 'finance', level: 'view' }],
+    },
     institutions: [{ institutionId: 'inst-k' }, { institutionId: 'inst-s' }],
     ...overrides,
   });
@@ -50,7 +57,7 @@ describe('JwtStrategy', () => {
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
       where: { id: 'u1' },
       include: {
-        permissions: { select: { area: true, level: true } },
+        position: positionSelect,
         institutions: { select: { institutionId: true } },
       },
     });
@@ -68,6 +75,41 @@ describe('JwtStrategy', () => {
     expect(user.scopeInstitutionIds).toEqual(['inst-k', 'inst-s']);
     expect(user.permissions).toEqual({ finance: 'view' });
     expect(prisma.institution.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('reads permissions from the position', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      dbUser({
+        position: {
+          id: 'pos1',
+          name: 'Boss',
+          teaching: false,
+          permissions: [{ area: 'finance', level: 'edit' }],
+        },
+      }),
+    );
+
+    const user = await strategy.validate(request(), {
+      sub: 'u1',
+      role: 'admin',
+    });
+
+    expect(user.permissions).toEqual({ finance: 'edit' });
+    expect(user.positionId).toBe('pos1');
+  });
+
+  it('gives no permissions without a position', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      dbUser({ positionId: null, position: null }),
+    );
+
+    const user = await strategy.validate(request(), {
+      sub: 'u1',
+      role: 'admin',
+    });
+
+    expect(user.permissions).toEqual({});
+    expect(user.positionId).toBeNull();
   });
 
   it('treats an empty or repeated header as absent', async () => {

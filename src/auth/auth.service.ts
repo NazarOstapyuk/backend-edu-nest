@@ -19,6 +19,7 @@ import type { StringValue } from 'ms';
 import { JwtService } from '@nestjs/jwt';
 import { Request, Response } from 'express';
 import * as bcrypt from 'bcryptjs';
+import { positionRef, positionSelect } from '../positions/position-select';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { RequestMeta } from '../audit/request-meta';
@@ -164,7 +165,7 @@ export class AuthService {
     email: true,
     mustChangePassword: true,
     accessScope: true,
-    permissions: { select: { area: true, level: true } },
+    position: positionSelect,
     institutions: { select: { institutionId: true } },
   } as const;
 
@@ -180,18 +181,24 @@ export class AuthService {
   private toProfile<
     T extends {
       role: Role;
-      permissions: { area: PermissionArea; level: PermissionLevel }[];
+      position: {
+        id: string;
+        name: string;
+        teaching: boolean;
+        permissions: { area: PermissionArea; level: PermissionLevel }[];
+      } | null;
       institutions: { institutionId: string }[];
     },
   >(user: T) {
-    const { permissions, institutions, ...profile } = user;
+    const { position, institutions, ...profile } = user;
     return {
       ...profile,
+      position: positionRef(position),
       institutionIds: institutions.map((row) => row.institutionId),
       permissions:
         user.role === Role.root
           ? allPermissions(PermissionLevel.edit)
-          : toPermissionMap(permissions),
+          : toPermissionMap(position?.permissions ?? []),
     };
   }
 
