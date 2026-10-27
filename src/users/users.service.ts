@@ -84,6 +84,7 @@ const USER_FIELDS = [
   'isActive',
   'accessScope',
   'institutionIds',
+  'positionId',
   'position',
   'password',
 ] as const;
@@ -115,6 +116,7 @@ const userAudit = (
   isActive: user.isActive,
   accessScope: user.accessScope,
   institutionIds: idsOf(user),
+  positionId: user.position?.id ?? null,
   position: user.position?.name ?? null,
   password: passwordChanged ? 'змінено' : null,
 });
@@ -367,55 +369,66 @@ export class UsersService {
     return { message: 'User deleted' };
   }
 
-  async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
-    const user = await this.prisma.user.findUnique({
+  private async lockUser(tx: Prisma.TransactionClient, id: string) {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${id} FOR UPDATE`;
+    const user = await tx.user.findUnique({
       where: { id },
       include: userInclude,
     });
     if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
     if (dto.role && dto.positionId)
       throw new BadRequestException('Access applies to staff only');
-    const changesPosition =
-      !!dto.positionId && dto.positionId !== user.positionId;
-    const becomesParent = dto.role === Role.parent && user.role !== Role.parent;
-    if (actor.id === id && (changesPosition || becomesParent))
-      throw new ForbiddenException('Cannot change own access');
-    if (actor.id === id && dto.isActive === false)
-      throw new ForbiddenException('Cannot change own access');
-    if (user.role === Role.root && (changesPosition || becomesParent))
-      throw new ForbiddenException('Root access cannot be changed');
-    this.assertManageable(actor, user);
-
-    if (dto.login && dto.login !== user.login) {
-      const existing = await this.prisma.user.findUnique({
-        where: { login: dto.login },
-      });
-      if (existing) throw new ConflictException('Login already taken');
-    }
-
-    const nextIsParent =
-      becomesParent || (user.role === Role.parent && !changesPosition);
-    const clearsPhone = dto.phone === null;
-    const nextPhone = dto.phone !== undefined ? dto.phone : user.phone;
-    if (nextIsParent && !nextPhone && (clearsPhone || becomesParent)) {
-      throw new BadRequestException('Phone is required for parents');
-    }
-
-    const data: Prisma.UserUncheckedUpdateInput = {};
-    if (dto.login !== undefined) data.login = dto.login;
-    if (dto.password) {
-      data.password = await bcrypt.hash(dto.password, 10);
-      data.mustChangePassword = true;
-      data.refreshToken = null;
-    }
-    if (dto.middleName !== undefined) data.middleName = dto.middleName;
-    if (dto.phone !== undefined) data.phone = dto.phone;
-    if (dto.email !== undefined) data.email = dto.email;
-    if (dto.firstName !== undefined) data.firstName = dto.firstName;
-    if (dto.lastName !== undefined) data.lastName = dto.lastName;
-    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    const passwordHash = dto.password
+      ? await bcrypt.hash(dto.password, 10)
+      : null;
 
     return this.prisma.$transaction(async (tx) => {
+      const user = await this.lockUser(tx, id);
+      const changesPosition =
+        !!dto.positionId && dto.positionId !== user.positionId;
+      const becomesParent =
+        dto.role === Role.parent && user.role !== Role.parent;
+      if (actor.id === id && (changesPosition || becomesParent))
+        throw new ForbiddenException('Cannot change own access');
+      if (actor.id === id && dto.isActive === false)
+        throw new ForbiddenException('Cannot change own access');
+      if (user.role === Role.root && (changesPosition || becomesParent))
+        throw new ForbiddenException('Root access cannot be changed');
+      this.assertManageable(actor, user);
+
+      if (dto.login && dto.login !== user.login) {
+        const existing = await tx.user.findUnique({
+          where: { login: dto.login },
+        });
+        if (existing) throw new ConflictException('Login already taken');
+      }
+
+      const nextIsParent =
+        becomesParent || (user.role === Role.parent && !changesPosition);
+      const clearsPhone = dto.phone === null;
+      const nextPhone = dto.phone !== undefined ? dto.phone : user.phone;
+      if (nextIsParent && !nextPhone && (clearsPhone || becomesParent)) {
+        throw new BadRequestException('Phone is required for parents');
+      }
+
+      const data: Prisma.UserUncheckedUpdateInput = {};
+      if (dto.login !== undefined) data.login = dto.login;
+      if (passwordHash) {
+        data.password = passwordHash;
+        data.mustChangePassword = true;
+        data.refreshToken = null;
+      }
+      if (dto.middleName !== undefined) data.middleName = dto.middleName;
+      if (dto.phone !== undefined) data.phone = dto.phone;
+      if (dto.email !== undefined) data.email = dto.email;
+      if (dto.firstName !== undefined) data.firstName = dto.firstName;
+      if (dto.lastName !== undefined) data.lastName = dto.lastName;
+      if (dto.isActive !== undefined) data.isActive = dto.isActive;
+
       let nextRole: Role = user.role;
       if (becomesParent) {
         nextRole = Role.parent;
@@ -466,23 +479,19 @@ export class UsersService {
   }
 
   async setAccess(id: string, dto: UpdateAccessDto, actor: AuthenticatedUser) {
-    const target = await this.prisma.user.findUnique({
-      where: { id },
-      include: userInclude,
-    });
-    if (!target) throw new NotFoundException('User not found');
-    const targetIds = idsOf(target);
     const requestedIds =
       dto.accessScope === AccessScope.institutions
         ? [...new Set(dto.institutionIds ?? [])].sort()
         : [];
-    const current = {
-      role: target.role,
-      accessScope: target.accessScope,
-      institutionIds: targetIds,
-      permissions: toPermissionMap(permissionsOf(target)),
-    };
     return this.prisma.$transaction(async (tx) => {
+      const target = await this.lockUser(tx, id);
+      const targetIds = idsOf(target);
+      const current = {
+        role: target.role,
+        accessScope: target.accessScope,
+        institutionIds: targetIds,
+        permissions: toPermissionMap(permissionsOf(target)),
+      };
       const position = await this.lockPosition(tx, dto.positionId);
       const permissions = toPermissionMap(position.permissions);
       const denial = grantDenial(
@@ -546,7 +555,13 @@ export class UsersService {
         action: AuditAction.update,
         before: userAudit(target),
         after: userAudit(updated),
-        fields: ['role', 'accessScope', 'institutionIds', 'position'],
+        fields: [
+          'role',
+          'accessScope',
+          'institutionIds',
+          'positionId',
+          'position',
+        ],
       });
       return toUserView(updated);
     });

@@ -447,6 +447,32 @@ describe('UsersService', () => {
       });
     });
 
+    it('locks the user row before the position row', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...parent,
+        role: Role.admin,
+        positionId: 'pos-acc',
+        position: accountantPosition,
+      });
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
+
+      await service.update('p1', { positionId: 'pos-teach' }, adminActor);
+
+      const order = mockPrisma.$queryRaw.mock.invocationCallOrder;
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(
+        (mockPrisma.$queryRaw.mock.calls[0] as [TemplateStringsArray])[0].join(
+          '',
+        ),
+      ).toContain('"User"');
+      expect(
+        (mockPrisma.$queryRaw.mock.calls[1] as [TemplateStringsArray])[0].join(
+          '',
+        ),
+      ).toContain('"Position"');
+      expect(order[0]).toBeLessThan(order[1]);
+    });
+
     it('refuses a position together with role parent', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(teacher);
       await expect(
@@ -1364,6 +1390,7 @@ describe('UsersService', () => {
       expect(input.after.position).toBe('Бухгалтер');
       expect(input.after.password).toBeNull();
       expect(input.fields).toContain('position');
+      expect(input.fields).toContain('positionId');
       expect(input.fields).not.toContain('permissions');
       expect(JSON.stringify(mockAudit.recordChange.mock.calls)).not.toContain(
         'secret99',
@@ -1519,10 +1546,12 @@ describe('UsersService', () => {
         'role',
         'accessScope',
         'institutionIds',
+        'positionId',
         'position',
       ]);
       expect(input.before.position).toBeNull();
       expect(input.after.position).toBe('Бухгалтер');
+      expect(input.after).toMatchObject({ positionId: 'pos-acc' });
     });
   });
 });
