@@ -23,10 +23,11 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
   },
-  userPermission: { deleteMany: jest.fn(), createMany: jest.fn() },
+  position: { findUnique: jest.fn() },
   userInstitution: { deleteMany: jest.fn(), createMany: jest.fn() },
   institution: { findUnique: jest.fn() },
   $transaction: jest.fn(),
+  $queryRaw: jest.fn(),
   charge: { count: jest.fn() },
   payment: { count: jest.fn() },
   allocation: { count: jest.fn() },
@@ -75,6 +76,7 @@ const actorOf = (
   accessScope: AccessScope.all,
   institutionIds: [] as string[],
   scopeInstitutionIds: null as string[] | null,
+  positionId: null as string | null,
   permissions,
 });
 const rootActor = actorOf(Role.root);
@@ -84,11 +86,43 @@ const adminActor = actorOf(Role.admin, {
 });
 const teacherActor = actorOf(Role.teacher, { users: PermissionLevel.edit });
 
+const teachingPosition = {
+  id: 'pos-teach',
+  name: 'Педагог',
+  teaching: true,
+  permissions: [] as { area: PermissionArea; level: PermissionLevel }[],
+};
+const accountantPosition = {
+  id: 'pos-acc',
+  name: 'Бухгалтер',
+  teaching: false,
+  permissions: [{ area: PermissionArea.finance, level: PermissionLevel.view }],
+};
+const payrollPosition = {
+  id: 'pos-pay',
+  name: 'Зарплата',
+  teaching: false,
+  permissions: [{ area: PermissionArea.payroll, level: PermissionLevel.edit }],
+};
+
+const dataOf = (mock: jest.Mock) =>
+  (mock.mock.calls[0] as [{ data: Record<string, unknown> }])[0].data;
+
+const zeroSalaryRecords = () => {
+  mockPrisma.salaryTerms.count.mockResolvedValue(0);
+  mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+  mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+};
+
 describe('UsersService', () => {
   let service: UsersService;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    mockPrisma.$transaction.mockImplementation(
+      (fn: (tx: typeof mockPrisma) => Promise<unknown>) => fn(mockPrisma),
+    );
+    mockPrisma.$queryRaw.mockResolvedValue([]);
     const module = await Test.createTestingModule({
       providers: [
         UsersService,
@@ -113,31 +147,143 @@ describe('UsersService', () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'existing' });
       await expect(
         service.create(
-          { login: 'taken', password: 'pass123', role: Role.teacher },
+          { login: 'taken', password: 'pass123', positionId: 'pos-teach' },
           adminActor,
         ),
       ).rejects.toThrow(ConflictException);
     });
 
-    it('creates user and returns without password and refreshToken', async () => {
+    it('requires a position for staff', async () => {
+      await expect(
+        service.create({ login: 'n', password: 'pass123' }, adminActor),
+      ).rejects.toThrow(new BadRequestException('Position is required'));
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a role together with a position', async () => {
+      await expect(
+        service.create(
+          {
+            login: 'r2',
+            password: 'pass123',
+            role: Role.root,
+            positionId: 'pos-acc',
+          },
+          rootActor,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('Access applies to staff only'),
+      );
+      await expect(
+        service.create(
+          {
+            login: 'mom',
+            password: 'pass123',
+            role: Role.parent,
+            phone: '+380671234567',
+            positionId: 'pos-acc',
+          },
+          adminActor,
+        ),
+      ).rejects.toThrow('Access applies to staff only');
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a teacher from a teaching position', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
       mockPrisma.user.create.mockResolvedValue({
         id: 'new-id',
         login: 'newuser',
         role: Role.teacher,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        password: 'hashed',
-        refreshToken: null,
+        positionId: 'pos-teach',
+        position: teachingPosition,
+        institutions: [],
       });
+
       const result = await service.create(
-        { login: 'newuser', password: 'pass123', role: Role.teacher },
+        { login: 'newuser', password: 'pass123', positionId: 'pos-teach' },
         adminActor,
       );
-      expect(result).not.toHaveProperty('password');
-      expect(result).not.toHaveProperty('refreshToken');
-      expect(result).toHaveProperty('id', 'new-id');
+
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(mockPrisma.position.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'pos-teach' } }),
+      );
+      expect(dataOf(mockPrisma.user.create)).toMatchObject({
+        role: Role.teacher,
+        positionId: 'pos-teach',
+        mustChangePassword: false,
+      });
+      const call = mockPrisma.user.create.mock.calls[0] as [
+        { omit: Record<string, boolean> },
+      ];
+      expect(call[0].omit).toEqual({ password: true, refreshToken: true });
+      expect(result).toMatchObject({
+        id: 'new-id',
+        position: { id: 'pos-teach', name: 'Педагог', teaching: true },
+        permissions: [],
+        institutionIds: [],
+      });
+    });
+
+    it('creates an admin from a non-teaching position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'a1',
+        position: accountantPosition,
+      });
+
+      const result = await service.create(
+        { login: 'acc', password: 'pass123', positionId: 'pos-acc' },
+        adminActor,
+      );
+
+      expect(dataOf(mockPrisma.user.create)).toMatchObject({
+        role: Role.admin,
+        positionId: 'pos-acc',
+      });
+      expect(result.permissions).toEqual([
+        { area: PermissionArea.finance, level: PermissionLevel.view },
+      ]);
+    });
+
+    it('answers 404 for an unknown position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+      await expect(
+        service.create(
+          { login: 'n', password: 'pass123', positionId: 'pos-x' },
+          adminActor,
+        ),
+      ).rejects.toThrow('Position not found');
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a non-root actor assigning a position with an area they lack', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(payrollPosition);
+      await expect(
+        service.create(
+          { login: 'n', password: 'pass123', positionId: 'pos-pay' },
+          adminActor,
+        ),
+      ).rejects.toThrow(
+        new ForbiddenException('Cannot grant more than you have'),
+      );
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('lets root assign any position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(payrollPosition);
+      mockPrisma.user.create.mockResolvedValue({ id: 'n' });
+      await service.create(
+        { login: 'n', password: 'pass123', positionId: 'pos-pay' },
+        rootActor,
+      );
+      expect(mockPrisma.user.create).toHaveBeenCalled();
     });
 
     it('requires a phone for parents', async () => {
@@ -159,11 +305,7 @@ describe('UsersService', () => {
 
     it('creates a parent who must change the password', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({
-        id: 'p1',
-        password: 'h',
-        refreshToken: null,
-      });
+      mockPrisma.user.create.mockResolvedValue({ id: 'p1' });
 
       await service.create(
         {
@@ -179,38 +321,57 @@ describe('UsersService', () => {
         adminActor,
       );
 
-      const data = (
-        mockPrisma.user.create.mock.calls[0] as [
-          { data: Record<string, unknown> },
-        ]
-      )[0].data;
-      expect(data).toMatchObject({
+      expect(dataOf(mockPrisma.user.create)).toMatchObject({
         role: Role.parent,
+        positionId: null,
         middleName: 'Ivanivna',
         phone: '+380671234567',
         email: 'mom@example.com',
         mustChangePassword: true,
       });
+      expect(mockPrisma.position.findUnique).not.toHaveBeenCalled();
     });
 
-    it('allows root to create any role including root', async () => {
+    it('allows root to create root', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({
-        id: 'id2',
-        login: 'root2',
+      mockPrisma.user.create.mockResolvedValue({ id: 'id2', role: Role.root });
+      await service.create(
+        { login: 'root2', password: 'pass123', role: Role.root },
+        rootActor,
+      );
+      expect(dataOf(mockPrisma.user.create)).toMatchObject({
         role: Role.root,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        password: 'hashed',
-        refreshToken: null,
+        positionId: null,
       });
-      await expect(
-        service.create(
-          { login: 'root2', password: 'pass123', role: Role.root },
-          rootActor,
-        ),
-      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('findAll', () => {
+    it('maps the position and its permissions', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: 'u1',
+          role: Role.admin,
+          positionId: 'pos-acc',
+          position: accountantPosition,
+          institutions: [{ institutionId: 'b' }, { institutionId: 'a' }],
+        },
+        { id: 'u2', role: Role.parent, positionId: null, position: null },
+      ]);
+
+      const rows = await service.findAll();
+
+      expect(rows[0]).toEqual({
+        id: 'u1',
+        role: Role.admin,
+        positionId: 'pos-acc',
+        position: { id: 'pos-acc', name: 'Бухгалтер', teaching: false },
+        permissions: [
+          { area: PermissionArea.finance, level: PermissionLevel.view },
+        ],
+        institutionIds: ['a', 'b'],
+      });
+      expect(rows[1]).toMatchObject({ position: null, permissions: [] });
     });
   });
 
@@ -220,16 +381,19 @@ describe('UsersService', () => {
       login: 'mom',
       role: Role.parent,
       accessScope: AccessScope.all,
-      permissions: [],
+      positionId: null,
+      position: null,
       phone: '+380671234567',
+    };
+    const teacher = {
+      ...parent,
+      role: Role.teacher,
+      positionId: 'pos-teach',
+      position: teachingPosition,
     };
 
     beforeEach(() => {
-      mockPrisma.user.update.mockResolvedValue({
-        id: 'p1',
-        password: 'h',
-        refreshToken: null,
-      });
+      mockPrisma.user.update.mockResolvedValue({ id: 'p1' });
     });
 
     it('forces a password change and drops sessions on admin reset', async () => {
@@ -237,11 +401,7 @@ describe('UsersService', () => {
 
       await service.update('p1', { password: 'newpass1' }, adminActor);
 
-      const data = (
-        mockPrisma.user.update.mock.calls[0] as [
-          { data: Record<string, unknown> },
-        ]
-      )[0].data;
+      const data = dataOf(mockPrisma.user.update);
       expect(data).toMatchObject({
         mustChangePassword: true,
         refreshToken: null,
@@ -266,39 +426,126 @@ describe('UsersService', () => {
     });
 
     it('requires a phone when turning a user into a parent', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        ...parent,
-        role: Role.teacher,
-        phone: null,
-      });
+      mockPrisma.user.findUnique.mockResolvedValue({ ...teacher, phone: null });
 
       await expect(
         service.update('p1', { role: Role.parent }, adminActor),
       ).rejects.toThrow('Phone is required for parents');
     });
 
-    it('clears access when a teacher becomes a parent', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        ...parent,
-        role: Role.teacher,
-        phone: '+380671234567',
-      });
-      mockPrisma.salaryTerms.count.mockResolvedValue(0);
-      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
-      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+    it('clears position and access when a teacher becomes a parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(teacher);
+      zeroSalaryRecords();
 
       await service.update('p1', { role: Role.parent }, adminActor);
 
-      const data = (
-        mockPrisma.user.update.mock.calls[0] as [
-          { data: Record<string, unknown> },
-        ]
-      )[0].data;
-      expect(data).toMatchObject({
-        permissions: { deleteMany: {} },
+      expect(dataOf(mockPrisma.user.update)).toMatchObject({
+        role: Role.parent,
+        positionId: null,
         institutions: { deleteMany: {} },
         accessScope: AccessScope.all,
       });
+    });
+
+    it('refuses a position together with role parent', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(teacher);
+      await expect(
+        service.update(
+          'p1',
+          { role: Role.parent, positionId: 'pos-acc' },
+          adminActor,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('Access applies to staff only'),
+      );
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changes the position and derives the role', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...teacher,
+        role: Role.admin,
+        positionId: 'pos-acc',
+        position: accountantPosition,
+      });
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
+
+      await service.update('p1', { positionId: 'pos-teach' }, adminActor);
+
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      expect(dataOf(mockPrisma.user.update)).toMatchObject({
+        role: Role.teacher,
+        positionId: 'pos-teach',
+      });
+    });
+
+    it('turns a parent into staff through a position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
+
+      await service.update('p1', { positionId: 'pos-acc' }, adminActor);
+
+      expect(dataOf(mockPrisma.user.update)).toMatchObject({
+        role: Role.admin,
+        positionId: 'pos-acc',
+      });
+    });
+
+    it('refuses assigning a position with an area the actor lacks', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+      mockPrisma.position.findUnique.mockResolvedValue(payrollPosition);
+
+      await expect(
+        service.update('p1', { positionId: 'pos-pay' }, adminActor),
+      ).rejects.toThrow(
+        new ForbiddenException('Cannot grant more than you have'),
+      );
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for an unknown position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.update('p1', { positionId: 'pos-x' }, adminActor),
+      ).rejects.toThrow('Position not found');
+    });
+
+    it('refuses to give root a position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...parent,
+        role: Role.root,
+      });
+
+      await expect(
+        service.update('p1', { positionId: 'pos-acc' }, rootActor),
+      ).rejects.toThrow(
+        new ForbiddenException('Root access cannot be changed'),
+      );
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('returns the position and derived permissions', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'p1',
+        role: Role.admin,
+        positionId: 'pos-acc',
+        position: accountantPosition,
+        institutions: [],
+      });
+
+      const result = await service.update('p1', { firstName: 'A' }, rootActor);
+
+      expect(result).toMatchObject({
+        position: { id: 'pos-acc', name: 'Бухгалтер', teaching: false },
+        permissions: [
+          { area: PermissionArea.finance, level: PermissionLevel.view },
+        ],
+        institutionIds: [],
+      });
+      expect(result).not.toHaveProperty('institutions');
     });
   });
 
@@ -309,9 +556,8 @@ describe('UsersService', () => {
       role: Role.admin,
       phone: null,
       accessScope: AccessScope.all,
-      permissions: [
-        { area: PermissionArea.payroll, level: PermissionLevel.edit },
-      ],
+      positionId: 'pos-pay',
+      position: payrollPosition,
       ...over,
     });
 
@@ -328,27 +574,29 @@ describe('UsersService', () => {
       ).rejects.toThrow('Forbidden');
     });
 
-    it('refuses an admin making themselves root', async () => {
-      await expect(
-        service.update('actor', { role: Role.root }, adminActor),
-      ).rejects.toThrow('Forbidden');
-    });
-
-    it('refuses to change own role', async () => {
+    it('refuses to change own role or position', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ id: 'actor', role: Role.admin, permissions: [] }),
+        target({
+          id: 'actor',
+          positionId: 'pos-acc',
+          position: accountantPosition,
+        }),
       );
       await expect(
         service.update('actor', { role: Role.parent }, adminActor),
       ).rejects.toThrow('Cannot change own access');
       await expect(
-        service.update('actor', { role: Role.teacher }, rootActor),
+        service.update('actor', { positionId: 'pos-teach' }, adminActor),
+      ).rejects.toThrow(new ForbiddenException('Cannot change own access'));
+      await expect(
+        service.update('actor', { positionId: 'pos-teach' }, rootActor),
       ).rejects.toThrow('Cannot change own access');
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('refuses a non-root actor touching root', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ role: Role.root, permissions: [] }),
+        target({ role: Role.root, positionId: null, position: null }),
       );
       await expect(
         service.update('x1', { password: 'newpass1' }, adminActor),
@@ -366,7 +614,12 @@ describe('UsersService', () => {
 
     it('allows updating a parent', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ role: Role.parent, permissions: [], phone: '+380' }),
+        target({
+          role: Role.parent,
+          positionId: null,
+          position: null,
+          phone: '+380',
+        }),
       );
       await service.update('x1', { firstName: 'A' }, adminActor);
       expect(mockPrisma.user.update).toHaveBeenCalled();
@@ -374,7 +627,11 @@ describe('UsersService', () => {
 
     it('allows a non-root actor to update their own fields', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ id: 'actor', permissions: [] }),
+        target({
+          id: 'actor',
+          positionId: 'pos-acc',
+          position: accountantPosition,
+        }),
       );
       await service.update('actor', { firstName: 'A' }, adminActor);
       expect(mockPrisma.user.update).toHaveBeenCalled();
@@ -382,7 +639,11 @@ describe('UsersService', () => {
 
     it('refuses to deactivate oneself', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ id: 'actor', permissions: [] }),
+        target({
+          id: 'actor',
+          positionId: 'pos-acc',
+          position: accountantPosition,
+        }),
       );
       await expect(
         service.update('actor', { isActive: false }, adminActor),
@@ -392,7 +653,11 @@ describe('UsersService', () => {
 
     it('refuses to delete oneself', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ id: 'actor', permissions: [] }),
+        target({
+          id: 'actor',
+          positionId: 'pos-acc',
+          position: accountantPosition,
+        }),
       );
       await expect(service.delete('actor', adminActor)).rejects.toThrow(
         'Cannot change own access',
@@ -402,6 +667,7 @@ describe('UsersService', () => {
 
     it('gives staff created by a scoped actor the actor scope', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
       mockPrisma.user.create.mockResolvedValue({ id: 'n' });
       const scoped = {
         ...adminActor,
@@ -409,52 +675,41 @@ describe('UsersService', () => {
         institutionIds: ['inst-a', 'inst-b'],
       };
       await service.create(
-        { login: 'n', password: 'pass123', role: Role.teacher },
+        { login: 'n', password: 'pass123', positionId: 'pos-teach' },
         scoped,
       );
-      const scopedCall = mockPrisma.user.create.mock.calls[0] as [
-        {
-          data: {
-            accessScope?: AccessScope;
-            institutions?: { create: { institutionId: string }[] };
-          };
-        },
-      ];
-      expect(scopedCall[0].data.accessScope).toBe(AccessScope.institutions);
-      expect(scopedCall[0].data.institutions).toEqual({
+      const scopedData = dataOf(mockPrisma.user.create);
+      expect(scopedData.accessScope).toBe(AccessScope.institutions);
+      expect(scopedData.institutions).toEqual({
         create: [{ institutionId: 'inst-a' }, { institutionId: 'inst-b' }],
       });
       mockPrisma.user.create.mockClear();
       await service.create(
-        { login: 'n', password: 'pass123', role: Role.teacher },
+        { login: 'n', password: 'pass123', positionId: 'pos-teach' },
         adminActor,
       );
-      const data = (
-        mockPrisma.user.create.mock.calls[0] as [{ data: object }]
-      )[0].data;
-      expect(data).not.toHaveProperty('accessScope');
+      expect(dataOf(mockPrisma.user.create)).not.toHaveProperty('accessScope');
     });
 
     it('gives a promoted parent the actor scope', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        target({ role: Role.parent, permissions: [], phone: '+380' }),
+        target({
+          role: Role.parent,
+          positionId: null,
+          position: null,
+          phone: '+380',
+        }),
       );
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
       const scoped = {
         ...adminActor,
         accessScope: AccessScope.institutions,
         institutionIds: ['inst-a'],
       };
-      await service.update('x1', { role: Role.teacher }, scoped);
-      const call = mockPrisma.user.update.mock.calls[0] as [
-        {
-          data: {
-            accessScope?: AccessScope;
-            institutions?: unknown;
-          };
-        },
-      ];
-      expect(call[0].data.accessScope).toBe(AccessScope.institutions);
-      expect(call[0].data.institutions).toEqual({
+      await service.update('x1', { positionId: 'pos-teach' }, scoped);
+      const data = dataOf(mockPrisma.user.update);
+      expect(data.accessScope).toBe(AccessScope.institutions);
+      expect(data.institutions).toEqual({
         deleteMany: {},
         create: [{ institutionId: 'inst-a' }],
       });
@@ -475,7 +730,7 @@ describe('UsersService', () => {
         id: 'u1',
         role: Role.admin,
         accessScope: AccessScope.all,
-        permissions: [],
+        position: null,
       });
       mockPrisma.charge.count.mockResolvedValue(0);
       mockPrisma.payment.count.mockResolvedValue(0);
@@ -692,76 +947,68 @@ describe('UsersService', () => {
     );
   });
 
-  describe('update role of a teacher with salary terms', () => {
-    it('rejects changing the role away from teacher', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 't1',
-        login: 'teacher',
-        role: Role.teacher,
-        accessScope: AccessScope.all,
-        permissions: [],
-        phone: null,
-      });
+  describe('leaving a teaching position with salary records', () => {
+    const teacherRow = {
+      id: 't1',
+      login: 'teacher',
+      role: Role.teacher,
+      accessScope: AccessScope.all,
+      positionId: 'pos-teach',
+      position: teachingPosition,
+      phone: null,
+    };
+
+    it('rejects moving a teacher with salary terms to a non-teaching position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(teacherRow);
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
       mockPrisma.salaryTerms.count.mockResolvedValue(2);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
 
       await expect(
-        service.update('t1', { role: Role.admin }, rootActor),
-      ).rejects.toThrow('User has salary terms');
+        service.update('t1', { positionId: 'pos-acc' }, rootActor),
+      ).rejects.toThrow(new BadRequestException('User has salary terms'));
       expect(mockPrisma.salaryTerms.count).toHaveBeenCalledWith({
         where: { teacherId: 't1' },
       });
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('rejects changing the role away from teacher with absences or extra hours', async () => {
+    it('rejects leaving teaching with absences or extra hours', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({
-        id: 't1',
-        login: 'teacher',
-        role: Role.teacher,
-        accessScope: AccessScope.all,
-        permissions: [],
-        phone: null,
+        ...teacherRow,
+        phone: '+380671234567',
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
       mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
       mockPrisma.teacherAbsence.count.mockResolvedValue(1);
 
       await expect(
-        service.update('t1', { role: Role.admin }, rootActor),
+        service.update('t1', { role: Role.parent }, rootActor),
       ).rejects.toThrow('User has salary terms');
 
       mockPrisma.teacherAbsence.count.mockResolvedValue(0);
       mockPrisma.payrollExtraHours.count.mockResolvedValue(1);
       await expect(
-        service.update('t1', { role: Role.admin }, rootActor),
+        service.update('t1', { role: Role.parent }, rootActor),
       ).rejects.toThrow('User has salary terms');
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('allows other changes of a teacher with salary terms', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 't1',
-        login: 'teacher',
-        role: Role.teacher,
-        accessScope: AccessScope.all,
-        permissions: [],
-        phone: null,
+    it('allows moving between teaching positions and other changes', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(teacherRow);
+      mockPrisma.position.findUnique.mockResolvedValue({
+        ...teachingPosition,
+        id: 'pos-teach2',
       });
       mockPrisma.salaryTerms.count.mockResolvedValue(2);
-      mockPrisma.user.update.mockResolvedValue({
-        id: 't1',
-        login: 'teacher',
-        role: Role.teacher,
-        accessScope: AccessScope.all,
-        permissions: [],
-        password: 'x',
-        refreshToken: null,
-      });
+      mockPrisma.user.update.mockResolvedValue({ id: 't1' });
 
+      await service.update('t1', { positionId: 'pos-teach2' }, rootActor);
       await service.update('t1', { firstName: 'Олена' }, rootActor);
 
       expect(mockPrisma.salaryTerms.count).not.toHaveBeenCalled();
-      expect(mockPrisma.user.update).toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -774,6 +1021,7 @@ describe('UsersService', () => {
       accessScope: AccessScope.all,
       institutionIds: [] as string[],
       scopeInstitutionIds: null as string[] | null,
+      positionId: 'pos-deputy',
       permissions: {
         users: PermissionLevel.edit,
         finance: PermissionLevel.edit,
@@ -783,119 +1031,145 @@ describe('UsersService', () => {
       id: 't1',
       role: Role.admin,
       accessScope: AccessScope.all,
-      permissions: [],
+      positionId: 'pos-empty',
+      position: {
+        id: 'pos-empty',
+        name: 'Порожня',
+        teaching: false,
+        permissions: [],
+      },
+      ...over,
+    });
+    const access = (over: Record<string, unknown> = {}) => ({
+      positionId: 'pos-acc',
+      accessScope: AccessScope.all,
       ...over,
     });
 
     beforeEach(() => {
-      mockPrisma.$transaction.mockImplementation(
-        (fn: (tx: typeof mockPrisma) => Promise<unknown>) => fn(mockPrisma),
-      );
-      mockPrisma.userPermission.deleteMany.mockResolvedValue({ count: 0 });
-      mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
       mockPrisma.user.update.mockResolvedValue({});
     });
 
-    it('replaces permissions and scope', async () => {
+    it('assigns the position, role and scope', async () => {
       mockPrisma.user.findUnique
         .mockResolvedValueOnce(targetRow())
         .mockResolvedValueOnce({
           ...targetRow({
-            permissions: [
-              { area: PermissionArea.finance, level: PermissionLevel.view },
-            ],
+            positionId: 'pos-acc',
+            position: accountantPosition,
           }),
           login: 'acc',
         });
 
-      const view = await service.setAccess(
-        't1',
-        {
-          accessScope: AccessScope.all,
-          permissions: [
-            { area: PermissionArea.finance, level: PermissionLevel.view },
-          ],
-        },
-        actor,
-      );
+      const view = await service.setAccess('t1', access(), actor);
 
-      expect(mockPrisma.userPermission.deleteMany).toHaveBeenCalledWith({
-        where: { userId: 't1' },
-      });
-      expect(mockPrisma.userPermission.createMany).toHaveBeenCalledWith({
-        data: [
-          {
-            userId: 't1',
-            area: PermissionArea.finance,
-            level: PermissionLevel.view,
-          },
-        ],
-      });
+      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 't1' },
-        data: { accessScope: AccessScope.all },
+        data: {
+          accessScope: AccessScope.all,
+          positionId: 'pos-acc',
+          role: Role.admin,
+        },
+      });
+      expect(view.position).toEqual({
+        id: 'pos-acc',
+        name: 'Бухгалтер',
+        teaching: false,
       });
       expect(view.permissions).toEqual([
         { area: PermissionArea.finance, level: PermissionLevel.view },
       ]);
     });
 
+    it('sets role teacher for a teaching position', async () => {
+      mockPrisma.position.findUnique.mockResolvedValue(teachingPosition);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(targetRow())
+        .mockResolvedValueOnce(targetRow());
+
+      await service.setAccess('t1', access({ positionId: 'pos-teach' }), actor);
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 't1' },
+        data: {
+          accessScope: AccessScope.all,
+          positionId: 'pos-teach',
+          role: Role.teacher,
+        },
+      });
+    });
+
+    it('refuses a non-teaching position for a teacher with salary terms', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        targetRow({
+          role: Role.teacher,
+          positionId: 'pos-teach',
+          position: teachingPosition,
+        }),
+      );
+      mockPrisma.salaryTerms.count.mockResolvedValue(1);
+      mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
+      mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+
+      await expect(service.setAccess('t1', access(), actor)).rejects.toThrow(
+        new BadRequestException('User has salary terms'),
+      );
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for an unknown position', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+      await expect(service.setAccess('t1', access(), actor)).rejects.toThrow(
+        'Position not found',
+      );
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
     it('maps denials to errors', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(
-        targetRow({ role: Role.root }),
+        targetRow({ role: Role.root, positionId: null, position: null }),
       );
-      await expect(
-        service.setAccess(
-          't1',
-          { accessScope: AccessScope.all, permissions: [] },
-          actor,
-        ),
-      ).rejects.toThrow('Root access cannot be changed');
+      await expect(service.setAccess('t1', access(), actor)).rejects.toThrow(
+        'Root access cannot be changed',
+      );
 
       mockPrisma.user.findUnique.mockResolvedValue(
-        targetRow({ role: Role.parent }),
+        targetRow({ role: Role.parent, positionId: null, position: null }),
       );
-      await expect(
-        service.setAccess(
-          't1',
-          { accessScope: AccessScope.all, permissions: [] },
-          actor,
-        ),
-      ).rejects.toThrow('Access applies to staff only');
+      await expect(service.setAccess('t1', access(), actor)).rejects.toThrow(
+        'Access applies to staff only',
+      );
 
       mockPrisma.user.findUnique.mockResolvedValue(targetRow({ id: 'g1' }));
-      await expect(
-        service.setAccess(
-          'g1',
-          { accessScope: AccessScope.all, permissions: [] },
-          actor,
-        ),
-      ).rejects.toThrow('Cannot change own access');
+      await expect(service.setAccess('g1', access(), actor)).rejects.toThrow(
+        'Cannot change own access',
+      );
 
       mockPrisma.user.findUnique.mockResolvedValue(targetRow());
+      mockPrisma.position.findUnique.mockResolvedValue(payrollPosition);
       await expect(
-        service.setAccess(
-          't1',
-          {
-            accessScope: AccessScope.all,
-            permissions: [
-              { area: PermissionArea.payroll, level: PermissionLevel.view },
-            ],
-          },
-          actor,
-        ),
+        service.setAccess('t1', access({ positionId: 'pos-pay' }), actor),
       ).rejects.toThrow('Cannot grant more than you have');
-      expect(mockPrisma.userPermission.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('refuses changing access of a user the actor does not cover', async () => {
       const narrowTarget = targetRow({
         accessScope: AccessScope.institutions,
         institutions: [{ institutionId: 'inst-a' }],
-        permissions: [
-          { area: PermissionArea.finance, level: PermissionLevel.edit },
-          { area: PermissionArea.payroll, level: PermissionLevel.edit },
-        ],
+        positionId: 'pos-big',
+        position: {
+          id: 'pos-big',
+          name: 'Велика',
+          teaching: false,
+          permissions: [
+            { area: PermissionArea.finance, level: PermissionLevel.edit },
+            { area: PermissionArea.payroll, level: PermissionLevel.edit },
+          ],
+        },
       });
       const deputy = {
         ...actor,
@@ -908,51 +1182,14 @@ describe('UsersService', () => {
       await expect(
         service.setAccess(
           't1',
-          {
-            accessScope: AccessScope.all,
-            permissions: [
-              { area: PermissionArea.finance, level: PermissionLevel.edit },
-              { area: PermissionArea.payroll, level: PermissionLevel.edit },
-            ],
-          },
-          deputy,
-        ),
-      ).rejects.toThrow('Cannot grant more than you have');
-      await expect(
-        service.setAccess(
-          't1',
-          {
+          access({
             accessScope: AccessScope.institutions,
             institutionIds: ['inst-a'],
-            permissions: [],
-          },
+          }),
           deputy,
         ),
       ).rejects.toThrow('Cannot grant more than you have');
-      expect(mockPrisma.userPermission.deleteMany).not.toHaveBeenCalled();
-    });
-
-    it('allows changing access of a covered user with a covered request', async () => {
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce(
-          targetRow({
-            permissions: [
-              { area: PermissionArea.finance, level: PermissionLevel.view },
-            ],
-          }),
-        )
-        .mockResolvedValueOnce(targetRow());
-      await service.setAccess(
-        't1',
-        {
-          accessScope: AccessScope.all,
-          permissions: [
-            { area: PermissionArea.finance, level: PermissionLevel.edit },
-          ],
-        },
-        actor,
-      );
-      expect(mockPrisma.userPermission.deleteMany).toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     describe('institutions', () => {
@@ -962,11 +1199,11 @@ describe('UsersService', () => {
         institutionIds,
         scopeInstitutionIds: institutionIds,
       });
-      const grant = (ids: string[]) => ({
-        accessScope: AccessScope.institutions,
-        institutionIds: ids,
-        permissions: [],
-      });
+      const grant = (ids: string[]) =>
+        access({
+          accessScope: AccessScope.institutions,
+          institutionIds: ids,
+        });
       const inst = (isActive: boolean) => ({
         id: 'a',
         type: 'kindergarten',
@@ -1010,9 +1247,13 @@ describe('UsersService', () => {
         });
         expect(mockPrisma.user.update).toHaveBeenCalledWith({
           where: { id: 't1' },
-          data: { accessScope: AccessScope.institutions },
+          data: {
+            accessScope: AccessScope.institutions,
+            positionId: 'pos-acc',
+            role: Role.admin,
+          },
         });
-        expect(view?.institutionIds).toEqual(['a']);
+        expect(view.institutionIds).toEqual(['a']);
       });
 
       it('clears institution rows when access becomes all', async () => {
@@ -1024,11 +1265,7 @@ describe('UsersService', () => {
             }),
           )
           .mockResolvedValueOnce(targetRow());
-        await service.setAccess(
-          't1',
-          { accessScope: AccessScope.all, permissions: [] },
-          actor,
-        );
+        await service.setAccess('t1', access(), actor);
         expect(mockPrisma.userInstitution.deleteMany).toHaveBeenCalled();
         expect(mockPrisma.userInstitution.createMany).not.toHaveBeenCalled();
       });
@@ -1065,31 +1302,14 @@ describe('UsersService', () => {
       });
     });
 
-    it('rejects duplicates and a missing user', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(targetRow());
-      await expect(
-        service.setAccess(
-          't1',
-          {
-            accessScope: AccessScope.all,
-            permissions: [
-              { area: PermissionArea.finance, level: PermissionLevel.view },
-              { area: PermissionArea.finance, level: PermissionLevel.edit },
-            ],
-          },
-          actor,
-        ),
-      ).rejects.toThrow('Duplicate permission');
+    it('rejects a missing user', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(
-        service.setAccess(
-          't1',
-          { accessScope: AccessScope.all, permissions: [] },
-          actor,
-        ),
-      ).rejects.toThrow('User not found');
+      await expect(service.setAccess('t1', access(), actor)).rejects.toThrow(
+        'User not found',
+      );
     });
   });
+
   describe('audit', () => {
     const row = {
       id: 'u1',
@@ -1102,20 +1322,20 @@ describe('UsersService', () => {
       email: null,
       isActive: true,
       accessScope: AccessScope.all,
-      permissions: [
-        { area: PermissionArea.finance, level: PermissionLevel.view },
-      ],
+      positionId: 'pos-acc',
+      position: accountantPosition,
     };
 
     it('records a created user without a password', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.user.create.mockResolvedValue({ ...row, password: 'hash' });
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
+      mockPrisma.user.create.mockResolvedValue(row);
 
       await service.create(
         {
           login: 'ann',
           password: 'secret99',
-          role: Role.admin,
+          positionId: 'pos-acc',
           firstName: 'Ann',
           lastName: 'Lee',
         },
@@ -1124,7 +1344,11 @@ describe('UsersService', () => {
 
       const [, input] = mockAudit.recordChange.mock.calls[0] as [
         unknown,
-        { before: unknown; after: { login: string; password: unknown } },
+        {
+          before: unknown;
+          after: { login: string; password: unknown; position: unknown };
+          fields: string[];
+        },
       ];
       expect(mockAudit.recordChange).toHaveBeenCalledWith(
         mockPrisma,
@@ -1137,7 +1361,10 @@ describe('UsersService', () => {
       );
       expect(input.before).toBeNull();
       expect(input.after.login).toBe('ann');
+      expect(input.after.position).toBe('Бухгалтер');
       expect(input.after.password).toBeNull();
+      expect(input.fields).toContain('position');
+      expect(input.fields).not.toContain('permissions');
       expect(JSON.stringify(mockAudit.recordChange.mock.calls)).not.toContain(
         'secret99',
       );
@@ -1148,7 +1375,6 @@ describe('UsersService', () => {
       mockPrisma.user.update.mockResolvedValue({
         ...row,
         firstName: 'Anna',
-        password: 'newhash',
       });
 
       await service.update(
@@ -1164,7 +1390,7 @@ describe('UsersService', () => {
           before: {
             firstName: string;
             password: unknown;
-            permissions: string[];
+            position: unknown;
           };
           after: { firstName: string; password: unknown };
         },
@@ -1172,12 +1398,11 @@ describe('UsersService', () => {
       expect(input.action).toBe('update');
       expect(input.before.firstName).toBe('Ann');
       expect(input.before.password).toBeNull();
-      expect(input.before.permissions).toEqual(['finance:view']);
+      expect(input.before.position).toBe('Бухгалтер');
       expect(input.after.firstName).toBe('Anna');
       expect(input.after.password).toBe('змінено');
       const dump = JSON.stringify(mockAudit.recordChange.mock.calls);
       expect(dump).not.toContain('newsecret1');
-      expect(dump).not.toContain('newhash');
     });
 
     it('records a deletion without the password field', async () => {
@@ -1238,13 +1463,13 @@ describe('UsersService', () => {
     });
 
     it('records an access change inside the transaction', async () => {
-      mockPrisma.userPermission.deleteMany.mockResolvedValue({ count: 0 });
-      mockPrisma.userPermission.createMany.mockResolvedValue({ count: 1 });
       mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
       mockPrisma.user.findUnique
         .mockResolvedValueOnce({
           ...row,
-          permissions: [],
+          positionId: null,
+          position: null,
           accessScope: AccessScope.institutions,
           institutions: [{ institutionId: 'b' }],
         })
@@ -1271,11 +1496,9 @@ describe('UsersService', () => {
       await service.setAccess(
         'u1',
         {
+          positionId: 'pos-acc',
           accessScope: AccessScope.institutions,
           institutionIds: ['a'],
-          permissions: [
-            { area: PermissionArea.finance, level: PermissionLevel.view },
-          ],
         },
         actor,
       );
@@ -1284,8 +1507,8 @@ describe('UsersService', () => {
         unknown,
         {
           fields: string[];
-          before: { permissions: string[]; institutionIds: string[] };
-          after: { permissions: string[]; institutionIds: string[] };
+          before: { position: unknown; institutionIds: string[] };
+          after: { position: unknown; institutionIds: string[] };
         },
       ];
       expect(db).toBe(mockPrisma);
@@ -1293,12 +1516,13 @@ describe('UsersService', () => {
       expect(input.after.institutionIds).toEqual(['a']);
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(input.fields).toEqual([
+        'role',
         'accessScope',
         'institutionIds',
-        'permissions',
+        'position',
       ]);
-      expect(input.before.permissions).toEqual([]);
-      expect(input.after.permissions).toEqual(['finance:view']);
+      expect(input.before.position).toBeNull();
+      expect(input.after.position).toBe('Бухгалтер');
     });
   });
 });

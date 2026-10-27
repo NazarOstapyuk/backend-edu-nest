@@ -1,10 +1,11 @@
 // src/users/dto/update-user.dto.ts
 import {
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   IsEmail,
   Matches,
   MaxLength,
@@ -25,9 +26,13 @@ export class UpdateUserDto {
   @IsOptional()
   password?: string;
 
-  @IsEnum(Role)
+  @IsIn([Role.parent])
   @IsOptional()
-  role?: Role;
+  role?: 'parent';
+
+  @IsUUID('4')
+  @IsOptional()
+  positionId?: string;
 
   @IsString()
   @IsNotEmpty()

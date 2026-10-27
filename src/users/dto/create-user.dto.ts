@@ -1,10 +1,11 @@
 // src/users/dto/create-user.dto.ts
 import {
   IsEmail,
-  IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   MinLength,
@@ -21,8 +22,13 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @IsEnum(Role)
-  role: Role;
+  @IsIn([Role.parent, Role.root])
+  @IsOptional()
+  role?: 'parent' | 'root';
+
+  @IsUUID('4')
+  @IsOptional()
+  positionId?: string;
 
   @IsString()
   @MinLength(3)

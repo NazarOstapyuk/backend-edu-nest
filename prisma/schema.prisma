@@ -103,7 +103,6 @@ model User {
   teacherAbsencesCreated   TeacherAbsence[]       @relation("TeacherAbsenceCreatedBy")
   teacherAbsencesVoided    TeacherAbsence[]       @relation("TeacherAbsenceVoidedBy")
   backupRunsCreated        BackupRun[]            @relation("BackupRunCreatedBy")
-  permissions              UserPermission[]
   positionId               String?
   position                 Position?              @relation(fields: [positionId], references: [id], onDelete: Restrict)
   auditEvents              AuditEvent[]           @relation("AuditEventActor")
@@ -1315,16 +1314,6 @@ enum AccessScope {
   institutions
 }
 
-model UserPermission {
-  id     String          @id @default(uuid())
-  userId String
-  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  area   PermissionArea
-  level  PermissionLevel
-
-  @@unique([userId, area])
-}
-
 enum AuditAction {
   create
   update
@@ -1596,7 +1585,7 @@ model Position {
 model PositionPermission {
   id         String          @id @default(uuid())
   positionId String
-  position   Position       @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  position   Position        @relation(fields: [positionId], references: [id], onDelete: Cascade)
   area       PermissionArea
   level      PermissionLevel
 

@@ -11,35 +11,66 @@ import {
   AuditAction,
   PermissionArea,
   PermissionLevel,
+  Prisma,
   Role,
 } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {
   coversUser,
   grantDenial,
+  holdsAll,
   toPermissionMap,
 } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { AuditService } from '../audit/audit.service';
 import { findInstitution } from '../institutions/institution-checks';
+import { positionRef, positionSelect } from '../positions/position-select';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
-const permissionSelect = { select: { area: true, level: true } } as const;
 const institutionSelect = { select: { institutionId: true } } as const;
+const userInclude = {
+  position: positionSelect,
+  institutions: institutionSelect,
+} as const;
+const userOmit = { password: true, refreshToken: true } as const;
+
+type PositionRow = {
+  id: string;
+  name: string;
+  teaching: boolean;
+  permissions: { area: PermissionArea; level: PermissionLevel }[];
+};
 
 const idsOf = (row: { institutions?: { institutionId: string }[] }) =>
   (row.institutions ?? []).map((i) => i.institutionId).sort();
 
-const withInstitutionIds = <
-  T extends { institutions?: { institutionId: string }[] },
+const permissionsOf = (row: { position?: PositionRow | null }) =>
+  (row.position?.permissions ?? []).map((p) => ({
+    area: p.area,
+    level: p.level,
+  }));
+
+const roleOf = (position: { teaching: boolean }): Role =>
+  position.teaching ? Role.teacher : Role.admin;
+
+const toUserView = <
+  T extends {
+    institutions?: { institutionId: string }[];
+    position?: PositionRow | null;
+  },
 >(
   row: T,
-): Omit<T, 'institutions'> & { institutionIds: string[] } => {
-  const { institutions, ...rest } = row;
-  return { ...rest, institutionIds: idsOf({ institutions }) };
+) => {
+  const { institutions, position, ...rest } = row;
+  return {
+    ...rest,
+    position: positionRef(position ?? null),
+    permissions: permissionsOf({ position }),
+    institutionIds: idsOf({ institutions }),
+  };
 };
 
 const USER_FIELDS = [
@@ -53,7 +84,7 @@ const USER_FIELDS = [
   'isActive',
   'accessScope',
   'institutionIds',
-  'permissions',
+  'position',
   'password',
 ] as const;
 const USER_FIELDS_NO_PASSWORD = USER_FIELDS.filter((f) => f !== 'password');
@@ -69,7 +100,7 @@ const userAudit = (
     email: string | null;
     isActive: boolean;
     accessScope: AccessScope;
-    permissions?: { area: PermissionArea; level: PermissionLevel }[];
+    position?: PositionRow | null;
     institutions?: { institutionId: string }[];
   },
   passwordChanged = false,
@@ -84,7 +115,7 @@ const userAudit = (
   isActive: user.isActive,
   accessScope: user.accessScope,
   institutionIds: idsOf(user),
-  permissions: (user.permissions ?? []).map((p) => `${p.area}:${p.level}`),
+  position: user.position?.name ?? null,
   password: passwordChanged ? 'змінено' : null,
 });
 
@@ -95,9 +126,43 @@ export class UsersService {
     private audit: AuditService,
   ) {}
 
+  private async lockPosition(tx: Prisma.TransactionClient, id: string) {
+    await tx.$queryRaw`SELECT id FROM "Position" WHERE id = ${id} FOR SHARE`;
+    const position = await tx.position.findUnique({
+      where: { id },
+      ...positionSelect,
+    });
+    if (!position) throw new NotFoundException('Position not found');
+    return position;
+  }
+
+  private assertCanAssign(actor: AuthenticatedUser, position: PositionRow) {
+    if (!holdsAll(actor, toPermissionMap(position.permissions)))
+      throw new ForbiddenException('Cannot grant more than you have');
+  }
+
+  private async assertNoSalaryRecords(
+    db: Prisma.TransactionClient,
+    id: string,
+  ) {
+    const [terms, extraHours, absences] = await Promise.all([
+      db.salaryTerms.count({ where: { teacherId: id } }),
+      db.payrollExtraHours.count({ where: { teacherId: id } }),
+      db.teacherAbsence.count({ where: { teacherId: id } }),
+    ]);
+    if (terms + extraHours + absences > 0)
+      throw new BadRequestException('User has salary terms');
+  }
+
   async create(dto: CreateUserDto, actor: AuthenticatedUser) {
     if (dto.role === Role.root && actor.role !== Role.root) {
       throw new ForbiddenException('Forbidden');
+    }
+    if (dto.role && dto.positionId) {
+      throw new BadRequestException('Access applies to staff only');
+    }
+    if (!dto.role && !dto.positionId) {
+      throw new BadRequestException('Position is required');
     }
 
     const existing = await this.prisma.user.findUnique({
@@ -111,48 +176,55 @@ export class UsersService {
 
     const password = await bcrypt.hash(dto.password, 10);
     const scoped =
+      !dto.role &&
       actor.role !== Role.root &&
-      actor.accessScope !== AccessScope.all &&
-      dto.role !== Role.parent;
-    const user = await this.prisma.user.create({
-      data: {
-        login: dto.login,
-        password,
-        role: dto.role,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        middleName: dto.middleName ?? null,
-        phone: dto.phone ?? null,
-        email: dto.email ?? null,
-        mustChangePassword: dto.role === Role.parent,
-        ...(scoped
-          ? {
-              accessScope: actor.accessScope,
-              institutions: {
-                create: actor.institutionIds.map((institutionId) => ({
-                  institutionId,
-                })),
-              },
-            }
-          : {}),
-      },
-      include: {
-        permissions: permissionSelect,
-        institutions: institutionSelect,
-      },
+      actor.accessScope !== AccessScope.all;
+    return this.prisma.$transaction(async (tx) => {
+      let role: Role = dto.role ?? Role.admin;
+      let positionId: string | null = null;
+      if (dto.positionId) {
+        const position = await this.lockPosition(tx, dto.positionId);
+        this.assertCanAssign(actor, position);
+        role = roleOf(position);
+        positionId = position.id;
+      }
+      const user = await tx.user.create({
+        data: {
+          login: dto.login,
+          password,
+          role,
+          positionId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          middleName: dto.middleName ?? null,
+          phone: dto.phone ?? null,
+          email: dto.email ?? null,
+          mustChangePassword: dto.role === Role.parent,
+          ...(scoped
+            ? {
+                accessScope: actor.accessScope,
+                institutions: {
+                  create: actor.institutionIds.map((institutionId) => ({
+                    institutionId,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: userInclude,
+        omit: userOmit,
+      });
+      await this.audit.recordChange(tx, {
+        actorId: actor.id,
+        entityType: 'users',
+        entityId: user.id,
+        action: AuditAction.create,
+        before: null,
+        after: userAudit(user),
+        fields: USER_FIELDS,
+      });
+      return toUserView(user);
     });
-    await this.audit.recordChange(this.prisma, {
-      actorId: actor.id,
-      entityType: 'users',
-      entityId: user.id,
-      action: AuditAction.create,
-      before: null,
-      after: userAudit(user),
-      fields: USER_FIELDS,
-    });
-
-    const { password: _p, refreshToken: _r, ...result } = user;
-    return withInstitutionIds(result);
   }
 
   async findAll() {
@@ -170,13 +242,14 @@ export class UsersService {
         mustChangePassword: true,
         isActive: true,
         accessScope: true,
-        permissions: permissionSelect,
+        positionId: true,
+        position: positionSelect,
         institutions: institutionSelect,
         createdAt: true,
         updatedAt: true,
       },
     });
-    return users.map(withInstitutionIds);
+    return users.map(toUserView);
   }
 
   private assertManageable(
@@ -184,7 +257,7 @@ export class UsersService {
     target: {
       role: Role;
       accessScope: AccessScope;
-      permissions: { area: PermissionArea; level: PermissionLevel }[];
+      position?: PositionRow | null;
       institutions?: { institutionId: string }[];
     },
   ) {
@@ -193,7 +266,7 @@ export class UsersService {
         role: target.role,
         accessScope: target.accessScope,
         institutionIds: idsOf(target),
-        permissions: toPermissionMap(target.permissions),
+        permissions: toPermissionMap(permissionsOf(target)),
       })
     )
       throw new ForbiddenException('Cannot manage this user');
@@ -202,10 +275,7 @@ export class UsersService {
   async delete(id: string, actor: AuthenticatedUser) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: {
-        permissions: permissionSelect,
-        institutions: institutionSelect,
-      },
+      include: userInclude,
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.role === Role.root)
@@ -298,36 +368,23 @@ export class UsersService {
   }
 
   async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
-    if (dto.role === Role.root && actor.role !== Role.root) {
-      throw new ForbiddenException('Forbidden');
-    }
-
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: {
-        permissions: permissionSelect,
-        institutions: institutionSelect,
-      },
+      include: userInclude,
     });
     if (!user) throw new NotFoundException('User not found');
-    if (actor.id === id && dto.role !== undefined && dto.role !== user.role)
+    if (dto.role && dto.positionId)
+      throw new BadRequestException('Access applies to staff only');
+    const changesPosition =
+      !!dto.positionId && dto.positionId !== user.positionId;
+    const becomesParent = dto.role === Role.parent && user.role !== Role.parent;
+    if (actor.id === id && (changesPosition || becomesParent))
       throw new ForbiddenException('Cannot change own access');
     if (actor.id === id && dto.isActive === false)
       throw new ForbiddenException('Cannot change own access');
+    if (user.role === Role.root && (changesPosition || becomesParent))
+      throw new ForbiddenException('Root access cannot be changed');
     this.assertManageable(actor, user);
-    if (
-      user.role === Role.teacher &&
-      dto.role !== undefined &&
-      dto.role !== Role.teacher
-    ) {
-      const [terms, extraHours, absences] = await Promise.all([
-        this.prisma.salaryTerms.count({ where: { teacherId: id } }),
-        this.prisma.payrollExtraHours.count({ where: { teacherId: id } }),
-        this.prisma.teacherAbsence.count({ where: { teacherId: id } }),
-      ]);
-      if (terms + extraHours + absences > 0)
-        throw new BadRequestException('User has salary terms');
-    }
 
     if (dto.login && dto.login !== user.login) {
       const existing = await this.prisma.user.findUnique({
@@ -336,37 +393,15 @@ export class UsersService {
       if (existing) throw new ConflictException('Login already taken');
     }
 
-    const nextRole = dto.role ?? user.role;
+    const nextIsParent =
+      becomesParent || (user.role === Role.parent && !changesPosition);
     const clearsPhone = dto.phone === null;
-    const becomesParent = dto.role === Role.parent && user.role !== Role.parent;
     const nextPhone = dto.phone !== undefined ? dto.phone : user.phone;
-    if (
-      nextRole === Role.parent &&
-      !nextPhone &&
-      (clearsPhone || becomesParent)
-    ) {
+    if (nextIsParent && !nextPhone && (clearsPhone || becomesParent)) {
       throw new BadRequestException('Phone is required for parents');
     }
 
-    const data: {
-      login?: string;
-      password?: string;
-      role?: Role;
-      firstName?: string;
-      lastName?: string;
-      isActive?: boolean;
-      middleName?: string | null;
-      phone?: string | null;
-      email?: string | null;
-      mustChangePassword?: boolean;
-      refreshToken?: null;
-      accessScope?: AccessScope;
-      permissions?: { deleteMany: object };
-      institutions?: {
-        deleteMany: object;
-        create?: { institutionId: string }[];
-      };
-    } = {};
+    const data: Prisma.UserUncheckedUpdateInput = {};
     if (dto.login !== undefined) data.login = dto.login;
     if (dto.password) {
       data.password = await bcrypt.hash(dto.password, 10);
@@ -376,114 +411,115 @@ export class UsersService {
     if (dto.middleName !== undefined) data.middleName = dto.middleName;
     if (dto.phone !== undefined) data.phone = dto.phone;
     if (dto.email !== undefined) data.email = dto.email;
-    if (dto.role !== undefined) data.role = dto.role;
     if (dto.firstName !== undefined) data.firstName = dto.firstName;
     if (dto.lastName !== undefined) data.lastName = dto.lastName;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    if (becomesParent) {
-      data.permissions = { deleteMany: {} };
-      data.institutions = { deleteMany: {} };
-      data.accessScope = AccessScope.all;
-    }
-    if (
-      user.role === Role.parent &&
-      (dto.role === Role.admin || dto.role === Role.teacher) &&
-      actor.role !== Role.root &&
-      actor.accessScope !== AccessScope.all
-    ) {
-      data.accessScope = actor.accessScope;
-      data.institutions = {
-        deleteMany: {},
-        create: actor.institutionIds.map((institutionId) => ({
-          institutionId,
-        })),
-      };
-    }
 
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data,
-      include: {
-        permissions: permissionSelect,
-        institutions: institutionSelect,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      let nextRole: Role = user.role;
+      if (becomesParent) {
+        nextRole = Role.parent;
+        data.role = Role.parent;
+        data.positionId = null;
+        data.institutions = { deleteMany: {} };
+        data.accessScope = AccessScope.all;
+      } else if (changesPosition && dto.positionId) {
+        const position = await this.lockPosition(tx, dto.positionId);
+        this.assertCanAssign(actor, position);
+        nextRole = roleOf(position);
+        data.role = nextRole;
+        data.positionId = position.id;
+        if (
+          user.role === Role.parent &&
+          actor.role !== Role.root &&
+          actor.accessScope !== AccessScope.all
+        ) {
+          data.accessScope = actor.accessScope;
+          data.institutions = {
+            deleteMany: {},
+            create: actor.institutionIds.map((institutionId) => ({
+              institutionId,
+            })),
+          };
+        }
+      }
+      if (user.role === Role.teacher && nextRole !== Role.teacher)
+        await this.assertNoSalaryRecords(tx, id);
+
+      const updated = await tx.user.update({
+        where: { id },
+        data,
+        include: userInclude,
+        omit: userOmit,
+      });
+      await this.audit.recordChange(tx, {
+        actorId: actor.id,
+        entityType: 'users',
+        entityId: id,
+        action: AuditAction.update,
+        before: userAudit(user),
+        after: userAudit(updated, Boolean(dto.password)),
+        fields: USER_FIELDS,
+      });
+      return toUserView(updated);
     });
-    await this.audit.recordChange(this.prisma, {
-      actorId: actor.id,
-      entityType: 'users',
-      entityId: id,
-      action: AuditAction.update,
-      before: userAudit(user),
-      after: userAudit(updated, Boolean(dto.password)),
-      fields: USER_FIELDS,
-    });
-    const { password: _p, refreshToken: _r, ...result } = updated;
-    return withInstitutionIds(result);
   }
+
   async setAccess(id: string, dto: UpdateAccessDto, actor: AuthenticatedUser) {
     const target = await this.prisma.user.findUnique({
       where: { id },
-      include: {
-        permissions: permissionSelect,
-        institutions: institutionSelect,
-      },
+      include: userInclude,
     });
     if (!target) throw new NotFoundException('User not found');
-    const areas = new Set(dto.permissions.map((p) => p.area));
-    if (areas.size !== dto.permissions.length)
-      throw new BadRequestException('Duplicate permission');
     const targetIds = idsOf(target);
     const requestedIds =
       dto.accessScope === AccessScope.institutions
         ? [...new Set(dto.institutionIds ?? [])].sort()
         : [];
-    const denial = grantDenial(
-      actor,
-      {
-        id: target.id,
-        role: target.role,
-        accessScope: target.accessScope,
-        institutionIds: targetIds,
-        permissions: toPermissionMap(target.permissions),
-      },
-      {
-        accessScope: dto.accessScope,
-        institutionIds: requestedIds,
-        permissions: toPermissionMap(dto.permissions),
-      },
-    );
-    if (denial === 'root')
-      throw new ForbiddenException('Root access cannot be changed');
-    if (denial === 'staff_only')
-      throw new BadRequestException('Access applies to staff only');
-    if (denial === 'self')
-      throw new ForbiddenException('Cannot change own access');
-    if (denial === 'too_much')
-      throw new ForbiddenException('Cannot grant more than you have');
-    if (actor.role !== Role.root) {
-      const requested = {
-        role: target.role,
-        accessScope: dto.accessScope,
-        institutionIds: requestedIds,
-        permissions: toPermissionMap(dto.permissions),
-      };
-      if (
-        !coversUser(actor, {
-          role: target.role,
-          accessScope: target.accessScope,
-          institutionIds: targetIds,
-          permissions: toPermissionMap(target.permissions),
-        }) ||
-        !coversUser(actor, requested)
-      )
-        throw new ForbiddenException('Cannot grant more than you have');
-    }
-    for (const institutionId of requestedIds) {
-      await findInstitution(this.prisma, institutionId, {
-        active: !targetIds.includes(institutionId),
-      });
-    }
+    const current = {
+      role: target.role,
+      accessScope: target.accessScope,
+      institutionIds: targetIds,
+      permissions: toPermissionMap(permissionsOf(target)),
+    };
     return this.prisma.$transaction(async (tx) => {
+      const position = await this.lockPosition(tx, dto.positionId);
+      const permissions = toPermissionMap(position.permissions);
+      const denial = grantDenial(
+        actor,
+        { id: target.id, ...current },
+        {
+          accessScope: dto.accessScope,
+          institutionIds: requestedIds,
+          permissions,
+        },
+      );
+      if (denial === 'root')
+        throw new ForbiddenException('Root access cannot be changed');
+      if (denial === 'staff_only')
+        throw new BadRequestException('Access applies to staff only');
+      if (denial === 'self')
+        throw new ForbiddenException('Cannot change own access');
+      if (denial === 'too_much')
+        throw new ForbiddenException('Cannot grant more than you have');
+      const role = roleOf(position);
+      if (actor.role !== Role.root) {
+        const requested = {
+          role,
+          accessScope: dto.accessScope,
+          institutionIds: requestedIds,
+          permissions,
+        };
+        if (!coversUser(actor, current) || !coversUser(actor, requested))
+          throw new ForbiddenException('Cannot grant more than you have');
+      }
+      if (target.role === Role.teacher && role !== Role.teacher)
+        await this.assertNoSalaryRecords(tx, id);
+      for (const institutionId of requestedIds) {
+        await findInstitution(tx, institutionId, {
+          active: !targetIds.includes(institutionId),
+        });
+      }
       await tx.userInstitution.deleteMany({ where: { userId: id } });
       if (requestedIds.length > 0) {
         await tx.userInstitution.createMany({
@@ -493,38 +529,26 @@ export class UsersService {
           })),
         });
       }
-      await tx.userPermission.deleteMany({ where: { userId: id } });
-      await tx.userPermission.createMany({
-        data: dto.permissions.map((p) => ({
-          userId: id,
-          area: p.area,
-          level: p.level,
-        })),
-      });
       await tx.user.update({
         where: { id },
-        data: { accessScope: dto.accessScope },
+        data: { accessScope: dto.accessScope, positionId: position.id, role },
       });
       const updated = await tx.user.findUnique({
         where: { id },
-        include: {
-          permissions: permissionSelect,
-          institutions: institutionSelect,
-        },
-        omit: { password: true, refreshToken: true },
+        include: userInclude,
+        omit: userOmit,
       });
-      if (updated) {
-        await this.audit.recordChange(tx, {
-          actorId: actor.id,
-          entityType: 'users',
-          entityId: id,
-          action: AuditAction.update,
-          before: userAudit(target),
-          after: userAudit(updated),
-          fields: ['accessScope', 'institutionIds', 'permissions'],
-        });
-      }
-      return updated ? withInstitutionIds(updated) : updated;
+      if (!updated) throw new NotFoundException('User not found');
+      await this.audit.recordChange(tx, {
+        actorId: actor.id,
+        entityType: 'users',
+        entityId: id,
+        action: AuditAction.update,
+        before: userAudit(target),
+        after: userAudit(updated),
+        fields: ['role', 'accessScope', 'institutionIds', 'position'],
+      });
+      return toUserView(updated);
     });
   }
 }

@@ -1,6 +1,4 @@
-import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
   ArrayNotEmpty,
   ArrayUnique,
   IsArray,
@@ -8,7 +6,6 @@ import {
   IsIn,
   IsUUID,
   ValidateIf,
-  ValidateNested,
 } from 'class-validator';
 import { AccessScope, PermissionArea, PermissionLevel } from '@prisma/client';
 
@@ -21,6 +18,9 @@ export class PermissionItemDto {
 }
 
 export class UpdateAccessDto {
+  @IsUUID('4')
+  positionId: string;
+
   @IsIn([AccessScope.all, AccessScope.institutions])
   accessScope: AccessScope;
 
@@ -32,10 +32,4 @@ export class UpdateAccessDto {
   @ArrayUnique()
   @IsUUID('4', { each: true })
   institutionIds?: string[];
-
-  @IsArray()
-  @ArrayMaxSize(12)
-  @ValidateNested({ each: true })
-  @Type(() => PermissionItemDto)
-  permissions: PermissionItemDto[];
 }
