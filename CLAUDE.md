@@ -64,9 +64,9 @@ Institution scope: `baseScope(user)` = granted institutions (`null` = all, for r
 User management: non-root actors can update/delete only staff they cover (every area level of the target ≤ the actor's, scope covered), never root (403 `Cannot manage this user`); only root can create a user with role root; nobody can change their own position or role, deactivate or delete themselves (403 `Cannot change own access`); `PATCH /users/:id/access` also requires covering the target and the requested access; staff created by a scoped actor (or promoted from parent) get the actor's scope and institutions. Teachers' role-based rights (own groups, lessons, payroll) are not counted by `coversUser`: any `users: edit` holder who covers a teacher's permissions can manage that teacher (including password resets).
 
 Roles (`Role` enum): `root`, `admin`, `teacher`, `parent`. Rules enforced in services, not guards:
-- `admin` cannot create/update a user into `root`; `root` user cannot be deleted and is hidden from `GET /users`.
+- `root` can be created only by root via `POST /users` and is never assigned through update; `root` user cannot be deleted and is hidden from `GET /users`.
 - `parent` can only read subscriptions of their own children (`SubscriptionsService.findByChild`) and the parent cabinet views (`src/parent-cabinet/`).
-- User responses must strip `password` and `refreshToken` (destructuring in UsersService, `omit` in Prisma includes elsewhere).
+- User responses must strip `password` and `refreshToken` (`omit` in UsersService and Prisma includes elsewhere).
 
 ### Domain: subscriptions
 
