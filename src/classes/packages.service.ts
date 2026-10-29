@@ -10,6 +10,9 @@ import {
   TariffUnit,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { scopeIds } from '../access/access-calc';
+import { assertChildInScope } from '../access/scope';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatMoney, money } from '../finance/finance-calc';
 import { voidChargeInTx } from '../finance/void-charge';
@@ -108,7 +111,13 @@ export class PackagesService {
     return packages.map((p) => toPackageView(p, today));
   }
 
-  async purchase(childId: string, dto: PurchasePackageDto, userId: string) {
+  async purchase(
+    childId: string,
+    dto: PurchasePackageDto,
+    user: AuthenticatedUser,
+  ) {
+    const userId = user.id;
+    await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
     });
@@ -117,6 +126,8 @@ export class PackagesService {
       where: { id: dto.directionId },
     });
     if (!direction) throw new NotFoundException('Direction not found');
+    if (!direction.isActive)
+      throw new BadRequestException('Direction is not active');
     const tariff = await this.prisma.tariff.findUnique({
       where: { id: dto.tariffId },
       include: { prices: true },
@@ -125,6 +136,18 @@ export class PackagesService {
     if (tariff.unit !== TariffUnit.package)
       throw new BadRequestException('Tariff unit must be package');
     if (!tariff.isActive) throw new BadRequestException('Tariff is not active');
+    const offered = await this.prisma.classGroup.findFirst({
+      where: {
+        directionId: direction.id,
+        packageTariffId: tariff.id,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!offered)
+      throw new BadRequestException(
+        'Tariff is not a package of this direction',
+      );
 
     const purchaseDate = toDay(dto.purchaseDate);
     const price = priceOn(tariff.prices, purchaseDate);

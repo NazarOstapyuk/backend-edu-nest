@@ -91,11 +91,12 @@ export class SalaryTermsService {
   async create(dto: CreateSalaryTermsDto, user: AuthenticatedUser) {
     const teacher = await this.prisma.user.findUnique({
       where: { id: dto.teacherId },
-      select: { id: true, role: true },
+      select: { id: true, role: true, isActive: true },
     });
     if (!teacher) throw new NotFoundException('Teacher not found');
     if (teacher.role !== Role.teacher)
       throw new BadRequestException('User is not a teacher');
+    if (!teacher.isActive) throw new BadRequestException('Teacher is inactive');
     const validFrom = parseDay(dto.validFrom);
     const extraHourRate =
       dto.extraHourRate === undefined || dto.extraHourRate === null

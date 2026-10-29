@@ -183,6 +183,7 @@ describe('GroupsService', () => {
     });
     mockPrisma.bellSchedule.findUnique.mockResolvedValue({
       id: 'b1',
+      active: true,
       periods: [{ number: 1 }],
     });
     await expect(
@@ -201,6 +202,86 @@ describe('GroupsService', () => {
     await expect(
       service.update('g1', { bellScheduleId: 'b9' }, fullAdmin),
     ).rejects.toThrow(new NotFoundException('Bell schedule not found'));
+  });
+
+  describe('inactive references', () => {
+    const stored = {
+      id: 'g1',
+      name: '1-А',
+      kind: GroupKind.school_class,
+      bellScheduleId: 'b1',
+      teachers: [{ id: 't1' }],
+    };
+
+    it('rejects an inactive teacher on create', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(null);
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: false },
+      ]);
+
+      await expect(
+        service.create(
+          { name: 'A', institutionId: 'inst-k', teacherIds: ['t1'] },
+          fullAdmin,
+        ),
+      ).rejects.toThrow(new BadRequestException('Teacher is inactive'));
+      expect(mockPrisma.group.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps a stored inactive teacher when renaming', async () => {
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce(stored)
+        .mockResolvedValueOnce(null);
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: false },
+      ]);
+      mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
+
+      await expect(
+        service.update('g1', { name: '1-Б', teacherIds: ['t1'] }, fullAdmin),
+      ).resolves.toEqual({ id: 'g1' });
+    });
+
+    it('rejects a newly added inactive teacher on update', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(stored);
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: true },
+        { id: 't2', role: Role.teacher, isActive: false },
+      ]);
+
+      await expect(
+        service.update('g1', { teacherIds: ['t1', 't2'] }, fullAdmin),
+      ).rejects.toThrow(new BadRequestException('Teacher is inactive'));
+      expect(mockPrisma.group.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an inactive bell schedule that is not current', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(stored);
+      mockPrisma.bellSchedule.findUnique.mockResolvedValue({
+        id: 'b2',
+        active: false,
+        periods: [{ number: 1 }],
+      });
+
+      await expect(
+        service.update('g1', { bellScheduleId: 'b2' }, fullAdmin),
+      ).rejects.toThrow(new BadRequestException('Bell schedule is inactive'));
+    });
+
+    it('keeps the current inactive bell schedule', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue(stored);
+      mockPrisma.bellSchedule.findUnique.mockResolvedValue({
+        id: 'b1',
+        active: false,
+        periods: [{ number: 1 }],
+      });
+      mockPrisma.timetableEntry.findMany.mockResolvedValue([]);
+      mockPrisma.group.update.mockResolvedValue({ id: 'g1' });
+
+      await expect(
+        service.update('g1', { bellScheduleId: 'b1' }, fullAdmin),
+      ).resolves.toEqual({ id: 'g1' });
+    });
   });
 
   describe('meal price category', () => {

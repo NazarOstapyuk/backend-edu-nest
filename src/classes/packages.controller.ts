@@ -41,7 +41,7 @@ export class PackagesController {
     @Body() dto: PurchasePackageDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.packages.purchase(childId, dto, user.id);
+    return this.packages.purchase(childId, dto, user);
   }
 
   @Permission(PermissionArea.classes, PermissionLevel.edit)

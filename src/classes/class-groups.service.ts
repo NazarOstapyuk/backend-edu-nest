@@ -23,11 +23,11 @@ import { UpdateClassGroupDto } from './dto/update-class-group.dto';
 export class ClassGroupsService {
   constructor(private prisma: PrismaService) {}
 
-  private async assertTeachers(ids: string[]) {
+  private async assertTeachers(ids: string[], currentIds: string[] = []) {
     if (ids.length === 0) return;
     const users = await this.prisma.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, role: true },
+      select: { id: true, role: true, isActive: true },
     });
     if (
       users.length !== new Set(ids).size ||
@@ -35,12 +35,16 @@ export class ClassGroupsService {
     ) {
       throw new BadRequestException('Invalid teachers');
     }
+    if (users.some((u) => !u.isActive && !currentIds.includes(u.id))) {
+      throw new BadRequestException('Teacher is inactive');
+    }
   }
 
   private async assertTariff(
     id: string | null | undefined,
     unit: TariffUnit,
     message: string,
+    currentId: string | null = null,
   ) {
     if (!id) return;
     const tariff = await this.prisma.tariff.findUnique({ where: { id } });
@@ -48,6 +52,8 @@ export class ClassGroupsService {
     if (tariff.unit !== unit) throw new BadRequestException(message);
     if (tariff.institutionId)
       throw new BadRequestException('Tariff belongs to another institution');
+    if (!tariff.isActive && id !== currentId)
+      throw new BadRequestException('Tariff is not active');
   }
 
   private async assertNameFree(
@@ -112,16 +118,22 @@ export class ClassGroupsService {
     const group = await this.load(id);
     if (dto.name !== undefined && dto.name !== group.name)
       await this.assertNameFree(group.directionId, dto.name, id);
-    if (dto.teacherIds) await this.assertTeachers(dto.teacherIds);
+    if (dto.teacherIds)
+      await this.assertTeachers(
+        dto.teacherIds,
+        group.teachers.map((t) => t.id),
+      );
     await this.assertTariff(
       dto.singleTariffId,
       TariffUnit.session,
       'Tariff unit must be session',
+      group.singleTariffId,
     );
     await this.assertTariff(
       dto.packageTariffId,
       TariffUnit.package,
       'Tariff unit must be package',
+      group.packageTariffId,
     );
 
     await this.prisma.classGroup.update({

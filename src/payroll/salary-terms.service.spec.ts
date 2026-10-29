@@ -93,6 +93,7 @@ describe('SalaryTermsService', () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 't1',
       role: Role.teacher,
+      isActive: true,
     });
     mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
     mockPrisma.salaryTerms.create.mockResolvedValue(row());
@@ -123,6 +124,18 @@ describe('SalaryTermsService', () => {
       await expect(service.create(createDto(), admin)).rejects.toThrow(
         new BadRequestException('User is not a teacher'),
       );
+    });
+
+    it('rejects an inactive teacher', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 't1',
+        role: Role.teacher,
+        isActive: false,
+      });
+      await expect(service.create(createDto(), admin)).rejects.toThrow(
+        new BadRequestException('Teacher is inactive'),
+      );
+      expect(mockPrisma.salaryTerms.create).not.toHaveBeenCalled();
     });
 
     it('closes the open version the day before the new one', async () => {

@@ -54,10 +54,10 @@ export class ChildrenService {
     private audit: AuditService,
   ) {}
 
-  private async validateParents(ids: string[]) {
+  private async validateParents(ids: string[], currentIds: string[] = []) {
     const users = await this.prisma.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, role: true },
+      select: { id: true, role: true, isActive: true },
     });
 
     const notFound = ids.filter((id) => !users.find((u) => u.id === id));
@@ -70,6 +70,10 @@ export class ChildrenService {
       throw new BadRequestException(
         `Users are not parents: ${notParents.map((u) => u.id).join(', ')}`,
       );
+    }
+
+    if (users.some((u) => !u.isActive && !currentIds.includes(u.id))) {
+      throw new BadRequestException('Parent is inactive');
     }
   }
 
@@ -156,7 +160,11 @@ export class ChildrenService {
     if (dto.groupId === null)
       throw new BadRequestException('Group is required');
 
-    if (dto.parentIds?.length) await this.validateParents(dto.parentIds);
+    if (dto.parentIds?.length)
+      await this.validateParents(
+        dto.parentIds,
+        before.parents.map((p) => p.id),
+      );
 
     return this.prisma.$transaction(async (tx) => {
       if (dto.groupId) {

@@ -63,7 +63,7 @@ describe('ClassGroupsService', () => {
     mockPrisma.direction.findUnique.mockResolvedValue({ id: 'd1' });
     mockPrisma.classGroup.findFirst.mockResolvedValue(null);
     mockPrisma.user.findMany.mockResolvedValue([
-      { id: 't1', role: Role.teacher },
+      { id: 't1', role: Role.teacher, isActive: true },
     ]);
     mockPrisma.classGroup.findUnique.mockResolvedValue(detail());
     mockPrisma.classGroup.create.mockResolvedValue({ id: 'g1' });
@@ -145,6 +145,87 @@ describe('ClassGroupsService', () => {
         singleTariffId: '00000000-0000-4000-8000-000000000001',
       }),
     ).rejects.toThrow('Tariff belongs to another institution');
+  });
+
+  describe('inactive references', () => {
+    const tariffId = '00000000-0000-4000-8000-000000000001';
+
+    it('rejects an inactive teacher on create', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: false },
+      ]);
+
+      await expect(service.create(dto)).rejects.toThrow('Teacher is inactive');
+      expect(mockPrisma.classGroup.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps a stored inactive teacher on update', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: false },
+      ]);
+
+      await expect(
+        service.update('g1', { name: 'LEGO 2', teacherIds: ['t1'] }),
+      ).resolves.toBeDefined();
+      expect(mockPrisma.classGroup.update).toHaveBeenCalled();
+    });
+
+    it('rejects a newly added inactive teacher on update', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 't1', role: Role.teacher, isActive: true },
+        { id: 't2', role: Role.teacher, isActive: false },
+      ]);
+
+      await expect(
+        service.update('g1', { teacherIds: ['t1', 't2'] }),
+      ).rejects.toThrow('Teacher is inactive');
+      expect(mockPrisma.classGroup.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an inactive tariff on create', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue({
+        id: tariffId,
+        unit: TariffUnit.session,
+        institutionId: null,
+        isActive: false,
+      });
+
+      await expect(
+        service.create({ ...dto, singleTariffId: tariffId }),
+      ).rejects.toThrow('Tariff is not active');
+    });
+
+    it('keeps a stored inactive tariff on update', async () => {
+      mockPrisma.classGroup.findUnique.mockResolvedValue(
+        detail({ singleTariffId: tariffId }),
+      );
+      mockPrisma.tariff.findUnique.mockResolvedValue({
+        id: tariffId,
+        unit: TariffUnit.session,
+        institutionId: null,
+        isActive: false,
+      });
+
+      await expect(
+        service.update('g1', { singleTariffId: tariffId }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects switching to an inactive tariff on update', async () => {
+      mockPrisma.classGroup.findUnique.mockResolvedValue(
+        detail({ packageTariffId: null }),
+      );
+      mockPrisma.tariff.findUnique.mockResolvedValue({
+        id: tariffId,
+        unit: TariffUnit.package,
+        institutionId: null,
+        isActive: false,
+      });
+
+      await expect(
+        service.update('g1', { packageTariffId: tariffId }),
+      ).rejects.toThrow('Tariff is not active');
+    });
   });
 
   describe('members', () => {

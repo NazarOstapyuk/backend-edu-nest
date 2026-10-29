@@ -293,6 +293,20 @@ describe('PaymentsService', () => {
       expect(mockPrisma.charge.findMany).not.toHaveBeenCalled();
     });
 
+    it('rejects a receipt date after Kyiv today', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await expect(
+        service.create(
+          'child-1',
+          { ...dto, receivedAt: '2999-01-01' },
+          'u1',
+          fullAdmin,
+        ),
+      ).rejects.toThrow('Date is in the future');
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+    });
+
     it('stores an empty reference when none is given', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.payment.create.mockResolvedValue(payment());

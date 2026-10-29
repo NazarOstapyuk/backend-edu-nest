@@ -1,18 +1,40 @@
 import { Test } from '@nestjs/testing';
 import {
+  AccessScope,
   ChargeSource,
   FinanceCategory,
   Prisma,
+  Role,
   TariffUnit,
 } from '@prisma/client';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { PackagesService } from './packages.service';
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);
 
+const actor: AuthenticatedUser = {
+  id: 'u1',
+  role: Role.admin,
+  login: 'admin',
+  mustChangePassword: false,
+  accessScope: AccessScope.all,
+  institutionIds: [],
+  scopeInstitutionIds: null,
+  permissions: {},
+};
+
+const scoped: AuthenticatedUser = {
+  ...actor,
+  accessScope: AccessScope.institutions,
+  institutionIds: ['inst-a'],
+  scopeInstitutionIds: ['inst-a'],
+};
+
 const mockPrisma = {
-  child: { findUnique: jest.fn() },
+  child: { findUnique: jest.fn(), findFirst: jest.fn() },
+  classGroup: { findFirst: jest.fn() },
   direction: { findUnique: jest.fn() },
   tariff: { findUnique: jest.fn() },
   package: {
@@ -66,7 +88,9 @@ describe('PackagesService', () => {
     mockPrisma.direction.findUnique.mockResolvedValue({
       id: 'd1',
       name: 'LEGO',
+      isActive: true,
     });
+    mockPrisma.classGroup.findFirst.mockResolvedValue({ id: 'g1' });
     mockPrisma.package.findMany.mockResolvedValue([]);
     mockPrisma.charge.create.mockResolvedValue({ id: 'c-new' });
     const module = await Test.createTestingModule({
@@ -91,7 +115,7 @@ describe('PackagesService', () => {
     it('creates a charge and a package with expiry', async () => {
       mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
 
-      await service.purchase('child-1', dto, 'u1');
+      await service.purchase('child-1', dto, actor);
 
       const charge = firstArg<{
         data: Record<string, unknown> & { amount: Prisma.Decimal };
@@ -129,12 +153,50 @@ describe('PackagesService', () => {
       async (over, message) => {
         mockPrisma.tariff.findUnique.mockResolvedValue(tariff(over));
 
-        await expect(service.purchase('child-1', dto, 'u1')).rejects.toThrow(
+        await expect(service.purchase('child-1', dto, actor)).rejects.toThrow(
           message,
         );
         expect(mockPrisma.charge.create).not.toHaveBeenCalled();
       },
     );
+
+    it('rejects an inactive direction', async () => {
+      mockPrisma.direction.findUnique.mockResolvedValue({
+        id: 'd1',
+        name: 'LEGO',
+        isActive: false,
+      });
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+
+      await expect(service.purchase('child-1', dto, actor)).rejects.toThrow(
+        'Direction is not active',
+      );
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a tariff that no active group of the direction offers', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      mockPrisma.classGroup.findFirst.mockResolvedValue(null);
+
+      await expect(service.purchase('child-1', dto, actor)).rejects.toThrow(
+        'Tariff is not a package of this direction',
+      );
+      expect(mockPrisma.classGroup.findFirst).toHaveBeenCalledWith({
+        where: { directionId: 'd1', packageTariffId: 'tp', isActive: true },
+        select: { id: true },
+      });
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
+    it('hides a child outside the access scope', async () => {
+      mockPrisma.child.findFirst.mockResolvedValue(null);
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+
+      await expect(service.purchase('child-1', dto, scoped)).rejects.toThrow(
+        'Child not found',
+      );
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('extend', () => {

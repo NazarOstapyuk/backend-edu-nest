@@ -197,6 +197,28 @@ describe('ChildrenService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    it('rejects an inactive parent', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'g1',
+        institutionId: 'i1',
+      });
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: '00000000-0000-0000-0000-000000000001',
+          role: Role.parent,
+          isActive: false,
+        },
+      ]);
+
+      await expect(
+        service.create(
+          { ...baseDto, parentIds: ['00000000-0000-0000-0000-000000000001'] },
+          fullAdmin,
+        ),
+      ).rejects.toThrow('Parent is inactive');
+      expect(mockPrisma.child.create).not.toHaveBeenCalled();
+    });
+
     it('throws BadRequestException when user is not a parent', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'g1',
@@ -295,6 +317,41 @@ describe('ChildrenService', () => {
           },
         },
       });
+    });
+
+    it('keeps a stored inactive parent on update', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        ...existingChild,
+        parents: [{ id: 'p1' }],
+      });
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 'p1', role: Role.parent, isActive: false },
+      ]);
+      mockPrisma.child.update.mockResolvedValue({ id: 'child-1' });
+
+      await expect(
+        service.update(
+          'child-1',
+          { firstName: 'Petro', parentIds: ['p1'] },
+          fullAdmin,
+        ),
+      ).resolves.toEqual({ id: 'child-1' });
+    });
+
+    it('rejects a newly added inactive parent on update', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        ...existingChild,
+        parents: [{ id: 'p1' }],
+      });
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 'p1', role: Role.parent, isActive: true },
+        { id: 'p2', role: Role.parent, isActive: false },
+      ]);
+
+      await expect(
+        service.update('child-1', { parentIds: ['p1', 'p2'] }, fullAdmin),
+      ).rejects.toThrow('Parent is inactive');
+      expect(mockPrisma.child.update).not.toHaveBeenCalled();
     });
 
     it('rejects an explicit null group', async () => {
@@ -726,7 +783,7 @@ describe('ChildrenService', () => {
         kind: GroupKind.kindergarten,
       });
       mockPrisma.user.findMany.mockResolvedValue([
-        { id: 'p1', role: Role.parent },
+        { id: 'p1', role: Role.parent, isActive: true },
       ]);
 
       await service.create(

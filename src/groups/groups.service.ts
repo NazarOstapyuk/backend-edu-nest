@@ -54,10 +54,10 @@ export class GroupsService {
     private audit: AuditService,
   ) {}
 
-  private async validateTeachers(ids: string[]) {
+  private async validateTeachers(ids: string[], currentIds: string[] = []) {
     const users = await this.prisma.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, role: true },
+      select: { id: true, role: true, isActive: true },
     });
 
     const notFound = ids.filter((id) => !users.find((u) => u.id === id));
@@ -71,19 +71,30 @@ export class GroupsService {
         `Users are not teachers: ${notTeachers.map((u) => u.id).join(', ')}`,
       );
     }
+
+    if (users.some((u) => !u.isActive && !currentIds.includes(u.id))) {
+      throw new BadRequestException('Teacher is inactive');
+    }
   }
 
   private async assertBellSchedule(
     groupId: string | null,
     kind: GroupKind,
     bellScheduleId: string | null | undefined,
+    currentId: string | null = null,
   ) {
     if (!bellScheduleId) return;
     const schedule = await this.prisma.bellSchedule.findUnique({
       where: { id: bellScheduleId },
-      select: { id: true, periods: { select: { number: true } } },
+      select: {
+        id: true,
+        active: true,
+        periods: { select: { number: true } },
+      },
     });
     if (!schedule) throw new NotFoundException('Bell schedule not found');
+    if (!schedule.active && bellScheduleId !== currentId)
+      throw new BadRequestException('Bell schedule is inactive');
     if (kind !== GroupKind.school_class)
       throw new BadRequestException('Not a school class');
     if (!groupId) return;
@@ -218,8 +229,17 @@ export class GroupsService {
           throw new ConflictException('Group name already taken');
       }
 
-      if (dto.teacherIds?.length) await this.validateTeachers(dto.teacherIds);
-      await this.assertBellSchedule(id, group.kind, dto.bellScheduleId);
+      if (dto.teacherIds?.length)
+        await this.validateTeachers(
+          dto.teacherIds,
+          group.teachers.map((t) => t.id),
+        );
+      await this.assertBellSchedule(
+        id,
+        group.kind,
+        dto.bellScheduleId,
+        group.bellScheduleId,
+      );
       await this.assertMealCategory(
         dto.mealPriceCategoryId,
         group.mealPriceCategoryId,

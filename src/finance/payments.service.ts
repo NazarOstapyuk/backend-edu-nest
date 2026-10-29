@@ -10,6 +10,7 @@ import type { AuthenticatedUser } from '../common/types/authenticated-user.type'
 import { PrismaService } from '../prisma/prisma.service';
 import { AllocationItem, applyAllocations } from './allocations';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { addDays, kyivToday } from '../tariffs/dates';
 import { money } from './finance-calc';
 
 @Injectable()
@@ -31,6 +32,11 @@ export class PaymentsService {
       throw new BadRequestException('Amount must be greater than 0');
     }
 
+    const receivedAt = new Date(dto.receivedAt);
+    if (receivedAt.getTime() >= addDays(kyivToday(), 1).getTime()) {
+      throw new BadRequestException('Date is in the future');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.create({
         data: {
@@ -40,7 +46,7 @@ export class PaymentsService {
           method: dto.method,
           status: PaymentStatus.confirmed,
           reference: dto.reference?.trim() ?? '',
-          receivedAt: new Date(dto.receivedAt),
+          receivedAt,
           note: dto.note,
           createdById: userId,
         },
