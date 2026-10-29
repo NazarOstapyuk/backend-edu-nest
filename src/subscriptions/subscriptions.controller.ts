@@ -19,7 +19,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Permission } from '../common/decorators/permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { SubscriptionsService } from './subscriptions.service';
 
@@ -30,8 +29,8 @@ export class SubscriptionsController {
 
   @Permission(PermissionArea.classes, PermissionLevel.edit)
   @Post()
-  create(@Body() dto: CreateSubscriptionDto) {
-    return this.service.create(dto);
+  create() {
+    return this.service.create();
   }
 
   @Permission(PermissionArea.classes, PermissionLevel.view)

@@ -160,7 +160,7 @@ export class UsersService {
     if (dto.role === Role.root && actor.role !== Role.root) {
       throw new ForbiddenException('Forbidden');
     }
-    if (dto.role && dto.positionId) {
+    if (dto.role && (dto.positionId || dto.accessScope)) {
       throw new BadRequestException('Access applies to staff only');
     }
     if (!dto.role && !dto.positionId) {
@@ -177,8 +177,14 @@ export class UsersService {
     }
 
     const password = await bcrypt.hash(dto.password, 10);
+    const requestedScope = dto.accessScope;
+    const requestedIds =
+      requestedScope === AccessScope.institutions
+        ? [...new Set(dto.institutionIds ?? [])].sort()
+        : [];
     const scoped =
       !dto.role &&
+      !requestedScope &&
       actor.role !== Role.root &&
       actor.accessScope !== AccessScope.all;
     return this.prisma.$transaction(async (tx) => {
@@ -189,6 +195,19 @@ export class UsersService {
         this.assertCanAssign(actor, position);
         role = roleOf(position);
         positionId = position.id;
+        if (requestedScope && actor.role !== Role.root) {
+          const requested = {
+            role,
+            accessScope: requestedScope,
+            institutionIds: requestedIds,
+            permissions: toPermissionMap(position.permissions),
+          };
+          if (!coversUser(actor, requested))
+            throw new ForbiddenException('Cannot grant more than you have');
+        }
+        for (const institutionId of requestedIds) {
+          await findInstitution(tx, institutionId, { active: true });
+        }
       }
       const user = await tx.user.create({
         data: {
@@ -202,6 +221,20 @@ export class UsersService {
           phone: dto.phone ?? null,
           email: dto.email ?? null,
           mustChangePassword: dto.role === Role.parent,
+          ...(requestedScope
+            ? {
+                accessScope: requestedScope,
+                ...(requestedIds.length > 0
+                  ? {
+                      institutions: {
+                        create: requestedIds.map((institutionId) => ({
+                          institutionId,
+                        })),
+                      },
+                    }
+                  : {}),
+              }
+            : {}),
           ...(scoped
             ? {
                 accessScope: actor.accessScope,
@@ -227,6 +260,26 @@ export class UsersService {
       });
       return toUserView(user);
     });
+  }
+
+  async lookup(role: 'teacher' | 'parent', includeInactive: boolean) {
+    const users = await this.prisma.user.findMany({
+      where: { role, ...(includeInactive ? {} : { isActive: true }) },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        middleName: true,
+        phone: true,
+        isActive: true,
+        institutions: institutionSelect,
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    return users.map(({ institutions, ...rest }) => ({
+      ...rest,
+      institutionIds: idsOf({ institutions }),
+    }));
   }
 
   async findAll() {

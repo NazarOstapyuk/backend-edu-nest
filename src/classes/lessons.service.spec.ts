@@ -450,6 +450,41 @@ describe('LessonsService.getRoster', () => {
     service = module.get(LessonsService);
   });
 
+  it('reports a single tariff only when it has a price on the date', async () => {
+    const group = {
+      id: 'g1',
+      name: 'LEGO 1',
+      directionId: 'd1',
+      direction: {
+        id: 'd1',
+        name: 'LEGO',
+        missedRule: MissedLessonRule.no_charge,
+      },
+      teachers: [{ id: 't1' }],
+    };
+    mockPrisma.lesson.findUnique.mockResolvedValue(null);
+    mockPrisma.classGroupMember.findMany.mockResolvedValue([]);
+    mockPrisma.package.findMany.mockResolvedValue([]);
+    mockPrisma.classGroup.findUnique.mockResolvedValue({
+      ...group,
+      singleTariff: {
+        prices: [{ effectiveFrom: new Date('2026-09-01'), price: '100.00' }],
+      },
+    });
+    expect(
+      (await service.getRoster('g1', '2026-10-11', admin)).hasSingleTariff,
+    ).toBe(true);
+    mockPrisma.classGroup.findUnique.mockResolvedValue({
+      ...group,
+      singleTariff: {
+        prices: [{ effectiveFrom: new Date('2026-11-01'), price: '100.00' }],
+      },
+    });
+    expect(
+      (await service.getRoster('g1', '2026-10-11', admin)).hasSingleTariff,
+    ).toBe(false);
+  });
+
   it('lists members and guests with package info', async () => {
     mockPrisma.classGroup.findUnique.mockResolvedValue({
       id: 'g1',
@@ -485,6 +520,7 @@ describe('LessonsService.getRoster', () => {
     const roster = await service.getRoster('g1', '2026-10-11', admin);
 
     expect(roster.lessonId).toBe('l1');
+    expect(roster.hasSingleTariff).toBe(false);
     expect(roster.rows).toEqual([
       {
         child: { id: 'c1', firstName: 'Ann', lastName: 'Ant' },

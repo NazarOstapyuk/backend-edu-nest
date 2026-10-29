@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { PermissionArea, PermissionLevel } from '@prisma/client';
@@ -14,8 +15,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
-import { Permission } from '../common/decorators/permission.decorator';
+import {
+  Permission,
+  PermissionAny,
+} from '../common/decorators/permission.decorator';
 import { CreateUserDto } from './dto/create-user.dto';
+import { LookupUsersQueryDto } from './dto/lookup-users-query.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
@@ -30,6 +35,26 @@ export class UsersController {
   @Permission(PermissionArea.users, PermissionLevel.edit)
   create(@Body() dto: CreateUserDto, @CurrentUser() user: AuthenticatedUser) {
     return this.usersService.create(dto, user);
+  }
+
+  @Get('lookup')
+  @PermissionAny(
+    [
+      PermissionArea.users,
+      PermissionArea.children,
+      PermissionArea.classes,
+      PermissionArea.timetable,
+      PermissionArea.payroll,
+      PermissionArea.finance,
+      PermissionArea.register,
+    ],
+    PermissionLevel.view,
+  )
+  lookup(@Query() query: LookupUsersQueryDto) {
+    return this.usersService.lookup(
+      query.role,
+      query.includeInactive === 'true',
+    );
   }
 
   @Get()

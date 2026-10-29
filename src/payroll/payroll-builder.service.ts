@@ -294,6 +294,24 @@ export class PayrollBuilder {
     });
   }
 
+  private async extraHourRateOn(db: Db, teacherId: string, month: Date) {
+    const end = lastDayOfMonth(month);
+    const rows = await db.salaryTerms.findMany({
+      where: {
+        teacherId,
+        validFrom: { lte: end },
+        OR: [{ validTo: null }, { validTo: { gte: month } }],
+      },
+      select: { validFrom: true, validTo: true, extraHourRate: true },
+      orderBy: { validFrom: 'asc' },
+    });
+    const atEnd = rows.find(
+      (row) => row.validTo === null || row.validTo.getTime() >= end.getTime(),
+    );
+    const version = atEnd ?? rows[rows.length - 1];
+    return version?.extraHourRate ? money(version.extraHourRate) : null;
+  }
+
   async detail(db: Db, teacher: TeacherRef, month: Date, staff: boolean) {
     const sheet = await db.payrollSheet.findUnique({
       where: { teacherId_month: { teacherId: teacher.id, month } },
@@ -407,6 +425,10 @@ export class PayrollBuilder {
       unpaidAbsenceDays?: number;
     } = { ...days };
     delete daysRest.unpaidAbsenceDays;
+    const extraHourRate =
+      staff && sheet?.status !== PayrollStatus.approved
+        ? await this.extraHourRateOn(db, teacher.id, month)
+        : null;
     const accrued = sumAmounts(lines);
     const paid = sumAmounts(activePayments);
     const teacherPublic = {
@@ -422,7 +444,10 @@ export class PayrollBuilder {
       reopenReason: sheet?.reopenReason ?? null,
       days: showDetails ? days : daysRest,
       ...(staff
-        ? { payrollDetailsVisible: teacher.payrollDetailsVisible }
+        ? {
+            payrollDetailsVisible: teacher.payrollDetailsVisible,
+            extraHourRate,
+          }
         : {}),
       ...(showDetails ? { extraHours, absences } : {}),
       lines: lines.map(lineView),

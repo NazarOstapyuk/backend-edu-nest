@@ -165,6 +165,38 @@ describe('RoutineService', () => {
   });
 
   describe('groups', () => {
+    it('adds hasTemplate from the template count', async () => {
+      mockPrisma.group.findMany.mockResolvedValue([
+        {
+          id: 'g1',
+          name: 'A',
+          institution: { id: 'i1', name: 'I' },
+          _count: { routineTemplates: 2 },
+        },
+        {
+          id: 'g2',
+          name: 'B',
+          institution: { id: 'i1', name: 'I' },
+          _count: { routineTemplates: 0 },
+        },
+      ]);
+      const rows = await service.groups(user());
+      expect(rows).toEqual([
+        {
+          id: 'g1',
+          name: 'A',
+          institution: { id: 'i1', name: 'I' },
+          hasTemplate: true,
+        },
+        {
+          id: 'g2',
+          name: 'B',
+          institution: { id: 'i1', name: 'I' },
+          hasTemplate: false,
+        },
+      ]);
+    });
+
     it('lists kindergarten groups in scope for a manager', async () => {
       mockPrisma.group.findMany.mockResolvedValue([]);
       await service.groups(user({ scopeInstitutionIds: ['i1'] }));

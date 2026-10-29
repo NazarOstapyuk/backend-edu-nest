@@ -249,6 +249,129 @@ describe('UsersService', () => {
       ]);
     });
 
+    describe('scope in one call', () => {
+      const scopedActor = {
+        ...adminActor,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['a', 'b'],
+        scopeInstitutionIds: ['a', 'b'],
+      };
+      const inst = (isActive = true) => ({
+        id: 'a',
+        type: 'kindergarten',
+        isActive,
+        name: 'A',
+      });
+      const dto = (extra: Record<string, unknown>) => ({
+        login: 'n',
+        password: 'pass123',
+        positionId: 'pos-acc',
+        ...extra,
+      });
+
+      beforeEach(() => {
+        mockPrisma.user.findUnique.mockResolvedValue(null);
+        mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
+        mockPrisma.institution.findUnique.mockResolvedValue(inst());
+        mockPrisma.user.create.mockResolvedValue({
+          id: 'a1',
+          position: accountantPosition,
+          institutions: [{ institutionId: 'a' }],
+        });
+      });
+
+      it('stores the requested scope in the create call', async () => {
+        await service.create(
+          dto({
+            accessScope: AccessScope.institutions,
+            institutionIds: ['a', 'a'],
+          }),
+          rootActor,
+        );
+        expect(dataOf(mockPrisma.user.create)).toMatchObject({
+          accessScope: AccessScope.institutions,
+          institutions: { create: [{ institutionId: 'a' }] },
+        });
+        expect(mockPrisma.institution.findUnique).toHaveBeenCalledTimes(1);
+      });
+
+      it('stores scope all explicitly', async () => {
+        await service.create(dto({ accessScope: AccessScope.all }), rootActor);
+        const data = dataOf(mockPrisma.user.create);
+        expect(data).toMatchObject({ accessScope: AccessScope.all });
+        expect(data.institutions).toBeUndefined();
+      });
+
+      it('refuses institutions outside the actor scope', async () => {
+        await expect(
+          service.create(
+            dto({
+              accessScope: AccessScope.institutions,
+              institutionIds: ['c'],
+            }),
+            scopedActor,
+          ),
+        ).rejects.toThrow(
+          new ForbiddenException('Cannot grant more than you have'),
+        );
+        await expect(
+          service.create(dto({ accessScope: AccessScope.all }), scopedActor),
+        ).rejects.toThrow('Cannot grant more than you have');
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses an inactive or unknown institution', async () => {
+        mockPrisma.institution.findUnique.mockResolvedValue(inst(false));
+        await expect(
+          service.create(
+            dto({
+              accessScope: AccessScope.institutions,
+              institutionIds: ['a'],
+            }),
+            rootActor,
+          ),
+        ).rejects.toThrow('Institution is inactive');
+        mockPrisma.institution.findUnique.mockResolvedValue(null);
+        await expect(
+          service.create(
+            dto({
+              accessScope: AccessScope.institutions,
+              institutionIds: ['a'],
+            }),
+            rootActor,
+          ),
+        ).rejects.toThrow('Institution not found');
+        expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses scope for parents', async () => {
+        await expect(
+          service.create(
+            {
+              login: 'mom',
+              password: 'pass123',
+              role: Role.parent,
+              phone: '+380671234567',
+              accessScope: AccessScope.all,
+            },
+            rootActor,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException('Access applies to staff only'),
+        );
+      });
+
+      it('keeps copying the actor scope when none is sent', async () => {
+        await service.create(dto({}), scopedActor);
+        expect(dataOf(mockPrisma.user.create)).toMatchObject({
+          accessScope: AccessScope.institutions,
+          institutions: {
+            create: [{ institutionId: 'a' }, { institutionId: 'b' }],
+          },
+        });
+      });
+    });
+
     it('answers 404 for an unknown position', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.position.findUnique.mockResolvedValue(null);
@@ -343,6 +466,48 @@ describe('UsersService', () => {
         role: Role.root,
         positionId: null,
       });
+    });
+  });
+
+  describe('lookup', () => {
+    it('returns active teachers by name', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([
+        {
+          id: 'u1',
+          firstName: 'A',
+          lastName: 'B',
+          middleName: null,
+          phone: null,
+          isActive: true,
+          institutions: [{ institutionId: 'y' }, { institutionId: 'x' }],
+        },
+      ]);
+      const rows = await service.lookup(Role.teacher, false);
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { role: Role.teacher, isActive: true },
+          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+        }),
+      );
+      expect(rows).toEqual([
+        {
+          id: 'u1',
+          firstName: 'A',
+          lastName: 'B',
+          middleName: null,
+          phone: null,
+          isActive: true,
+          institutionIds: ['x', 'y'],
+        },
+      ]);
+    });
+
+    it('includes inactive users on request', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      await service.lookup(Role.parent, true);
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { role: Role.parent } }),
+      );
     });
   });
 

@@ -1,5 +1,8 @@
 // src/users/dto/create-user.dto.ts
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsEmail,
   IsIn,
   IsNotEmpty,
@@ -7,10 +10,11 @@ import {
   IsString,
   IsUUID,
   Matches,
+  ValidateIf,
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { Role } from '@prisma/client';
+import { AccessScope, Role } from '@prisma/client';
 import { PHONE_PATTERN } from '../../common/validation/contacts';
 
 export class CreateUserDto {
@@ -29,6 +33,17 @@ export class CreateUserDto {
   @IsUUID('4')
   @IsOptional()
   positionId?: string;
+
+  @IsIn([AccessScope.all, AccessScope.institutions])
+  @IsOptional()
+  accessScope?: AccessScope;
+
+  @ValidateIf((o: CreateUserDto) => o.accessScope === AccessScope.institutions)
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds?: string[];
 
   @IsString()
   @MinLength(3)

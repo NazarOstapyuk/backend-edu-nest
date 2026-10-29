@@ -210,8 +210,8 @@ export class RoutineService {
     return this.build(group, range.from, range.to);
   }
 
-  groups(user: AuthenticatedUser) {
-    return this.prisma.group.findMany({
+  async groups(user: AuthenticatedUser) {
+    const rows = await this.prisma.group.findMany({
       where: {
         kind: GroupKind.kindergarten,
         ...groupScopeWhere(scopeIds(user)),
@@ -223,9 +223,14 @@ export class RoutineService {
         id: true,
         name: true,
         institution: { select: { id: true, name: true } },
+        _count: { select: { routineTemplates: true } },
       },
       orderBy: [{ institution: { name: 'asc' } }, { name: 'asc' }],
     });
+    return rows.map(({ _count, ...group }) => ({
+      ...group,
+      hasTemplate: _count.routineTemplates > 0,
+    }));
   }
 
   async templates(user: AuthenticatedUser, id: string) {

@@ -506,6 +506,40 @@ describe('PayrollBuilder', () => {
       expect(detail.payrollDetailsVisible).toBe(false);
     });
 
+    it('shows the extra hour rate effective at month end on a staff card', async () => {
+      mockPrisma.salaryTerms.findMany.mockResolvedValue([
+        {
+          ...termsRow,
+          validFrom: day('2026-09-01'),
+          validTo: day('2026-10-14'),
+          extraHourRate: dec('200'),
+        },
+        {
+          ...termsRow,
+          id: 'st2',
+          validFrom: day('2026-10-15'),
+          extraHourRate: dec('250'),
+        },
+      ]);
+      const detail = await builder.detail(prisma, teacher, OCT, true);
+      expect(detail.extraHourRate).toBe('250.00');
+      const own = await builder.detail(prisma, teacher, OCT, false);
+      expect(own).not.toHaveProperty('extraHourRate');
+    });
+
+    it('answers a null extra hour rate without terms or rate', async () => {
+      mockPrisma.salaryTerms.findMany.mockResolvedValue([
+        { ...termsRow, extraHourRate: null },
+      ]);
+      expect(
+        (await builder.detail(prisma, teacher, OCT, true)).extraHourRate,
+      ).toBeNull();
+      mockPrisma.salaryTerms.findMany.mockResolvedValue([]);
+      expect(
+        (await builder.detail(prisma, teacher, OCT, true)).extraHourRate,
+      ).toBeNull();
+    });
+
     it('snapshots the extra hours line through compute', async () => {
       const computed = await builder.compute(prisma, 't1', OCT, null, []);
 

@@ -58,7 +58,7 @@ export class LessonsService {
   async getRoster(groupId: string, dateValue: string, user: AuthenticatedUser) {
     const group = await this.prisma.classGroup.findUnique({
       where: { id: groupId },
-      include: { direction: true, teachers: { select: { id: true } } },
+      include: markGroupInclude,
     });
     if (!group) throw new NotFoundException('Class group not found');
     assertGroupAccess(group, user);
@@ -143,6 +143,9 @@ export class LessonsService {
       date,
       lessonId: lesson?.id ?? null,
       conductedBy: lesson?.conductedBy ?? null,
+      hasSingleTariff:
+        !!group.singleTariff &&
+        priceOn(group.singleTariff.prices, date) !== null,
       rows,
     };
   }
