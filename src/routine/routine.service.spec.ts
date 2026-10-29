@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { kyivToday } from '../tariffs/dates';
 import { Test } from '@nestjs/testing';
 import {
   AccessScope,
@@ -181,6 +182,14 @@ describe('RoutineService', () => {
         },
       ]);
       const rows = await service.groups(user());
+      const select = (
+        mockPrisma.group.findMany.mock.calls[0] as [
+          { select: { _count: { select: { routineTemplates: unknown } } } },
+        ]
+      )[0].select;
+      expect(select._count.select.routineTemplates).toEqual({
+        where: { OR: [{ validTo: null }, { validTo: { gte: kyivToday() } }] },
+      });
       expect(rows).toEqual([
         {
           id: 'g1',

@@ -361,6 +361,20 @@ describe('UsersService', () => {
         );
       });
 
+      it('lets a scoped actor grant a subset of its institutions', async () => {
+        await service.create(
+          dto({
+            accessScope: AccessScope.institutions,
+            institutionIds: ['a'],
+          }),
+          scopedActor,
+        );
+        expect(dataOf(mockPrisma.user.create)).toMatchObject({
+          accessScope: AccessScope.institutions,
+          institutions: { create: [{ institutionId: 'a' }] },
+        });
+      });
+
       it('keeps copying the actor scope when none is sent', async () => {
         await service.create(dto({}), scopedActor);
         expect(dataOf(mockPrisma.user.create)).toMatchObject({
@@ -470,44 +484,86 @@ describe('UsersService', () => {
   });
 
   describe('lookup', () => {
-    it('returns active teachers by name', async () => {
-      mockPrisma.user.findMany.mockResolvedValue([
-        {
-          id: 'u1',
-          firstName: 'A',
-          lastName: 'B',
-          middleName: null,
-          phone: null,
-          isActive: true,
-          institutions: [{ institutionId: 'y' }, { institutionId: 'x' }],
-        },
-      ]);
-      const rows = await service.lookup(Role.teacher, false);
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { role: Role.teacher, isActive: true },
-          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-        }),
+    const row = {
+      id: 'u1',
+      firstName: 'A',
+      lastName: 'B',
+      middleName: null,
+      phone: '+380671234567',
+      isActive: true,
+      institutions: [{ institutionId: 'y' }, { institutionId: 'x' }],
+    };
+    const callArg = () =>
+      (
+        mockPrisma.user.findMany.mock.calls[0] as [
+          { where: Record<string, unknown>; select: Record<string, unknown> },
+        ]
+      )[0];
+    const viewer = (area: PermissionArea, scope: string[] | null = null) => ({
+      ...actorOf(Role.admin, { [area]: PermissionLevel.view }),
+      scopeInstitutionIds: scope,
+    });
+
+    it('returns active teachers by name without phone', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([row]);
+      const rows = await service.lookup(
+        Role.teacher,
+        false,
+        viewer(PermissionArea.payroll),
       );
-      expect(rows).toEqual([
-        {
-          id: 'u1',
-          firstName: 'A',
-          lastName: 'B',
-          middleName: null,
-          phone: null,
-          isActive: true,
-          institutionIds: ['x', 'y'],
-        },
-      ]);
+      const arg = callArg();
+      expect(arg.where).toEqual({ role: Role.teacher, isActive: true });
+      expect(arg.select).not.toHaveProperty('phone');
+      expect(arg).toMatchObject({
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      });
+      expect(rows[0]).toMatchObject({
+        phone: null,
+        institutionIds: ['x', 'y'],
+      });
     });
 
     it('includes inactive users on request', async () => {
       mockPrisma.user.findMany.mockResolvedValue([]);
-      await service.lookup(Role.parent, true);
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { role: Role.parent } }),
+      await service.lookup(Role.teacher, true, rootActor);
+      expect(callArg().where).toEqual({ role: Role.teacher });
+    });
+
+    it('refuses parents without users or children view', async () => {
+      await expect(
+        service.lookup(Role.parent, false, viewer(PermissionArea.finance)),
+      ).rejects.toThrow(new ForbiddenException('Insufficient permissions'));
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns parents with phone for children view and scope all', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([row]);
+      const rows = await service.lookup(
+        Role.parent,
+        false,
+        viewer(PermissionArea.children),
       );
+      const arg = callArg();
+      expect(arg.where).toEqual({ role: Role.parent, isActive: true });
+      expect(arg.select).toHaveProperty('phone', true);
+      expect(rows[0].phone).toBe('+380671234567');
+    });
+
+    it('narrows parents to the scope or those without children', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      await service.lookup(
+        Role.parent,
+        false,
+        viewer(PermissionArea.users, ['i1']),
+      );
+      expect(callArg().where).toEqual({
+        role: Role.parent,
+        isActive: true,
+        OR: [
+          { children: { some: { group: { institutionId: { in: ['i1'] } } } } },
+          { children: { none: {} } },
+        ],
+      });
     });
   });
 

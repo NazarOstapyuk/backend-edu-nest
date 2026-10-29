@@ -223,7 +223,15 @@ export class RoutineService {
         id: true,
         name: true,
         institution: { select: { id: true, name: true } },
-        _count: { select: { routineTemplates: true } },
+        _count: {
+          select: {
+            routineTemplates: {
+              where: {
+                OR: [{ validTo: null }, { validTo: { gte: kyivToday() } }],
+              },
+            },
+          },
+        },
       },
       orderBy: [{ institution: { name: 'asc' } }, { name: 'asc' }],
     });

@@ -18,10 +18,13 @@ import * as bcrypt from 'bcryptjs';
 import {
   coversUser,
   grantDenial,
+  hasPermission,
   holdsAll,
+  scopeIds,
   toPermissionMap,
 } from '../access/access-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { childScopeWhere } from '../access/scope';
 import { AuditService } from '../audit/audit.service';
 import { findInstitution } from '../institutions/institution-checks';
 import { positionRef, positionSelect } from '../positions/position-select';
@@ -262,15 +265,38 @@ export class UsersService {
     });
   }
 
-  async lookup(role: 'teacher' | 'parent', includeInactive: boolean) {
+  async lookup(
+    role: 'teacher' | 'parent',
+    includeInactive: boolean,
+    actor: AuthenticatedUser,
+  ) {
+    const isParents = role === 'parent';
+    if (
+      isParents &&
+      !hasPermission(actor, PermissionArea.users, PermissionLevel.view) &&
+      !hasPermission(actor, PermissionArea.children, PermissionLevel.view)
+    )
+      throw new ForbiddenException('Insufficient permissions');
+    const scope = scopeIds(actor);
     const users = await this.prisma.user.findMany({
-      where: { role, ...(includeInactive ? {} : { isActive: true }) },
+      where: {
+        role,
+        ...(includeInactive ? {} : { isActive: true }),
+        ...(isParents && scope
+          ? {
+              OR: [
+                { children: { some: childScopeWhere(scope) } },
+                { children: { none: {} } },
+              ],
+            }
+          : {}),
+      },
       select: {
         id: true,
         firstName: true,
         lastName: true,
         middleName: true,
-        phone: true,
+        ...(isParents ? { phone: true } : {}),
         isActive: true,
         institutions: institutionSelect,
       },
@@ -278,6 +304,7 @@ export class UsersService {
     });
     return users.map(({ institutions, ...rest }) => ({
       ...rest,
+      phone: isParents ? (rest.phone ?? null) : null,
       institutionIds: idsOf({ institutions }),
     }));
   }

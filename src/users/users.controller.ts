@@ -50,10 +50,14 @@ export class UsersController {
     ],
     PermissionLevel.view,
   )
-  lookup(@Query() query: LookupUsersQueryDto) {
+  lookup(
+    @Query() query: LookupUsersQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.usersService.lookup(
       query.role,
       query.includeInactive === 'true',
+      user,
     );
   }
 
