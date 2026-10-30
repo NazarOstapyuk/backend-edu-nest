@@ -1,5 +1,8 @@
 // src/users/dto/update-user.dto.ts
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsIn,
   IsNotEmpty,
@@ -12,7 +15,7 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { Role } from '@prisma/client';
+import { AccessScope, Role } from '@prisma/client';
 import { PHONE_PATTERN } from '../../common/validation/contacts';
 
 export class UpdateUserDto {
@@ -33,6 +36,17 @@ export class UpdateUserDto {
   @IsUUID('4')
   @IsOptional()
   positionId?: string;
+
+  @IsIn([AccessScope.all, AccessScope.institutions])
+  @IsOptional()
+  accessScope?: AccessScope;
+
+  @ValidateIf((o: UpdateUserDto) => o.accessScope === AccessScope.institutions)
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  institutionIds?: string[];
 
   @IsString()
   @IsNotEmpty()

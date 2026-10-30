@@ -298,6 +298,7 @@ export class UsersService {
         middleName: true,
         ...(isParents ? { phone: true } : {}),
         isActive: true,
+        accessScope: true,
         institutions: institutionSelect,
       },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
@@ -462,6 +463,15 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto, actor: AuthenticatedUser) {
     if (dto.role && dto.positionId)
       throw new BadRequestException('Access applies to staff only');
+    if (dto.accessScope && (dto.role || !dto.positionId))
+      throw new BadRequestException('Access applies to staff only');
+    if (dto.accessScope && actor.id === id)
+      throw new ForbiddenException('Cannot change own access');
+    const requestedScope = dto.accessScope;
+    const requestedIds =
+      requestedScope === AccessScope.institutions
+        ? [...new Set(dto.institutionIds ?? [])].sort()
+        : [];
     const passwordHash = dto.password
       ? await bcrypt.hash(dto.password, 10)
       : null;
@@ -516,13 +526,35 @@ export class UsersService {
         data.positionId = null;
         data.institutions = { deleteMany: {} };
         data.accessScope = AccessScope.all;
-      } else if (changesPosition && dto.positionId) {
+      } else if ((changesPosition || requestedScope) && dto.positionId) {
         const position = await this.lockPosition(tx, dto.positionId);
         this.assertCanAssign(actor, position);
         nextRole = roleOf(position);
         data.role = nextRole;
         data.positionId = position.id;
-        if (
+        if (requestedScope) {
+          if (actor.role !== Role.root) {
+            const requested = {
+              role: nextRole,
+              accessScope: requestedScope,
+              institutionIds: requestedIds,
+              permissions: toPermissionMap(position.permissions),
+            };
+            if (!coversUser(actor, requested))
+              throw new ForbiddenException('Cannot grant more than you have');
+          }
+          const currentIds = idsOf(user);
+          for (const institutionId of requestedIds) {
+            await findInstitution(tx, institutionId, {
+              active: !currentIds.includes(institutionId),
+            });
+          }
+          data.accessScope = requestedScope;
+          data.institutions = {
+            deleteMany: {},
+            create: requestedIds.map((institutionId) => ({ institutionId })),
+          };
+        } else if (
           user.role === Role.parent &&
           actor.role !== Role.root &&
           actor.accessScope !== AccessScope.all

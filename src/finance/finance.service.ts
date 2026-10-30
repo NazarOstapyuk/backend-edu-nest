@@ -24,13 +24,21 @@ import {
 export class FinanceService {
   constructor(private prisma: PrismaService) {}
 
-  private async findChild(childId: string): Promise<PersonRef> {
+  private async findChild(
+    childId: string,
+  ): Promise<PersonRef & { institutionId: string | null }> {
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        group: { select: { institutionId: true } },
+      },
     });
     if (!child) throw new NotFoundException('Child not found');
-    return child;
+    const { group, ...person } = child;
+    return { ...person, institutionId: group?.institutionId ?? null };
   }
 
   private loadRecords(childId: string) {

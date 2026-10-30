@@ -171,7 +171,7 @@ export const toPaymentView = (payment: LoadedPayment) => ({
 });
 
 export const buildChildFinance = (
-  child: PersonRef,
+  child: PersonRef & { institutionId: string | null },
   charges: LoadedCharge[],
   payments: LoadedPayment[],
 ) => ({

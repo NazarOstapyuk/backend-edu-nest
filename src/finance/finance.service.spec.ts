@@ -7,7 +7,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FinanceService } from './finance.service';
 
 const d = (value: string) => new Prisma.Decimal(value);
-const child = { id: 'child-1', firstName: 'Ivan', lastName: 'Petrenko' };
+const child = {
+  id: 'child-1',
+  firstName: 'Ivan',
+  lastName: 'Petrenko',
+  group: { institutionId: 'inst-1' },
+};
 
 const mockPrisma = {
   child: {
@@ -96,11 +101,24 @@ describe('FinanceService', () => {
 
       const result = await service.getChildFinance('child-1', fullAdmin);
 
-      expect(result.child).toEqual(child);
+      expect(result.child).toEqual({
+        id: 'child-1',
+        firstName: 'Ivan',
+        lastName: 'Petrenko',
+        institutionId: 'inst-1',
+      });
       expect(result.totals).toEqual({ totalDue: '0.00', unallocated: '0.00' });
       expect(mockPrisma.charge.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { childId: 'child-1' } }),
       );
+    });
+
+    it('returns null institution for a child without a group', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ ...child, group: null });
+
+      const result = await service.getChildFinance('child-1', fullAdmin);
+
+      expect(result.child.institutionId).toBeNull();
     });
 
     it('includes parents with contacts', async () => {

@@ -16,7 +16,12 @@ import {
 
 const d = (value: string) => new Prisma.Decimal(value);
 const admin = { id: 'u1', firstName: 'Olena', lastName: 'Admin' };
-const child = { id: 'child-1', firstName: 'Ivan', lastName: 'Petrenko' };
+const child = {
+  id: 'child-1',
+  firstName: 'Ivan',
+  lastName: 'Petrenko',
+  institutionId: 'inst-1',
+};
 
 const allocation = (over: Record<string, unknown> = {}) => ({
   id: 'a1',

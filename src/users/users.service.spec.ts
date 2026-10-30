@@ -491,6 +491,7 @@ describe('UsersService', () => {
       middleName: null,
       phone: '+380671234567',
       isActive: true,
+      accessScope: AccessScope.institutions,
       institutions: [{ institutionId: 'y' }, { institutionId: 'x' }],
     };
     const callArg = () =>
@@ -519,6 +520,7 @@ describe('UsersService', () => {
       });
       expect(rows[0]).toMatchObject({
         phone: null,
+        accessScope: AccessScope.institutions,
         institutionIds: ['x', 'y'],
       });
     });
@@ -735,6 +737,139 @@ describe('UsersService', () => {
       expect(dataOf(mockPrisma.user.update)).toMatchObject({
         role: Role.admin,
         positionId: 'pos-acc',
+      });
+    });
+
+    describe('promotion with scope in one call', () => {
+      const scopedActor = {
+        ...adminActor,
+        accessScope: AccessScope.institutions,
+        institutionIds: ['a', 'b'],
+        scopeInstitutionIds: ['a', 'b'],
+      };
+      const inst = (isActive = true) => ({
+        id: 'a',
+        type: 'kindergarten',
+        isActive,
+        name: 'A',
+      });
+
+      beforeEach(() => {
+        mockPrisma.user.findUnique.mockResolvedValue(parent);
+        mockPrisma.position.findUnique.mockResolvedValue(accountantPosition);
+        mockPrisma.institution.findUnique.mockResolvedValue(inst());
+      });
+
+      it('stores position and requested scope in one update', async () => {
+        await service.update(
+          'p1',
+          {
+            positionId: 'pos-acc',
+            accessScope: AccessScope.institutions,
+            institutionIds: ['a', 'a'],
+          },
+          rootActor,
+        );
+        expect(mockPrisma.user.update).toHaveBeenCalledTimes(1);
+        expect(dataOf(mockPrisma.user.update)).toMatchObject({
+          role: Role.admin,
+          positionId: 'pos-acc',
+          accessScope: AccessScope.institutions,
+          institutions: {
+            deleteMany: {},
+            create: [{ institutionId: 'a' }],
+          },
+        });
+      });
+
+      it('stores scope all with no institutions', async () => {
+        await service.update(
+          'p1',
+          { positionId: 'pos-acc', accessScope: AccessScope.all },
+          rootActor,
+        );
+        expect(dataOf(mockPrisma.user.update)).toMatchObject({
+          accessScope: AccessScope.all,
+          institutions: { deleteMany: {}, create: [] },
+        });
+      });
+
+      it('refuses scope without a position or with role parent', async () => {
+        await expect(
+          service.update('p1', { accessScope: AccessScope.all }, rootActor),
+        ).rejects.toThrow(
+          new BadRequestException('Access applies to staff only'),
+        );
+        await expect(
+          service.update(
+            'p1',
+            { role: Role.parent, accessScope: AccessScope.all },
+            rootActor,
+          ),
+        ).rejects.toThrow('Access applies to staff only');
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses a scope the actor does not cover', async () => {
+        await expect(
+          service.update(
+            'p1',
+            { positionId: 'pos-acc', accessScope: AccessScope.all },
+            scopedActor,
+          ),
+        ).rejects.toThrow(
+          new ForbiddenException('Cannot grant more than you have'),
+        );
+        await expect(
+          service.update(
+            'p1',
+            {
+              positionId: 'pos-acc',
+              accessScope: AccessScope.institutions,
+              institutionIds: ['c'],
+            },
+            scopedActor,
+          ),
+        ).rejects.toThrow('Cannot grant more than you have');
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses inactive and unknown institutions', async () => {
+        mockPrisma.institution.findUnique.mockResolvedValue(inst(false));
+        await expect(
+          service.update(
+            'p1',
+            {
+              positionId: 'pos-acc',
+              accessScope: AccessScope.institutions,
+              institutionIds: ['a'],
+            },
+            rootActor,
+          ),
+        ).rejects.toThrow('Institution is inactive');
+        mockPrisma.institution.findUnique.mockResolvedValue(null);
+        await expect(
+          service.update(
+            'p1',
+            {
+              positionId: 'pos-acc',
+              accessScope: AccessScope.institutions,
+              institutionIds: ['a'],
+            },
+            rootActor,
+          ),
+        ).rejects.toThrow('Institution not found');
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses scope changes on oneself', async () => {
+        await expect(
+          service.update(
+            adminActor.id,
+            { positionId: 'pos-acc', accessScope: AccessScope.all },
+            adminActor,
+          ),
+        ).rejects.toThrow(new ForbiddenException('Cannot change own access'));
       });
     });
 
