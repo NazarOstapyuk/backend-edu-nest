@@ -1665,4 +1665,5 @@ model NoteAnswer {
 
   @@index([childId, date])
   @@index([groupId, date])
+  @@index([questionId])
 }
