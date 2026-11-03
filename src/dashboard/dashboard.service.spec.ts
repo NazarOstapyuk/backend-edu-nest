@@ -60,6 +60,7 @@ describe('DashboardService', () => {
   const calendar = { entriesBetween: jest.fn() };
   const backups = { status: jest.fn() };
   const onlinePayments = { config: jest.fn() };
+  const notes = { pending: jest.fn() };
 
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-16T10:00:00.000Z'));
@@ -74,12 +75,42 @@ describe('DashboardService', () => {
     calendar.entriesBetween.mockResolvedValue([]);
     backups.status.mockResolvedValue({ configured: true, stale: false });
     onlinePayments.config.mockReturnValue({ enabled: false });
+    notes.pending.mockResolvedValue([]);
     service = new DashboardService(
       prisma as never,
       calendar as never,
       backups as never,
       onlinePayments as never,
+      notes as never,
     );
+  });
+
+  it('adds the notes section for teachers when something is pending', async () => {
+    const teacher = makeUser({ role: Role.teacher });
+    notes.pending.mockResolvedValue([
+      {
+        group: { id: 'g1', name: 'Сонечко' },
+        own: true,
+        pending: 2,
+        overdue: true,
+      },
+    ]);
+    const result = await service.today(teacher);
+    expect(result.notes).toEqual({
+      groups: [{ id: 'g1', name: 'Сонечко', pending: 2, overdue: true }],
+    });
+    expect(notes.pending).toHaveBeenCalledWith(teacher);
+  });
+
+  it('omits the notes section when empty or without access', async () => {
+    const result = await service.today(
+      makeUser({ permissions: { register: 'view' } }),
+    );
+    expect(result.notes).toBeUndefined();
+    expect(notes.pending).toHaveBeenCalled();
+    notes.pending.mockClear();
+    await service.today(makeUser({ permissions: { finance: 'view' } }));
+    expect(notes.pending).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

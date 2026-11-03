@@ -16,6 +16,7 @@ import { CalendarService } from '../attendance/calendar.service';
 import { canManageRegister } from '../attendance/register.service';
 import { BackupsService } from '../backups/backups.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { DailyNotesService } from '../daily-notes/daily-notes.service';
 import { formatMoney, sumMoney } from '../finance/finance-calc';
 import { OnlinePaymentsService } from '../online-payments/online-payments.service';
 import { childMoney } from '../parent-cabinet/cabinet-calc';
@@ -36,6 +37,9 @@ const can = (user: AuthenticatedUser, area: PermissionArea) =>
 export interface TodayDashboard {
   date: string;
   register?: { count: number; names: string[]; more: number };
+  notes?: {
+    groups: { id: string; name: string; pending: number; overdue: boolean }[];
+  };
   notices?: { count: number };
   debts?: { children: number; amount: string };
   meals?: { count: number; groups: { name: string; count: number }[] };
@@ -56,6 +60,7 @@ export class DashboardService {
     private calendar: CalendarService,
     private backups: BackupsService,
     private onlinePayments: OnlinePaymentsService,
+    private notes: DailyNotesService,
   ) {}
 
   async today(user: AuthenticatedUser): Promise<TodayDashboard> {
@@ -73,6 +78,18 @@ export class DashboardService {
     if (canManageRegister(user) || isTeacher) {
       add(async () => {
         result.register = await this.register(user, today);
+      });
+      add(async () => {
+        const rows = await this.notes.pending(user);
+        if (rows.length > 0)
+          result.notes = {
+            groups: rows.map((row) => ({
+              id: row.group.id,
+              name: row.group.name,
+              pending: row.pending,
+              overdue: row.overdue,
+            })),
+          };
       });
     }
     if (can(user, PermissionArea.register)) {
