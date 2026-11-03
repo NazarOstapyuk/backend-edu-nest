@@ -5,12 +5,13 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateStaffTaskDto {
   @IsOptional()
   @IsString()
-  title?: string;
+  title?: string | null;
 
   @IsOptional()
   @IsString()
@@ -18,13 +19,13 @@ export class UpdateStaffTaskDto {
 
   @IsOptional()
   @IsString()
-  dueDate?: string;
+  dueDate?: string | null;
 
   @IsOptional()
   @IsString()
-  dueTime?: string;
+  dueTime?: string | null;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(200)

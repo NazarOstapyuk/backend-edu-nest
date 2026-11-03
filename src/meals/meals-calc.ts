@@ -57,10 +57,18 @@ const kyivOffsetMinutes = (instant: Date): number => {
   return Math.round((asUtc - instant.getTime()) / MINUTE_MS);
 };
 
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
 export function deadlineFor(date: Date, hhmm: string): Date {
   const minutes = parseTime(hhmm) ?? 0;
-  const guess = new Date(date.getTime() + minutes * MINUTE_MS);
-  return new Date(guess.getTime() - kyivOffsetMinutes(guess) * MINUTE_MS);
+  const wall = date.getTime() + minutes * MINUTE_MS;
+  const before = kyivOffsetMinutes(new Date(wall - DAY_MS));
+  const after = kyivOffsetMinutes(new Date(wall + DAY_MS));
+  for (const offset of [before, after]) {
+    const instant = new Date(wall - offset * MINUTE_MS);
+    if (kyivOffsetMinutes(instant) === offset) return instant;
+  }
+  return new Date(wall - before * MINUTE_MS);
 }
 
 export const isBeforeDeadline = (

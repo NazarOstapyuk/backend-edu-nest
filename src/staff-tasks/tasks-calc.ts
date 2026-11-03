@@ -34,17 +34,24 @@ export function assigneeState(
   return now.getTime() > task.dueAt.getTime() ? 'overdue' : 'open';
 }
 
-export function progress(
-  rows: {
-    doneAt: Date | null;
-    removedAt: Date | null;
-    user: { isActive: boolean };
-  }[],
-): { done: number; total: number } {
+export const COUNTED_ROLES: Role[] = [Role.admin, Role.teacher];
+
+export type CountedRow = {
+  doneAt: Date | null;
+  removedAt: Date | null;
+  user: { isActive: boolean; role: Role };
+};
+
+export const isCounted = (row: CountedRow): boolean =>
+  row.removedAt === null &&
+  row.user.isActive &&
+  COUNTED_ROLES.includes(row.user.role);
+
+export function progress(rows: CountedRow[]): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const row of rows) {
-    if (row.removedAt || !row.user.isActive) continue;
+    if (!isCounted(row)) continue;
     total += 1;
     if (row.doneAt) done += 1;
   }

@@ -20,7 +20,9 @@ import {
   assigneeState,
   canAssign,
   cursorOf,
+  COUNTED_ROLES,
   isClosed,
+  isCounted,
   kyivDateTime,
   normalizeDescription,
   normalizeTitle,
@@ -125,7 +127,7 @@ const kyivParts = (instant: Date) => {
 
 const counted = {
   removedAt: null,
-  user: { isActive: true },
+  user: { isActive: true, role: { in: COUNTED_ROLES } },
 } satisfies Prisma.StaffTaskAssigneeWhereInput;
 
 const openTaskWhere: Prisma.StaffTaskWhereInput = {
@@ -156,8 +158,15 @@ const actorBase = (user: AuthenticatedUser) => {
   return base === null ? null : new Set(base);
 };
 
-function parseDeadline(dueDate: string, dueTime: string): Date {
-  if (parseTime(dueTime) === null)
+function parseDeadline(
+  dueDate: string | null | undefined,
+  dueTime: string | null | undefined,
+): Date {
+  if (
+    typeof dueDate !== 'string' ||
+    typeof dueTime !== 'string' ||
+    parseTime(dueTime) === null
+  )
     throw new BadRequestException('Invalid deadline');
   let day: Date;
   try {
@@ -173,8 +182,8 @@ function assertUnique(ids: string[]) {
     throw new BadRequestException('Duplicate assignee');
 }
 
-function title(raw: string): string {
-  const value = normalizeTitle(raw);
+function title(raw: string | null | undefined): string {
+  const value = typeof raw === 'string' ? normalizeTitle(raw) : null;
   if (value === null) throw new BadRequestException('Invalid title');
   return value;
 }
@@ -690,12 +699,7 @@ export class StaffTasksService {
         done: count.done,
         total: count.total,
         notDone: task.assignees
-          .filter(
-            (row) =>
-              row.removedAt === null &&
-              row.user.isActive &&
-              row.doneAt === null,
-          )
+          .filter((row) => isCounted(row) && row.doneAt === null)
           .sort((a, b) => a.user.lastName.localeCompare(b.user.lastName))
           .map((row) => ({
             id: row.user.id,

@@ -390,6 +390,31 @@ describe('StaffTasksService', () => {
       ).rejects.toThrow(new BadRequestException('Invalid deadline'));
     });
 
+    it('rejects null title, date and time', async () => {
+      await expect(
+        service.update('task1', { title: null }, admin),
+      ).rejects.toThrow(new BadRequestException('Invalid title'));
+      for (const dto of [
+        { dueDate: null, dueTime: null },
+        { dueDate: '2026-11-04', dueTime: null },
+        { dueDate: null, dueTime: '14:00' },
+        { dueDate: null },
+      ]) {
+        await expect(service.update('task1', dto, admin)).rejects.toThrow(
+          new BadRequestException('Invalid deadline'),
+        );
+      }
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('clears the description with null', async () => {
+      await service.update('task1', { description: null }, admin);
+      expect(mockPrisma.staffTask.update).toHaveBeenCalledWith({
+        where: { id: 'task1' },
+        data: { description: null },
+      });
+    });
+
     it('rejects moving the deadline into the past', async () => {
       await expect(
         service.update(
@@ -574,6 +599,39 @@ describe('StaffTasksService', () => {
       const [view] = result.items;
       expect(view.assignees.map((a) => a.id)).toEqual(['t1', 't2']);
       expect(view.assignees[1].isActive).toBe(false);
+      expect(view.done).toBe(1);
+      expect(view.total).toBe(1);
+      expect(view.overdue).toBe(false);
+      const calls = mockPrisma.staffTask.findMany.mock.calls as [
+        { where: { OR: [{ OR: { assignees: unknown }[] }] } },
+      ][];
+      const where = calls[0][0];
+      expect(where.where.OR[0].OR[0].assignees).toEqual({
+        some: {
+          removedAt: null,
+          user: { isActive: true, role: { in: [Role.admin, Role.teacher] } },
+          doneAt: null,
+        },
+      });
+    });
+
+    it('keeps assignees who became parent or root but does not count them', async () => {
+      mockPrisma.staffTask.findMany.mockResolvedValue([
+        task({
+          dueAt: PAST,
+          assignees: [
+            row('t1', { doneAt: PAST }),
+            row('t2', { user: person('t2', { role: Role.parent }) }),
+            row('t3', { user: person('t3', { role: Role.root }) }),
+          ],
+        }),
+      ]);
+      const [view] = (await service.given({}, admin)).items;
+      expect(view.assignees.map((a) => [a.id, a.role])).toEqual([
+        ['t1', Role.teacher],
+        ['t2', Role.parent],
+        ['t3', Role.root],
+      ]);
       expect(view.done).toBe(1);
       expect(view.total).toBe(1);
       expect(view.overdue).toBe(false);
@@ -805,6 +863,7 @@ describe('StaffTasksService', () => {
             row('t2'),
             row('t3', { user: person('t3', { isActive: false }) }),
             row('t4', { removedAt: PAST }),
+            row('t5', { user: person('t5', { role: Role.parent }) }),
           ],
         }),
       ]);

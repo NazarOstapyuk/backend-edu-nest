@@ -5,6 +5,7 @@ import {
   canAssign,
   cursorOf,
   isClosed,
+  isCounted,
   kyivDateTime,
   normalizeDescription,
   normalizeTitle,
@@ -93,15 +94,36 @@ describe('assigneeState', () => {
 describe('progress and isClosed', () => {
   const d = new Date();
 
-  it('skips removed and inactive rows', () => {
+  it('skips removed, inactive and non-staff rows', () => {
+    const staff = { isActive: true, role: Role.teacher };
     expect(
       progress([
-        { doneAt: d, removedAt: null, user: { isActive: true } },
-        { doneAt: null, removedAt: null, user: { isActive: true } },
-        { doneAt: d, removedAt: d, user: { isActive: true } },
-        { doneAt: d, removedAt: null, user: { isActive: false } },
+        { doneAt: d, removedAt: null, user: staff },
+        { doneAt: null, removedAt: null, user: { ...staff, role: Role.admin } },
+        { doneAt: d, removedAt: d, user: staff },
+        { doneAt: d, removedAt: null, user: { ...staff, isActive: false } },
+        {
+          doneAt: null,
+          removedAt: null,
+          user: { ...staff, role: Role.parent },
+        },
+        { doneAt: d, removedAt: null, user: { ...staff, role: Role.root } },
       ]),
     ).toEqual({ done: 1, total: 2 });
+  });
+
+  it('counts only active admins and teachers', () => {
+    const at = (role: Role, isActive = true) => ({
+      doneAt: null,
+      removedAt: null,
+      user: { isActive, role },
+    });
+    expect(isCounted(at(Role.admin))).toBe(true);
+    expect(isCounted(at(Role.teacher))).toBe(true);
+    expect(isCounted(at(Role.parent))).toBe(false);
+    expect(isCounted(at(Role.root))).toBe(false);
+    expect(isCounted(at(Role.teacher, false))).toBe(false);
+    expect(isCounted({ ...at(Role.teacher), removedAt: d })).toBe(false);
   });
 
   it('closes when cancelled or all counted are done', () => {

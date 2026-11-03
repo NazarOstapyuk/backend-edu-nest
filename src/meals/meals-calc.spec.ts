@@ -44,6 +44,60 @@ describe('deadlineFor', () => {
       '2026-10-26T07:30:00.000Z',
     );
   });
+
+  it('converts ordinary winter and summer days', () => {
+    expect(deadlineFor(day('2026-11-03'), '14:00').toISOString()).toBe(
+      '2026-11-03T12:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-07-01'), '14:00').toISOString()).toBe(
+      '2026-07-01T11:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-11-03'), '00:00').toISOString()).toBe(
+      '2026-11-02T22:00:00.000Z',
+    );
+  });
+
+  it('keeps night times on the day of the switch to summer time', () => {
+    expect(deadlineFor(day('2026-03-29'), '02:30').toISOString()).toBe(
+      '2026-03-29T00:30:00.000Z',
+    );
+    expect(deadlineFor(day('2026-03-29'), '04:00').toISOString()).toBe(
+      '2026-03-29T01:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-03-29'), '10:00').toISOString()).toBe(
+      '2026-03-29T07:00:00.000Z',
+    );
+  });
+
+  it('shifts a time inside the spring gap forward', () => {
+    expect(deadlineFor(day('2026-03-29'), '03:00').toISOString()).toBe(
+      '2026-03-29T01:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-03-29'), '03:30').toISOString()).toBe(
+      '2026-03-29T01:30:00.000Z',
+    );
+  });
+
+  it('keeps night times on the day of the switch to winter time', () => {
+    expect(deadlineFor(day('2026-10-25'), '02:00').toISOString()).toBe(
+      '2026-10-24T23:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-10-25'), '04:00').toISOString()).toBe(
+      '2026-10-25T02:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-10-25'), '10:00').toISOString()).toBe(
+      '2026-10-25T08:00:00.000Z',
+    );
+  });
+
+  it('picks the first, summer-time occurrence of an ambiguous time', () => {
+    expect(deadlineFor(day('2026-10-25'), '03:00').toISOString()).toBe(
+      '2026-10-25T00:00:00.000Z',
+    );
+    expect(deadlineFor(day('2026-10-25'), '03:30').toISOString()).toBe(
+      '2026-10-25T00:30:00.000Z',
+    );
+  });
 });
 
 describe('isBeforeDeadline', () => {
