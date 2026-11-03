@@ -126,6 +126,22 @@ export class GroupsService {
     await tx.$queryRaw`SELECT id FROM "Institution" WHERE id = ${id} FOR SHARE`;
   }
 
+  private async lockForeignNoteSets(
+    tx: Prisma.TransactionClient,
+    groupId: string,
+    institutionId: string,
+  ) {
+    const sets = await tx.noteSet.findMany({
+      where: { groups: { some: { id: groupId } }, NOT: { institutionId } },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    if (sets.length === 0) return [];
+    const ids = sets.map((s) => s.id);
+    await tx.$queryRaw`SELECT id FROM "NoteSet" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
+    return ids;
+  }
+
   async create(dto: CreateGroupDto, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockInstitution(tx, dto.institutionId);
@@ -257,6 +273,10 @@ export class GroupsService {
         );
       }
 
+      const detachedSetIds = moving
+        ? await this.lockForeignNoteSets(tx, id, targetInstitutionId)
+        : [];
+
       const updated = await tx.group.update({
         where: { id },
         data: {
@@ -267,6 +287,13 @@ export class GroupsService {
           teachers: dto.teacherIds
             ? { set: dto.teacherIds.map((id) => ({ id })) }
             : undefined,
+          ...(detachedSetIds.length
+            ? {
+                noteSets: {
+                  disconnect: detachedSetIds.map((setId) => ({ id: setId })),
+                },
+              }
+            : {}),
         },
         include: groupInclude,
       });

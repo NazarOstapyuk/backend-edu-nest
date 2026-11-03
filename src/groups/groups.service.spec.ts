@@ -28,6 +28,7 @@ const mockPrisma = {
   routineTemplate: { count: jest.fn() },
   routineDay: { count: jest.fn() },
   noteAnswer: { count: jest.fn() },
+  noteSet: { findMany: jest.fn() },
   bellSchedule: { findUnique: jest.fn() },
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
@@ -78,6 +79,7 @@ describe('GroupsService', () => {
     mockPrisma.institution.findUnique.mockResolvedValue(kgInst);
     mockPrisma.enrollment.findFirst.mockResolvedValue(null);
     mockPrisma.mealOrder.findFirst.mockResolvedValue(null);
+    mockPrisma.noteSet.findMany.mockResolvedValue([]);
     const moduleRef = await Test.createTestingModule({
       providers: [
         GroupsService,
@@ -532,6 +534,85 @@ describe('GroupsService', () => {
           }) as unknown,
         }),
       );
+    });
+
+    it('detaches a moved group from note sets of other institutions', async () => {
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce({
+          id: 'g1',
+          name: 'A',
+          kind: GroupKind.kindergarten,
+          institutionId: 'inst-k',
+          bellScheduleId: null,
+          mealPriceCategoryId: null,
+        })
+        .mockResolvedValueOnce(null);
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...kgInst,
+        id: 'inst-k2',
+      });
+      mockPrisma.noteSet.findMany.mockResolvedValue([
+        { id: 'set-a' },
+        { id: 'set-b' },
+      ]);
+      mockPrisma.group.update.mockResolvedValue({
+        id: 'g1',
+        name: 'A',
+        kind: GroupKind.kindergarten,
+        institutionId: 'inst-k2',
+        bellScheduleId: null,
+        mealPriceCategoryId: null,
+      });
+      await service.update('g1', { institutionId: 'inst-k2' }, fullAdmin);
+      expect(mockPrisma.noteSet.findMany).toHaveBeenCalledWith({
+        where: {
+          groups: { some: { id: 'g1' } },
+          NOT: { institutionId: 'inst-k2' },
+        },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+      });
+      const calls = mockPrisma.$queryRaw.mock.calls as [
+        TemplateStringsArray,
+        ...unknown[],
+      ][];
+      const setLock = calls.findIndex((c) =>
+        c[0].join('?').includes('"NoteSet"'),
+      );
+      expect(setLock).toBeGreaterThan(-1);
+      expect(calls[setLock][0].join('?')).toContain('ORDER BY id FOR UPDATE');
+      expect(
+        mockPrisma.$queryRaw.mock.invocationCallOrder[setLock],
+      ).toBeLessThan(mockPrisma.group.update.mock.invocationCallOrder[0]);
+      expect(
+        firstArg<{ data: { noteSets?: unknown } }>(mockPrisma.group.update).data
+          .noteSets,
+      ).toEqual({ disconnect: [{ id: 'set-a' }, { id: 'set-b' }] });
+    });
+
+    it('keeps note sets when the group stays in its institution', async () => {
+      mockPrisma.group.findUnique.mockResolvedValueOnce({
+        id: 'g1',
+        name: 'A',
+        kind: GroupKind.kindergarten,
+        institutionId: 'inst-k',
+        bellScheduleId: null,
+        mealPriceCategoryId: null,
+      });
+      mockPrisma.group.update.mockResolvedValue({
+        id: 'g1',
+        name: 'A',
+        kind: GroupKind.kindergarten,
+        institutionId: 'inst-k',
+        bellScheduleId: null,
+        mealPriceCategoryId: null,
+      });
+      await service.update('g1', { institutionId: 'inst-k' }, fullAdmin);
+      expect(mockPrisma.noteSet.findMany).not.toHaveBeenCalled();
+      expect(
+        firstArg<{ data: { noteSets?: unknown } }>(mockPrisma.group.update).data
+          .noteSets,
+      ).toBeUndefined();
     });
   });
 
