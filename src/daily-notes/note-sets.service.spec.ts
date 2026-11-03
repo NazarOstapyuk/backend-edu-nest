@@ -401,6 +401,44 @@ describe('NoteSetsService', () => {
       );
     });
 
+    it('deactivates a set of an inactive institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...institution,
+        isActive: false,
+      });
+      await service.update('s1', { active: false }, admin);
+      expect(mockPrisma.noteSet.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ active: false }) as object,
+        }),
+      );
+    });
+
+    it('rejects other changes of a set of an inactive institution', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue({
+        ...institution,
+        isActive: false,
+      });
+      await expect(
+        service.update('s1', { active: false, name: 'X' }, admin),
+      ).rejects.toThrow(new BadRequestException('Institution is inactive'));
+      await expect(
+        service.update('s1', { active: true }, admin),
+      ).rejects.toThrow(new BadRequestException('Institution is inactive'));
+      expect(mockPrisma.noteSet.update).not.toHaveBeenCalled();
+    });
+
+    it('still checks the scope when only deactivating', async () => {
+      mockPrisma.noteSet.findUnique.mockResolvedValue({
+        ...setRow(),
+        institution: { id: 'i2', name: 'Школа' },
+      });
+      await expect(
+        service.update('s1', { active: false }, scoped),
+      ).rejects.toThrow(new NotFoundException('Note set not found'));
+      expect(mockPrisma.noteSet.update).not.toHaveBeenCalled();
+    });
+
     it('answers 404 for a set outside the effective scope', async () => {
       mockPrisma.noteSet.findUnique.mockResolvedValue({
         ...setRow(),

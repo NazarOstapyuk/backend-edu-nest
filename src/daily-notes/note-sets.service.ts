@@ -110,6 +110,11 @@ const checkDeadline = (deadline: string): string => {
   return deadline;
 };
 
+const onlyDeactivates = (dto: UpdateNoteSetDto): boolean => {
+  const sent = Object.entries(dto).filter(([, value]) => value !== undefined);
+  return sent.length === 1 && sent[0][0] === 'active' && sent[0][1] === false;
+};
+
 const normalizeQuestion = (
   q: NoteQuestionDto,
   sortOrder: number,
@@ -266,7 +271,8 @@ export class NoteSetsService {
       this.prisma.$transaction(async (tx) => {
         const current = await this.lockSet(tx, id, actor);
         const institutionId = current.institution.id;
-        await findInstitution(tx, institutionId, { active: true });
+        if (!onlyDeactivates(dto))
+          await findInstitution(tx, institutionId, { active: true });
         if (dto.name !== undefined && dto.name !== current.name)
           await this.assertNameFree(tx, institutionId, dto.name, id);
         if (groupIds) await this.assertGroups(tx, institutionId, groupIds);
