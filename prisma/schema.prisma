@@ -108,6 +108,8 @@ model User {
   auditEvents              AuditEvent[]           @relation("AuditEventActor")
   auditChanges             AuditChange[]          @relation("AuditChangeActor")
   authEvents               AuthEvent[]            @relation("AuthEventUser")
+  noteAnswersGiven         NoteAnswer[]           @relation("NoteAnsweredBy")
+  noteAnswersVoided        NoteAnswer[]           @relation("NoteVoidedBy")
 }
 
 model Group {
@@ -128,6 +130,8 @@ model Group {
   schoolLessons       SchoolLesson[]
   routineTemplates    RoutineTemplate[]
   routineDays         RoutineDay[]
+  noteSets            NoteSet[]          @relation("NoteSetGroups")
+  noteAnswers         NoteAnswer[]
   mealPriceCategoryId String?
   mealPriceCategory   MealPriceCategory? @relation(fields: [mealPriceCategoryId], references: [id], onDelete: Restrict)
   createdAt           DateTime           @default(now())
@@ -162,6 +166,7 @@ model Child {
   lessonMarks         LessonMark[]
   mealOrders          MealOrder[]
   paymentRequests     PaymentRequest[]
+  noteAnswers         NoteAnswer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1468,6 +1473,7 @@ model Institution {
   menuDays     MenuDay[]
   calendarDays CalendarDay[]
   users        UserInstitution[]
+  noteSets     NoteSet[]
 }
 
 model UserInstitution {
@@ -1590,4 +1596,73 @@ model PositionPermission {
   level      PermissionLevel
 
   @@unique([positionId, area])
+}
+
+enum NoteQuestionType {
+  choice
+  text
+  yes_no
+  number
+}
+
+model NoteSet {
+  id            String         @id @default(uuid())
+  institutionId String
+  institution   Institution    @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  name          String
+  deadline      String         @default("17:00")
+  active        Boolean        @default(true)
+  groups        Group[]        @relation("NoteSetGroups")
+  questions     NoteQuestion[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([institutionId, name])
+}
+
+model NoteQuestion {
+  id        String           @id @default(uuid())
+  setId     String
+  set       NoteSet          @relation(fields: [setId], references: [id], onDelete: Cascade)
+  text      String
+  type      NoteQuestionType
+  required  Boolean          @default(false)
+  options   String[]
+  min       Decimal?         @db.Decimal(10, 2)
+  max       Decimal?         @db.Decimal(10, 2)
+  unit      String?
+  sortOrder Int
+  active    Boolean          @default(true)
+  answers   NoteAnswer[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([setId])
+}
+
+model NoteAnswer {
+  id           String           @id @default(uuid())
+  childId      String
+  child        Child            @relation(fields: [childId], references: [id])
+  groupId      String
+  group        Group            @relation(fields: [groupId], references: [id])
+  questionId   String
+  question     NoteQuestion     @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  date         DateTime         @db.Date
+  questionText String
+  questionType NoteQuestionType
+  unit         String?
+  valueText    String?
+  valueBool    Boolean?
+  valueNumber  Decimal?         @db.Decimal(10, 2)
+  answeredById String
+  answeredBy   User             @relation("NoteAnsweredBy", fields: [answeredById], references: [id])
+  createdAt    DateTime         @default(now())
+  voidedAt     DateTime?
+  voidedById   String?
+  voidedBy     User?            @relation("NoteVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason   String?
+
+  @@index([childId, date])
+  @@index([groupId, date])
 }

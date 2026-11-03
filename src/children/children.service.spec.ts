@@ -39,6 +39,7 @@ const mockPrisma = {
   subgroupMember: { count: jest.fn() },
   lessonMark: { count: jest.fn() },
   paymentRequest: { count: jest.fn() },
+  noteAnswer: { count: jest.fn() },
 };
 
 const mockAudit = { recordChange: jest.fn() };
@@ -564,6 +565,7 @@ describe('ChildrenService', () => {
       mockPrisma.subgroupMember.count.mockResolvedValue(0);
       mockPrisma.lessonMark.count.mockResolvedValue(0);
       mockPrisma.paymentRequest.count.mockResolvedValue(0);
+      mockPrisma.noteAnswer.count.mockResolvedValue(0);
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
       mockPrisma.child.delete.mockResolvedValue({});
 
@@ -669,6 +671,7 @@ describe('ChildrenService', () => {
         'absenceNotice',
         'subgroupMember',
         'lessonMark',
+        'noteAnswer',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }
@@ -677,6 +680,35 @@ describe('ChildrenService', () => {
       await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
         'Cannot delete: child has financial records',
       );
+      expect(mockPrisma.child.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a child with note answers', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      for (const model of [
+        'charge',
+        'payment',
+        'enrollment',
+        'adaptationVisit',
+        'classGroupMember',
+        'lessonAttendance',
+        'package',
+        'dailyAttendance',
+        'absenceNotice',
+        'subgroupMember',
+        'lessonMark',
+        'paymentRequest',
+      ] as const) {
+        mockPrisma[model].count.mockResolvedValue(0);
+      }
+      mockPrisma.noteAnswer.count.mockResolvedValue(1);
+
+      await expect(service.delete('child-1', fullAdmin)).rejects.toThrow(
+        'Cannot delete: child has financial records',
+      );
+      expect(mockPrisma.noteAnswer.count).toHaveBeenCalledWith({
+        where: { childId: 'child-1' },
+      });
       expect(mockPrisma.child.delete).not.toHaveBeenCalled();
     });
 
@@ -856,6 +888,7 @@ describe('ChildrenService', () => {
         'subgroupMember',
         'lessonMark',
         'paymentRequest',
+        'noteAnswer',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }

@@ -27,6 +27,7 @@ const mockPrisma = {
   subgroup: { count: jest.fn() },
   routineTemplate: { count: jest.fn() },
   routineDay: { count: jest.fn() },
+  noteAnswer: { count: jest.fn() },
   bellSchedule: { findUnique: jest.fn() },
   mealPriceCategory: { findUnique: jest.fn() },
   timetableEntry: { findMany: jest.fn() },
@@ -111,6 +112,7 @@ describe('GroupsService', () => {
     mockPrisma.subgroup.count.mockResolvedValue(0);
     mockPrisma.routineTemplate.count.mockResolvedValue(0);
     mockPrisma.routineDay.count.mockResolvedValue(0);
+    mockPrisma.noteAnswer.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
@@ -127,13 +129,14 @@ describe('GroupsService', () => {
     mockPrisma.subgroup.count.mockResolvedValue(0);
     mockPrisma.routineTemplate.count.mockResolvedValue(0);
     mockPrisma.routineDay.count.mockResolvedValue(0);
+    mockPrisma.noteAnswer.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).rejects.toThrow(
       new BadRequestException('Cannot delete: group has attendance records'),
     );
     expect(mockPrisma.group.delete).not.toHaveBeenCalled();
   });
 
-  it.each(['routineTemplate', 'routineDay'] as const)(
+  it.each(['routineTemplate', 'routineDay', 'noteAnswer'] as const)(
     'refuses to delete a group with %s rows',
     async (model) => {
       mockPrisma.group.findUnique.mockResolvedValue({ id: 'g1' });
@@ -146,6 +149,7 @@ describe('GroupsService', () => {
         'subgroup',
         'routineTemplate',
         'routineDay',
+        'noteAnswer',
       ] as const) {
         mockPrisma[m].count.mockResolvedValue(0);
       }
@@ -170,6 +174,7 @@ describe('GroupsService', () => {
     mockPrisma.subgroup.count.mockResolvedValue(0);
     mockPrisma.routineTemplate.count.mockResolvedValue(0);
     mockPrisma.routineDay.count.mockResolvedValue(0);
+    mockPrisma.noteAnswer.count.mockResolvedValue(0);
     await expect(service.delete('g1', fullAdmin)).resolves.toEqual({
       message: 'Group deleted',
     });
@@ -672,6 +677,7 @@ describe('GroupsService', () => {
         'subgroup',
         'routineTemplate',
         'routineDay',
+        'noteAnswer',
       ] as const) {
         mockPrisma[model].count.mockResolvedValue(0);
       }

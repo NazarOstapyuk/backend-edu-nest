@@ -54,6 +54,7 @@ const mockPrisma = {
   backupRun: { count: jest.fn() },
   routineTemplate: { count: jest.fn() },
   routineDay: { count: jest.fn() },
+  noteAnswer: { count: jest.fn() },
   salaryTerms: { count: jest.fn() },
   payrollSheet: { count: jest.fn() },
   payrollAdjustment: { count: jest.fn() },
@@ -1140,6 +1141,7 @@ describe('UsersService', () => {
       mockPrisma.backupRun.count.mockResolvedValue(0);
       mockPrisma.routineTemplate.count.mockResolvedValue(0);
       mockPrisma.routineDay.count.mockResolvedValue(0);
+      mockPrisma.noteAnswer.count.mockResolvedValue(0);
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
       mockPrisma.payrollSheet.count.mockResolvedValue(0);
       mockPrisma.payrollAdjustment.count.mockResolvedValue(0);
@@ -1309,6 +1311,18 @@ describe('UsersService', () => {
       );
       expect(mockPrisma.backupRun.count).toHaveBeenCalledWith({
         where: { createdById: 'u1' },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user answered or voided note answers', async () => {
+      mockPrisma.noteAnswer.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.noteAnswer.count).toHaveBeenCalledWith({
+        where: { OR: [{ answeredById: 'u1' }, { voidedById: 'u1' }] },
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
@@ -1817,6 +1831,7 @@ describe('UsersService', () => {
         'backupRun',
         'routineTemplate',
         'routineDay',
+        'noteAnswer',
         'salaryTerms',
         'payrollSheet',
         'payrollAdjustment',

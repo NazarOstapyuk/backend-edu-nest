@@ -430,6 +430,9 @@ export class UsersService {
       this.prisma.backupRun.count({ where: { createdById: id } }),
       this.prisma.routineTemplate.count({ where: { createdById: id } }),
       this.prisma.routineDay.count({ where: { createdById: id } }),
+      this.prisma.noteAnswer.count({
+        where: { OR: [{ answeredById: id }, { voidedById: id }] },
+      }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(
