@@ -60,7 +60,7 @@ Success: a task given to five teachers in the morning shows up for each of them 
 - **Removed assignees keep history:** removing an assignee marks their row removed (`removedAt`) instead of deleting it; removed rows are not counted, not reminded and not shown to that person anymore. Adding the same person back reactivates the row without the old done mark.
 - **What an assignee sees:** title, description, deadline, the author's name and their own status. Never the other assignees or the "N of M" count.
 - **Dashboard:** the `tasks` section is decided in the service: parents get nothing; any teacher or admin gets `mine`; `given` only for users who authored tasks.
-- **User deletion:** a user who authored a task or has an assignment row cannot be deleted (400 `User has tasks`); deactivate instead.
+- **User deletion:** a user who authored a task or has an assignment row cannot be deleted (the existing user delete guard, 400 `Cannot delete: user has financial records, deactivate instead`); deactivate instead.
 - **Paging and the counter** (cursor or page, a separate count endpoint or part of a list) are the builder's call; the API section of the backend `CLAUDE.md` documents what was chosen.
 
 ## What the builder decides
