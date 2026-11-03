@@ -433,6 +433,10 @@ export class UsersService {
       this.prisma.noteAnswer.count({
         where: { OR: [{ answeredById: id }, { voidedById: id }] },
       }),
+      this.prisma.staffTask.count({
+        where: { OR: [{ createdById: id }, { cancelledById: id }] },
+      }),
+      this.prisma.staffTaskAssignee.count({ where: { userId: id } }),
     ]);
     if (counts.some((count) => count > 0)) {
       throw new BadRequestException(

@@ -110,6 +110,9 @@ model User {
   authEvents               AuthEvent[]            @relation("AuthEventUser")
   noteAnswersGiven         NoteAnswer[]           @relation("NoteAnsweredBy")
   noteAnswersVoided        NoteAnswer[]           @relation("NoteVoidedBy")
+  staffTasksCreated        StaffTask[]            @relation("StaffTaskCreatedBy")
+  staffTasksCancelled      StaffTask[]            @relation("StaffTaskCancelledBy")
+  staffTaskAssignments     StaffTaskAssignee[]    @relation("StaffTaskAssignee")
 }
 
 model Group {
@@ -1666,4 +1669,36 @@ model NoteAnswer {
   @@index([childId, date])
   @@index([groupId, date])
   @@index([questionId])
+}
+
+model StaffTask {
+  id            String              @id @default(uuid())
+  title         String
+  description   String?
+  dueAt         DateTime
+  createdById   String
+  createdBy     User                @relation("StaffTaskCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelledBy   User?               @relation("StaffTaskCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  assignees     StaffTaskAssignee[]
+
+  @@index([createdById, dueAt])
+}
+
+model StaffTaskAssignee {
+  id        String    @id @default(uuid())
+  taskId    String
+  task      StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("StaffTaskAssignee", fields: [userId], references: [id], onDelete: Restrict)
+  doneAt    DateTime?
+  removedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([taskId, userId])
+  @@index([userId])
 }

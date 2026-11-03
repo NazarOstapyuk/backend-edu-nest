@@ -55,6 +55,8 @@ const mockPrisma = {
   routineTemplate: { count: jest.fn() },
   routineDay: { count: jest.fn() },
   noteAnswer: { count: jest.fn() },
+  staffTask: { count: jest.fn() },
+  staffTaskAssignee: { count: jest.fn() },
   salaryTerms: { count: jest.fn() },
   payrollSheet: { count: jest.fn() },
   payrollAdjustment: { count: jest.fn() },
@@ -1142,6 +1144,8 @@ describe('UsersService', () => {
       mockPrisma.routineTemplate.count.mockResolvedValue(0);
       mockPrisma.routineDay.count.mockResolvedValue(0);
       mockPrisma.noteAnswer.count.mockResolvedValue(0);
+      mockPrisma.staffTask.count.mockResolvedValue(0);
+      mockPrisma.staffTaskAssignee.count.mockResolvedValue(0);
       mockPrisma.salaryTerms.count.mockResolvedValue(0);
       mockPrisma.payrollSheet.count.mockResolvedValue(0);
       mockPrisma.payrollAdjustment.count.mockResolvedValue(0);
@@ -1323,6 +1327,30 @@ describe('UsersService', () => {
       );
       expect(mockPrisma.noteAnswer.count).toHaveBeenCalledWith({
         where: { OR: [{ answeredById: 'u1' }, { voidedById: 'u1' }] },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user created or cancelled staff tasks', async () => {
+      mockPrisma.staffTask.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.staffTask.count).toHaveBeenCalledWith({
+        where: { OR: [{ createdById: 'u1' }, { cancelledById: 'u1' }] },
+      });
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when user is a staff task assignee', async () => {
+      mockPrisma.staffTaskAssignee.count.mockResolvedValue(1);
+
+      await expect(service.delete('u1', rootActor)).rejects.toThrow(
+        'Cannot delete: user has financial records, deactivate instead',
+      );
+      expect(mockPrisma.staffTaskAssignee.count).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
       });
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
     });
@@ -1832,6 +1860,8 @@ describe('UsersService', () => {
         'routineTemplate',
         'routineDay',
         'noteAnswer',
+        'staffTask',
+        'staffTaskAssignee',
         'salaryTerms',
         'payrollSheet',
         'payrollAdjustment',
