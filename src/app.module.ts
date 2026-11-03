@@ -28,6 +28,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { InstitutionsModule } from './institutions/institutions.module';
 import { RoutineModule } from './routine/routine.module';
 import { DailyNotesModule } from './daily-notes/daily-notes.module';
+import { StaffTasksModule } from './staff-tasks/staff-tasks.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { DailyNotesModule } from './daily-notes/daily-notes.module';
     InstitutionsModule,
     RoutineModule,
     DailyNotesModule,
+    StaffTasksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

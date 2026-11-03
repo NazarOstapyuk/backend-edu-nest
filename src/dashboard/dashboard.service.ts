@@ -21,6 +21,10 @@ import { formatMoney, sumMoney } from '../finance/finance-calc';
 import { OnlinePaymentsService } from '../online-payments/online-payments.service';
 import { childMoney } from '../parent-cabinet/cabinet-calc';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  StaffTasksService,
+  TasksDashboard,
+} from '../staff-tasks/staff-tasks.service';
 import { addDays, isoDay, kyivToday } from '../tariffs/dates';
 import {
   mealsByGroup,
@@ -51,6 +55,7 @@ export interface TodayDashboard {
   onlinePending?: { count: number };
   payroll?: { month: string; count: number; names: string[]; more: number };
   backups?: { configured: boolean; stale: boolean };
+  tasks?: TasksDashboard;
 }
 
 @Injectable()
@@ -61,6 +66,7 @@ export class DashboardService {
     private backups: BackupsService,
     private onlinePayments: OnlinePaymentsService,
     private notes: DailyNotesService,
+    private tasks: StaffTasksService,
   ) {}
 
   async today(user: AuthenticatedUser): Promise<TodayDashboard> {
@@ -75,6 +81,10 @@ export class DashboardService {
     const sections: Promise<void>[] = [];
     const add = (task: () => Promise<void>) => sections.push(task());
 
+    add(async () => {
+      const tasks = await this.tasks.dashboard(user);
+      if (tasks) result.tasks = tasks;
+    });
     if (canManageRegister(user) || isTeacher) {
       add(async () => {
         result.register = await this.register(user, today);

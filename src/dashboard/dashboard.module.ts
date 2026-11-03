@@ -3,6 +3,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { BackupsModule } from '../backups/backups.module';
 import { DailyNotesModule } from '../daily-notes/daily-notes.module';
 import { OnlinePaymentsModule } from '../online-payments/online-payments.module';
+import { StaffTasksModule } from '../staff-tasks/staff-tasks.module';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 
@@ -12,6 +13,7 @@ import { DashboardService } from './dashboard.service';
     BackupsModule,
     DailyNotesModule,
     OnlinePaymentsModule,
+    StaffTasksModule,
   ],
   controllers: [DashboardController],
   providers: [DashboardService],

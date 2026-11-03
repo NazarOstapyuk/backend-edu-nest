@@ -61,6 +61,7 @@ describe('DashboardService', () => {
   const backups = { status: jest.fn() };
   const onlinePayments = { config: jest.fn() };
   const notes = { pending: jest.fn() };
+  const tasks = { dashboard: jest.fn() };
 
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-16T10:00:00.000Z'));
@@ -76,13 +77,41 @@ describe('DashboardService', () => {
     backups.status.mockResolvedValue({ configured: true, stale: false });
     onlinePayments.config.mockReturnValue({ enabled: false });
     notes.pending.mockResolvedValue([]);
+    tasks.dashboard.mockResolvedValue(null);
     service = new DashboardService(
       prisma as never,
       calendar as never,
       backups as never,
       onlinePayments as never,
       notes as never,
+      tasks as never,
     );
+  });
+
+  it('adds the tasks section for a teacher with an overdue task', async () => {
+    const teacher = makeUser({ role: Role.teacher });
+    const section = {
+      mine: [
+        {
+          id: 'task1',
+          title: 'Здати плани',
+          dueAt: '2026-10-16T09:00:00.000Z',
+          dueTime: '12:00',
+          overdue: true,
+        },
+      ],
+      given: [],
+    };
+    tasks.dashboard.mockResolvedValue(section);
+    const result = await service.today(teacher);
+    expect(result.tasks).toEqual(section);
+    expect(tasks.dashboard).toHaveBeenCalledWith(teacher);
+  });
+
+  it('omits the tasks section when empty', async () => {
+    const result = await service.today(makeUser());
+    expect(result).not.toHaveProperty('tasks');
+    expect(tasks.dashboard).toHaveBeenCalled();
   });
 
   it('adds the notes section for teachers when something is pending', async () => {
