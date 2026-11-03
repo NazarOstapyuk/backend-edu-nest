@@ -30,6 +30,7 @@ const mockPrisma = {
   tariff: { count: jest.fn() },
   menuDay: { count: jest.fn() },
   calendarDay: { count: jest.fn() },
+  noteSet: { count: jest.fn() },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
@@ -235,6 +236,7 @@ describe('InstitutionsService', () => {
       mockPrisma.menuDay.count.mockResolvedValue(0);
       mockPrisma.calendarDay.count.mockResolvedValue(0);
       mockPrisma.userInstitution.count.mockResolvedValue(0);
+      mockPrisma.noteSet.count.mockResolvedValue(0);
     };
 
     it('deletes an empty institution and records the change', async () => {
@@ -263,6 +265,7 @@ describe('InstitutionsService', () => {
       'menuDay',
       'calendarDay',
       'userInstitution',
+      'noteSet',
     ] as const)('refuses when the institution has %s rows', async (model) => {
       empty();
       mockPrisma[model].count.mockResolvedValue(1);

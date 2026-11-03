@@ -27,6 +27,7 @@ import { OnlinePaymentsModule } from './online-payments/online-payments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InstitutionsModule } from './institutions/institutions.module';
 import { RoutineModule } from './routine/routine.module';
+import { DailyNotesModule } from './daily-notes/daily-notes.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { RoutineModule } from './routine/routine.module';
     DashboardModule,
     InstitutionsModule,
     RoutineModule,
+    DailyNotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

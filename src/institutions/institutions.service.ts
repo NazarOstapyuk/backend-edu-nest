@@ -150,6 +150,7 @@ export class InstitutionsService {
         tx.menuDay.count({ where }),
         tx.calendarDay.count({ where }),
         tx.userInstitution.count({ where }),
+        tx.noteSet.count({ where }),
       ]);
       if (counts.some((count) => count > 0)) {
         throw new BadRequestException('Institution is in use');
