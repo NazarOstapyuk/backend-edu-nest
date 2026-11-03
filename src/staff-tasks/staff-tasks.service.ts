@@ -7,7 +7,6 @@ import {
 import { AccessScope, Prisma, Role } from '@prisma/client';
 import { baseScope } from '../access/access-calc';
 import { kyivDayStart } from '../audit/audit-calc';
-import { kyivStamp } from '../backups/backup-retention';
 import { parseDay } from '../classes/access';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { deadlineFor, parseTime } from '../meals/meals-calc';
@@ -20,10 +19,14 @@ import {
   AssigneeState,
   assigneeState,
   canAssign,
+  cursorOf,
   isClosed,
+  kyivDateTime,
   normalizeDescription,
   normalizeTitle,
+  parseCursor,
   progress,
+  TaskCursor,
 } from './tasks-calc';
 
 const HISTORY_DAYS = 30;
@@ -116,11 +119,8 @@ export type TasksDashboard = {
 const iso = (value: Date | null) => (value ? value.toISOString() : null);
 
 const kyivParts = (instant: Date) => {
-  const stamp = kyivStamp(instant);
-  return {
-    dueDate: stamp.slice(0, 10),
-    dueTime: `${stamp.slice(11, 13)}:${stamp.slice(13, 15)}`,
-  };
+  const { date, time } = kyivDateTime(instant);
+  return { dueDate: date, dueTime: time };
 };
 
 const counted = {
@@ -188,16 +188,28 @@ function description(raw: string | null | undefined): string | null {
 const byDueAsc = (a: { dueAt: Date }, b: { dueAt: Date }) =>
   a.dueAt.getTime() - b.dueAt.getTime();
 
+type Keyed = { dueAt: Date; id: string };
+
+const byKey = (a: Keyed, b: Keyed) =>
+  a.dueAt.getTime() - b.dueAt.getTime() ||
+  (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 function historyOrder<T>(
   items: T[],
-  dueAt: (item: T) => Date,
+  key: (item: T) => Keyed,
   closed: (item: T) => boolean,
 ): T[] {
   const open = items.filter((item) => !closed(item));
   const done = items.filter(closed);
-  open.sort((a, b) => dueAt(a).getTime() - dueAt(b).getTime());
-  done.sort((a, b) => dueAt(b).getTime() - dueAt(a).getTime());
+  open.sort((a, b) => byKey(key(a), key(b)));
+  done.sort((a, b) => byKey(key(b), key(a)));
   return [...open, ...done];
+}
+
+function cursor(raw: string): TaskCursor {
+  const parsed = parseCursor(raw);
+  if (!parsed) throw new BadRequestException('Invalid cursor');
+  return parsed;
 }
 
 function givenView(task: TaskRecord, now: Date): GivenTaskView {
@@ -474,23 +486,27 @@ export class StaffTasksService {
       user.role === Role.root && query.all === 'true'
         ? {}
         : { createdById: user.id };
-    if (query.before) {
+    if (query.before !== undefined) {
+      const after = cursor(query.before);
+      const page: Prisma.StaffTaskWhereInput =
+        after.id === null
+          ? { dueAt: { lt: after.dueAt } }
+          : {
+              OR: [
+                { dueAt: { lt: after.dueAt } },
+                { dueAt: after.dueAt, id: { lt: after.id } },
+              ],
+            };
       const tasks = await this.prisma.staffTask.findMany({
-        where: {
-          ...author,
-          NOT: openTaskWhere,
-          dueAt: { lt: new Date(query.before) },
-        },
+        where: { ...author, AND: [{ NOT: openTaskWhere }, page] },
         include: taskInclude,
-        orderBy: { dueAt: 'desc' },
+        orderBy: [{ dueAt: 'desc' }, { id: 'desc' }],
         take: PAGE_SIZE,
       });
       return {
         items: tasks.map((task) => givenView(task, now)),
         nextBefore:
-          tasks.length === PAGE_SIZE
-            ? tasks[tasks.length - 1].dueAt.toISOString()
-            : null,
+          tasks.length === PAGE_SIZE ? cursorOf(tasks[tasks.length - 1]) : null,
       };
     }
     const cutoff = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
@@ -512,7 +528,7 @@ export class StaffTasksService {
       (task) => !closed(task) || task.dueAt.getTime() >= cutoff.getTime(),
     );
     return {
-      items: historyOrder(visible, (task) => task.dueAt, closed).map((task) =>
+      items: historyOrder(visible, (task) => task, closed).map((task) =>
         givenView(task, now),
       ),
       nextBefore: older > 0 ? cutoff.toISOString() : null,
@@ -527,22 +543,28 @@ export class StaffTasksService {
     if (user.role === Role.root) return { items: [], nextBefore: null };
     const now = new Date();
     const own = { userId: user.id, removedAt: null };
-    if (query.before) {
+    if (query.before !== undefined) {
+      const after = cursor(query.before);
+      const page: Prisma.StaffTaskAssigneeWhereInput =
+        after.id === null
+          ? { task: { dueAt: { lt: after.dueAt } } }
+          : {
+              OR: [
+                { task: { dueAt: { lt: after.dueAt } } },
+                { task: { dueAt: after.dueAt }, taskId: { lt: after.id } },
+              ],
+            };
       const rows = await this.prisma.staffTaskAssignee.findMany({
-        where: {
-          ...own,
-          ...closedRowWhere,
-          task: { dueAt: { lt: new Date(query.before) } },
-        },
+        where: { ...own, AND: [closedRowWhere, page] },
         include: myInclude,
-        orderBy: { task: { dueAt: 'desc' } },
+        orderBy: [{ task: { dueAt: 'desc' } }, { taskId: 'desc' }],
         take: PAGE_SIZE,
       });
       return {
         items: rows.map((row) => myView(row, now)),
         nextBefore:
           rows.length === PAGE_SIZE
-            ? rows[rows.length - 1].task.dueAt.toISOString()
+            ? cursorOf(rows[rows.length - 1].task)
             : null,
       };
     }
@@ -565,7 +587,7 @@ export class StaffTasksService {
     const closed = (row: MyRecord) =>
       row.doneAt !== null || row.task.cancelledAt !== null;
     return {
-      items: historyOrder(rows, (row) => row.task.dueAt, closed).map((row) =>
+      items: historyOrder(rows, (row) => row.task, closed).map((row) =>
         myView(row, now),
       ),
       nextBefore: older > 0 ? cutoff.toISOString() : null,

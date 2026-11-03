@@ -3,9 +3,12 @@ import {
   assigneeState,
   AssignTarget,
   canAssign,
+  cursorOf,
   isClosed,
+  kyivDateTime,
   normalizeDescription,
   normalizeTitle,
+  parseCursor,
   progress,
 } from './tasks-calc';
 
@@ -131,5 +134,52 @@ describe('normalizeDescription', () => {
       value: 'a'.repeat(2000),
     });
     expect(normalizeDescription('a'.repeat(2001))).toBeNull();
+  });
+});
+
+describe('kyivDateTime', () => {
+  it('formats winter and summer instants in Kyiv', () => {
+    expect(kyivDateTime(new Date('2026-11-03T12:00:00Z'))).toEqual({
+      date: '2026-11-03',
+      time: '14:00',
+    });
+    expect(kyivDateTime(new Date('2026-07-01T11:00:00Z'))).toEqual({
+      date: '2026-07-01',
+      time: '14:00',
+    });
+    expect(kyivDateTime(new Date('2026-11-03T22:30:00Z'))).toEqual({
+      date: '2026-11-04',
+      time: '00:30',
+    });
+  });
+});
+
+describe('cursor', () => {
+  const at = new Date('2026-10-01T09:00:00.000Z');
+
+  it('round-trips a compound cursor', () => {
+    const cursor = cursorOf({ dueAt: at, id: 'task-9' });
+    expect(cursor).toBe('2026-10-01T09:00:00.000Z|task-9');
+    expect(parseCursor(cursor)).toEqual({ dueAt: at, id: 'task-9' });
+  });
+
+  it('accepts a date alone', () => {
+    expect(parseCursor('2026-10-01T09:00:00.000Z')).toEqual({
+      dueAt: at,
+      id: null,
+    });
+  });
+
+  it('rejects garbage', () => {
+    for (const raw of [
+      '',
+      'abc',
+      '2026-13-01T09:00:00.000Z',
+      '2026-10-01T09:00:00.000Z|',
+      '2026-10-01|x',
+      '2026-10-01T09:00:00.000Z|a|b',
+    ]) {
+      expect(parseCursor(raw)).toBeNull();
+    }
   });
 });

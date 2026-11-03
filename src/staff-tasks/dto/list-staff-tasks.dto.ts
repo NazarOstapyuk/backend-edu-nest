@@ -1,8 +1,8 @@
-import { IsDateString, IsIn, IsOptional } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export class ListStaffTasksDto {
   @IsOptional()
-  @IsDateString()
+  @IsString()
   before?: string;
 
   @IsOptional()

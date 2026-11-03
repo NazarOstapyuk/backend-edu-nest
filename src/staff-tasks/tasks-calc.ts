@@ -73,3 +73,42 @@ export function normalizeDescription(
   if (value.length === 0) return { value: null };
   return value.length <= 2000 ? { value } : null;
 }
+
+export function kyivDateTime(instant: Date): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+export type TaskCursor = { dueAt: Date; id: string | null };
+
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+export const cursorOf = (item: { dueAt: Date; id: string }): string =>
+  `${item.dueAt.toISOString()}|${item.id}`;
+
+export function parseCursor(raw: string): TaskCursor | null {
+  const parts = raw.split('|');
+  if (parts.length > 2) return null;
+  const [instant, id] = parts;
+  if (!ISO_INSTANT.test(instant)) return null;
+  const dueAt = new Date(instant);
+  if (Number.isNaN(dueAt.getTime()) || dueAt.toISOString() !== instant)
+    return null;
+  if (id === undefined) return { dueAt, id: null };
+  return id.length > 0 ? { dueAt, id } : null;
+}

@@ -607,27 +607,67 @@ describe('StaffTasksService', () => {
       expect(arg[0].where).not.toHaveProperty('createdById');
     });
 
-    it('pages older closed tasks', async () => {
-      mockPrisma.staffTask.findMany.mockResolvedValue(
-        Array.from({ length: 30 }, (_, i) =>
-          task({
-            id: `x${i}`,
-            cancelledAt: PAST,
-            dueAt: new Date(PAST.getTime() - i * 3_600_000),
-          }),
-        ),
+    it('pages older closed tasks by a compound cursor without losing ties', async () => {
+      const tie = new Date('2026-09-01T09:00:00.000Z');
+      const stored = Array.from({ length: 31 }, (_, i) =>
+        task({
+          id: `x${String(99 - i).padStart(2, '0')}`,
+          cancelledAt: PAST,
+          dueAt: i >= 29 ? tie : new Date(Date.UTC(2026, 9, 2) - i * 3_600_000),
+        }),
       );
-      const result = await service.given(
+      type Page = {
+        dueAt?: { lt: Date };
+        OR?: [{ dueAt: { lt: Date } }, { dueAt: Date; id: { lt: string } }];
+      };
+      mockPrisma.staffTask.findMany.mockImplementation(
+        ({ where }: { where: { AND: [unknown, Page] } }) => {
+          const page = where.AND[1];
+          const keep = (t: ReturnType<typeof task>) => {
+            if (page.dueAt) return t.dueAt < page.dueAt.lt;
+            const [older, same] = page.OR!;
+            return (
+              t.dueAt < older.dueAt.lt ||
+              (t.dueAt.getTime() === same.dueAt.getTime() && t.id < same.id.lt)
+            );
+          };
+          return Promise.resolve(stored.filter(keep).slice(0, 30));
+        },
+      );
+      const first = await service.given(
         { before: '2026-10-04T10:00:00.000Z' },
         admin,
       );
-      expect(result.items).toHaveLength(30);
-      expect(result.nextBefore).toBe(
-        new Date(PAST.getTime() - 29 * 3_600_000).toISOString(),
-      );
+      expect(first.items).toHaveLength(30);
+      expect(first.nextBefore).toBe('2026-09-01T09:00:00.000Z|x70');
       expect(mockPrisma.staffTask.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ orderBy: { dueAt: 'desc' }, take: 30 }),
+        expect.objectContaining({
+          orderBy: [{ dueAt: 'desc' }, { id: 'desc' }],
+          take: 30,
+        }),
       );
+      const second = await service.given({ before: first.nextBefore! }, admin);
+      expect(second.items.map((i) => i.id)).toEqual(['x69']);
+      expect(second.nextBefore).toBeNull();
+      const ids = [...first.items, ...second.items].map((i) => i.id);
+      expect(ids).toEqual(expect.arrayContaining(['x70', 'x69']));
+      expect(new Set(ids).size).toBe(31);
+    });
+
+    it('rejects a garbage cursor', async () => {
+      for (const before of [
+        'abc',
+        '2026-10-04|x',
+        '2026-10-04T10:00:00.000Z|',
+      ]) {
+        await expect(service.given({ before }, admin)).rejects.toThrow(
+          new BadRequestException('Invalid cursor'),
+        );
+        await expect(service.mine({ before }, teacher)).rejects.toThrow(
+          new BadRequestException('Invalid cursor'),
+        );
+      }
+      expect(mockPrisma.staffTask.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -652,6 +692,39 @@ describe('StaffTasksService', () => {
             userId: 't1',
             removedAt: null,
           }) as object,
+        }),
+      );
+    });
+
+    it('pages my closed rows by task dueAt and id', async () => {
+      mockPrisma.staffTaskAssignee.findMany.mockResolvedValue(
+        Array.from({ length: 30 }, (_, i) => ({
+          ...row('t1', { doneAt: PAST }),
+          task: task({ id: `y${i}`, dueAt: PAST }),
+        })),
+      );
+      const result = await service.mine(
+        { before: '2026-11-02T12:00:00.000Z|z' },
+        teacher,
+      );
+      expect(result.nextBefore).toBe('2026-11-02T12:00:00.000Z|y29');
+      expect(mockPrisma.staffTaskAssignee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId: 't1',
+            removedAt: null,
+            AND: [
+              expect.anything(),
+              {
+                OR: [
+                  { task: { dueAt: { lt: PAST } } },
+                  { task: { dueAt: PAST }, taskId: { lt: 'z' } },
+                ],
+              },
+            ],
+          },
+          orderBy: [{ task: { dueAt: 'desc' } }, { taskId: 'desc' }],
+          take: 30,
         }),
       );
     });
