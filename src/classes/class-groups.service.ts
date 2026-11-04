@@ -3,11 +3,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, TariffUnit } from '@prisma/client';
+import { TariffUnit } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { kyivToday, overlaps, toDay } from '../tariffs/dates';
 import { assertGroupAccess } from './access';
+import {
+  assertNewGroupFields,
+  assertTariff,
+  assertTeachers,
+  newGroupData,
+} from './class-group-checks';
 import {
   groupDetailInclude,
   groupSummaryInclude,
@@ -22,39 +28,6 @@ import { UpdateClassGroupDto } from './dto/update-class-group.dto';
 @Injectable()
 export class ClassGroupsService {
   constructor(private prisma: PrismaService) {}
-
-  private async assertTeachers(ids: string[], currentIds: string[] = []) {
-    if (ids.length === 0) return;
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, role: true, isActive: true },
-    });
-    if (
-      users.length !== new Set(ids).size ||
-      users.some((u) => u.role !== Role.teacher)
-    ) {
-      throw new BadRequestException('Invalid teachers');
-    }
-    if (users.some((u) => !u.isActive && !currentIds.includes(u.id))) {
-      throw new BadRequestException('Teacher is inactive');
-    }
-  }
-
-  private async assertTariff(
-    id: string | null | undefined,
-    unit: TariffUnit,
-    message: string,
-    currentId: string | null = null,
-  ) {
-    if (!id) return;
-    const tariff = await this.prisma.tariff.findUnique({ where: { id } });
-    if (!tariff) throw new NotFoundException('Tariff not found');
-    if (tariff.unit !== unit) throw new BadRequestException(message);
-    if (tariff.institutionId)
-      throw new BadRequestException('Tariff belongs to another institution');
-    if (!tariff.isActive && id !== currentId)
-      throw new BadRequestException('Tariff is not active');
-  }
 
   private async assertNameFree(
     directionId: string,
@@ -89,27 +62,10 @@ export class ClassGroupsService {
     });
     if (!direction) throw new NotFoundException('Direction not found');
     await this.assertNameFree(dto.directionId, dto.name);
-    await this.assertTeachers(dto.teacherIds);
-    await this.assertTariff(
-      dto.singleTariffId,
-      TariffUnit.session,
-      'Tariff unit must be session',
-    );
-    await this.assertTariff(
-      dto.packageTariffId,
-      TariffUnit.package,
-      'Tariff unit must be package',
-    );
+    await assertNewGroupFields(this.prisma, dto);
 
     const group = await this.prisma.classGroup.create({
-      data: {
-        name: dto.name,
-        directionId: dto.directionId,
-        format: dto.format,
-        singleTariffId: dto.singleTariffId ?? null,
-        packageTariffId: dto.packageTariffId ?? null,
-        teachers: { connect: dto.teacherIds.map((id) => ({ id })) },
-      },
+      data: newGroupData(dto.directionId, dto.name, dto),
     });
     return toGroupDetail(await this.load(group.id), kyivToday());
   }
@@ -119,17 +75,20 @@ export class ClassGroupsService {
     if (dto.name !== undefined && dto.name !== group.name)
       await this.assertNameFree(group.directionId, dto.name, id);
     if (dto.teacherIds)
-      await this.assertTeachers(
+      await assertTeachers(
+        this.prisma,
         dto.teacherIds,
         group.teachers.map((t) => t.id),
       );
-    await this.assertTariff(
+    await assertTariff(
+      this.prisma,
       dto.singleTariffId,
       TariffUnit.session,
       'Tariff unit must be session',
       group.singleTariffId,
     );
-    await this.assertTariff(
+    await assertTariff(
+      this.prisma,
       dto.packageTariffId,
       TariffUnit.package,
       'Tariff unit must be package',
