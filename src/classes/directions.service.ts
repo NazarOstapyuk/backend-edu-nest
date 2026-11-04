@@ -73,9 +73,12 @@ export class DirectionsService {
   }
 
   async delete(id: string) {
-    await this.get(id);
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Direction" WHERE id = ${id} FOR UPDATE`;
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "Direction" WHERE id = ${id} FOR UPDATE`;
+      if (locked.length === 0)
+        throw new NotFoundException('Direction not found');
       await tx.$queryRaw`SELECT id FROM "ClassGroup" WHERE "directionId" = ${id} ORDER BY id FOR UPDATE`;
       const inGroups = { classGroup: { directionId: id } };
       const [lessons, rates, packages] = await Promise.all([

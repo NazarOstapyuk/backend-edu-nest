@@ -164,7 +164,15 @@ describe('DirectionsService', () => {
 
   describe('delete', () => {
     beforeEach(() => {
-      mockPrisma.direction.findUnique.mockResolvedValue({ id: 'd1' });
+      mockPrisma.$queryRaw.mockResolvedValue([{ id: 'd1' }]);
+    });
+
+    it('answers 404 when the direction is gone under the lock', async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+
+      await expect(service.delete('d1')).rejects.toThrow('Direction not found');
+      expect(mockPrisma.lesson.count).not.toHaveBeenCalled();
+      expect(mockPrisma.direction.delete).not.toHaveBeenCalled();
     });
 
     it('deletes the direction with its unused groups', async () => {
