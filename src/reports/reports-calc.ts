@@ -43,15 +43,30 @@ export interface PaymentRow {
   note: string | null;
 }
 
+export interface TariffRef {
+  id: string;
+  name: string;
+}
+
+export interface ChargeTariffSources {
+  enrollments: Map<string, TariffRef>;
+  packages: Map<string, TariffRef>;
+  adaptations: Map<string, TariffRef>;
+  attendances: Map<string, TariffRef>;
+}
+
 export interface ChargeRow {
   periodStart: Date | null;
   createdAt: Date;
+  childId: string;
   child: string;
   group: string | null;
   category: FinanceCategory;
   sourceType: ChargeSource;
   description: string;
   amount: Prisma.Decimal;
+  tariffId: string | null;
+  tariff: string | null;
 }
 
 export interface DebtChild {
@@ -88,6 +103,84 @@ const SOURCE_LABELS: Record<ChargeSource, string> = {
   extra_session: 'Разове заняття',
   meals: 'Харчування',
 };
+
+const NO_TARIFF = 'Без тарифу';
+
+export function chargeTariff(
+  charge: { sourceType: ChargeSource; sourceId: string | null },
+  sources: ChargeTariffSources,
+): TariffRef | null {
+  if (!charge.sourceId) return null;
+  const bySource: Partial<Record<ChargeSource, Map<string, TariffRef>>> = {
+    [ChargeSource.monthly]: sources.enrollments,
+    [ChargeSource.extra_package]: sources.packages,
+    [ChargeSource.adaptation]: sources.adaptations,
+    [ChargeSource.extra_session]: sources.attendances,
+  };
+  return bySource[charge.sourceType]?.get(charge.sourceId) ?? null;
+}
+
+export const tariffLabel = (row: {
+  tariff: string | null;
+  category: FinanceCategory;
+}): string =>
+  row.tariff ??
+  (row.category === FinanceCategory.meals
+    ? CATEGORY_LABELS[FinanceCategory.meals]
+    : NO_TARIFF);
+
+export function tariffTotals(rows: ChargeRow[]): ReportSheet {
+  const groups = new Map<
+    string,
+    {
+      label: string;
+      count: number;
+      children: Set<string>;
+      amounts: Prisma.Decimal[];
+    }
+  >();
+  for (const row of rows) {
+    const label = tariffLabel(row);
+    const key = row.tariffId ?? `label:${label}`;
+    const group = groups.get(key) ?? {
+      label,
+      count: 0,
+      children: new Set<string>(),
+      amounts: [],
+    };
+    group.count += 1;
+    group.children.add(row.childId);
+    group.amounts.push(row.amount);
+    groups.set(key, group);
+  }
+  const sheetRows = [...groups.values()]
+    .map((g) => ({ ...g, sum: sumMoney(g.amounts) }))
+    .sort((a, b) => b.sum.cmp(a.sum) || a.label.localeCompare(b.label))
+    .map(
+      (g): ReportRow => ({
+        tariff: g.label,
+        count: g.count,
+        children: g.children.size,
+        amount: formatMoney(g.sum),
+      }),
+    );
+  return {
+    name: 'За тарифами',
+    columns: [
+      { key: 'tariff', label: 'Тариф', type: 'text' },
+      { key: 'count', label: 'Нарахувань', type: 'number' },
+      { key: 'children', label: 'Дітей', type: 'number' },
+      { key: 'amount', label: 'Сума', type: 'money' },
+    ],
+    rows: sheetRows,
+    totals: {
+      tariff: TOTAL_LABEL,
+      count: rows.length,
+      children: new Set(rows.map((r) => r.childId)).size,
+      ...moneyTotals(sheetRows, ['amount']),
+    },
+  };
+}
 
 const categoryLabel = (category: FinanceCategory | null): string =>
   category ? CATEGORY_LABELS[category] : NO_CATEGORY;
@@ -212,6 +305,7 @@ export function chargesReport(period: PeriodRef, rows: ChargeRow[]): Report {
     group: row.group,
     category: CATEGORY_LABELS[row.category],
     source: SOURCE_LABELS[row.sourceType],
+    tariff: tariffLabel(row),
     description: row.description,
     amount: formatMoney(row.amount),
   }));
@@ -225,12 +319,14 @@ export function chargesReport(period: PeriodRef, rows: ChargeRow[]): Report {
       { key: 'group', label: 'Група', type: 'text' },
       { key: 'category', label: 'Категорія', type: 'text' },
       { key: 'source', label: 'Джерело', type: 'text' },
+      { key: 'tariff', label: 'Тариф', type: 'text' },
       { key: 'description', label: 'Опис', type: 'text' },
       { key: 'amount', label: 'Сума', type: 'money' },
     ],
     rows: lines,
     totals: { child: TOTAL_LABEL, ...moneyTotals(lines, ['amount']) },
     sheets: [
+      tariffTotals(items),
       groupTotals(
         items,
         (c) => CATEGORY_LABELS[c.category],

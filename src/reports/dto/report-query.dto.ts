@@ -31,6 +31,10 @@ export class ReportQueryDto {
   teacherId?: string;
 
   @IsOptional()
+  @IsUUID('4')
+  tariffId?: string;
+
+  @IsOptional()
   @IsIn(['json', 'xlsx'])
   format?: 'json' | 'xlsx';
 }

@@ -14,4 +14,12 @@ describe('ReportQueryDto', () => {
     const dto = plainToInstance(ReportQueryDto, { institutionId: 'x' });
     expect(await validate(dto, { whitelist: true })).toHaveLength(1);
   });
+  it('accepts a uuid tariffId and rejects other values', async () => {
+    const id = '0b7e6a52-6f4d-4c1b-8d3e-2f6c1a9b7e10';
+    const ok = plainToInstance(ReportQueryDto, { tariffId: id });
+    expect(await validate(ok, { whitelist: true })).toEqual([]);
+    expect(ok.tariffId).toBe(id);
+    const bad = plainToInstance(ReportQueryDto, { tariffId: 'x' });
+    expect(await validate(bad, { whitelist: true })).toHaveLength(1);
+  });
 });

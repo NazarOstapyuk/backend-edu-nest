@@ -15,6 +15,7 @@ import { childMoney } from '../parent-cabinet/cabinet-calc';
 import {
   attendanceReport,
   chargeDay,
+  chargeTariff,
   chargesReport,
   debtsReport,
   lessonsReport,
@@ -103,12 +104,15 @@ describe('chargesReport', () => {
 
   it('keeps only charges dated inside the period', () => {
     const base = {
+      childId: 'c1',
       child: 'А',
       group: null,
       category: FinanceCategory.tuition,
       sourceType: ChargeSource.monthly,
       description: 'Жовтень',
       amount: dec('1000.00'),
+      tariffId: 't1',
+      tariff: 'Абонемент',
     };
     const r = chargesReport(period, [
       {
@@ -127,7 +131,139 @@ describe('chargesReport', () => {
       date: '2026-10-01',
       source: 'Місячна оплата',
       category: 'Навчання',
+      tariff: 'Абонемент',
     });
+  });
+
+  const row = (
+    childId: string,
+    amount: string,
+    tariff: { id: string; name: string } | null,
+    category: FinanceCategory = FinanceCategory.extra_classes,
+  ) => ({
+    periodStart: d('2026-10-05'),
+    createdAt: new Date('2026-10-05T08:00:00Z'),
+    childId,
+    child: childId,
+    group: null,
+    category,
+    sourceType: tariff ? ChargeSource.extra_package : ChargeSource.manual,
+    description: 'x',
+    amount: dec(amount),
+    tariffId: tariff?.id ?? null,
+    tariff: tariff?.name ?? null,
+  });
+
+  it('adds a tariff column and a first sheet grouped by tariff', () => {
+    const lego = { id: 't-lego', name: 'Лего' };
+    const art = { id: 't-art', name: 'Малювання' };
+    const r = chargesReport(period, [
+      row('c1', '300.00', lego),
+      row('c1', '300.00', lego),
+      row('c2', '300.00', lego),
+      row('c1', '1000.00', art),
+      row('c3', '50.00', null, FinanceCategory.meals),
+      row('c3', '20.00', null),
+    ]);
+    expect(r.columns.map((c) => c.key)).toEqual([
+      'date',
+      'child',
+      'group',
+      'category',
+      'source',
+      'tariff',
+      'description',
+      'amount',
+    ]);
+    expect(r.rows.map((x) => x.tariff)).toContain('Харчування');
+    expect(r.rows.map((x) => x.tariff)).toContain('Без тарифу');
+    expect(r.sheets.map((s) => s.name)).toEqual([
+      'За тарифами',
+      'За категоріями',
+      'За джерелами',
+    ]);
+    const sheet = r.sheets[0];
+    expect(sheet.rows).toEqual([
+      { tariff: 'Малювання', count: 1, children: 1, amount: '1000.00' },
+      { tariff: 'Лего', count: 3, children: 2, amount: '900.00' },
+      { tariff: 'Харчування', count: 1, children: 1, amount: '50.00' },
+      { tariff: 'Без тарифу', count: 1, children: 1, amount: '20.00' },
+    ]);
+    expect(sheet.totals).toEqual({
+      tariff: 'Разом',
+      count: 6,
+      children: 3,
+      amount: '1970.00',
+    });
+  });
+
+  it('keeps same-named tariffs of different institutions apart', () => {
+    const r = chargesReport(period, [
+      row('c1', '100.00', { id: 'a', name: 'Лего' }),
+      row('c2', '200.00', { id: 'b', name: 'Лего' }),
+    ]);
+    expect(r.sheets[0].rows).toHaveLength(2);
+  });
+});
+
+describe('chargeTariff', () => {
+  const t = (id: string) => ({ id, name: id });
+  const sources = {
+    enrollments: new Map([['e1', t('monthly')]]),
+    packages: new Map([['p1', t('package')]]),
+    adaptations: new Map([['v1', t('adaptation')]]),
+    attendances: new Map([['a1', t('single')]]),
+  };
+
+  it('resolves each source type through its own map', () => {
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.monthly, sourceId: 'e1' },
+        sources,
+      ),
+    ).toEqual(t('monthly'));
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.extra_package, sourceId: 'p1' },
+        sources,
+      ),
+    ).toEqual(t('package'));
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.adaptation, sourceId: 'v1' },
+        sources,
+      ),
+    ).toEqual(t('adaptation'));
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.extra_session, sourceId: 'a1' },
+        sources,
+      ),
+    ).toEqual(t('single'));
+  });
+
+  it('returns null for sources without a tariff or unknown ids', () => {
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.opening_balance, sourceId: 'p1' },
+        sources,
+      ),
+    ).toBeNull();
+    expect(
+      chargeTariff({ sourceType: ChargeSource.meals, sourceId: 'e1' }, sources),
+    ).toBeNull();
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.manual, sourceId: null },
+        sources,
+      ),
+    ).toBeNull();
+    expect(
+      chargeTariff(
+        { sourceType: ChargeSource.monthly, sourceId: 'x' },
+        sources,
+      ),
+    ).toBeNull();
   });
 });
 
