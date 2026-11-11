@@ -84,10 +84,15 @@ export class DirectionsService {
       const [lessons, rates, packages] = await Promise.all([
         tx.lesson.count({ where: inGroups }),
         tx.salaryRate.count({ where: inGroups }),
-        tx.package.count({ where: { directionId: id } }),
+        tx.package.count({ where: { directionId: id, voidedAt: null } }),
       ]);
       if (lessons + rates + packages > 0)
-        throw new BadRequestException('Cannot delete: direction is in use');
+        throw new BadRequestException({
+          statusCode: 400,
+          message: 'Cannot delete: direction is in use',
+          error: 'Bad Request',
+          usage: { lessons, packages, rates },
+        });
       await tx.classGroupMember.deleteMany({ where: inGroups });
       await tx.classGroup.deleteMany({ where: { directionId: id } });
       await tx.direction.delete({ where: { id } });

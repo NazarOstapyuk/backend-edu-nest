@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   ClassFormat,
@@ -223,6 +224,29 @@ describe('DirectionsService', () => {
       );
       expect(mockPrisma.classGroupMember.deleteMany).not.toHaveBeenCalled();
       expect(mockPrisma.direction.delete).not.toHaveBeenCalled();
+    });
+
+    it('ignores voided packages', async () => {
+      await service.delete('d1');
+
+      expect(mockPrisma.package.count).toHaveBeenCalledWith({
+        where: { directionId: 'd1', voidedAt: null },
+      });
+    });
+
+    it('reports what blocks the deletion', async () => {
+      mockPrisma.lesson.count.mockResolvedValue(3);
+      mockPrisma.package.count.mockResolvedValue(1);
+
+      const error = await service.delete('d1').catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toEqual({
+        statusCode: 400,
+        message: 'Cannot delete: direction is in use',
+        error: 'Bad Request',
+        usage: { lessons: 3, packages: 1, rates: 0 },
+      });
     });
   });
 

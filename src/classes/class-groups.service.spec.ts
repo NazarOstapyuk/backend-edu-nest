@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AccessScope, ClassFormat, Role, TariffUnit } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -309,5 +310,20 @@ describe('ClassGroupsService', () => {
       'Cannot delete: group is in use',
     );
     expect(mockPrisma.classGroup.delete).not.toHaveBeenCalled();
+  });
+
+  it('reports what blocks deleting a group', async () => {
+    mockPrisma.lesson.count.mockResolvedValue(3);
+    mockPrisma.salaryRate.count.mockResolvedValue(1);
+
+    const error = await service.delete('g1').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual({
+      statusCode: 400,
+      message: 'Cannot delete: group is in use',
+      error: 'Bad Request',
+      usage: { lessons: 3, rates: 1 },
+    });
   });
 });

@@ -120,7 +120,12 @@ export class ClassGroupsService {
       where: { classGroupId: id },
     });
     if (lessons > 0 || rates > 0)
-      throw new BadRequestException('Cannot delete: group is in use');
+      throw new BadRequestException({
+        statusCode: 400,
+        message: 'Cannot delete: group is in use',
+        error: 'Bad Request',
+        usage: { lessons, rates },
+      });
     await this.prisma.$transaction([
       this.prisma.classGroupMember.deleteMany({ where: { classGroupId: id } }),
       this.prisma.classGroup.delete({ where: { id } }),
