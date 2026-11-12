@@ -46,6 +46,11 @@ Success: the admin opens Reports → «Оцінювання», picks the semeste
 - **Semester presets** in the report period filter, computed on the client from today: «I семестр» = 1 Sep – 31 Dec, «II семестр» = 1 Jan – 31 May of the current school year (school year starts 1 Sep).
 - **Notes UI:** the question editor gets the type «Відсоток» with a list of numeric values (default 20, 50, 100); the fill screen and the parent cabinet render percent like choice buttons / text, with a `%` suffix. Completeness, deadlines, dashboard and reminders treat percent exactly like choice.
 
+## Setup after release (admin, no code)
+
+- Mini-school note set: deactivate the sleep questions; replace the combined question «Навчальні заняття (ЯДС, Математика, Укр.мова)» with one percent question per subject (ЯДС, Математика, Українська мова, ...), then deactivate the combined one. Each subject then gets its own average and level in the report. Old answers of the combined question stay in history and appear in the report as their own row for periods that include them.
+- School institution: fill the level scale.
+
 ## What is left to the builder
 
 - Exact Prisma model and migration names, DTO shapes beyond the ones above, error strings (add Ukrainian translations in the frontend `errorMessages.ts`).
