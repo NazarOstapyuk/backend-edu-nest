@@ -64,6 +64,7 @@ export const toPackageView = (p: LoadedPackage, today: Date) => {
     expiresAt: effectiveExpiry(p),
     state: packageState(p, today),
     chargeId: p.chargeId,
+    autoRenewed: p.renewedByAttendanceId !== null,
     needsReconciliation: p.needsReconciliation,
     reconciledAt: p.reconciledAt,
     reconciliationNote: p.reconciliationNote,

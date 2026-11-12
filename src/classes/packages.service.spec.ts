@@ -9,7 +9,33 @@ import {
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
-import { PackagesService } from './packages.service';
+import { PackagesService, toPackageView } from './packages.service';
+
+describe('toPackageView', () => {
+  const view = (renewedByAttendanceId: string | null) =>
+    toPackageView(
+      {
+        id: 'p1',
+        sessionsTotal: 4,
+        usedBefore: 0,
+        purchaseDate: new Date('2026-10-01T00:00:00Z'),
+        expiresAt: null,
+        createdAt: new Date('2026-10-01T10:00:00Z'),
+        voidedAt: null,
+        needsReconciliation: false,
+        renewedByAttendanceId,
+        extensions: [],
+        usages: [],
+        legacySubscription: null,
+      } as unknown as Parameters<typeof toPackageView>[0],
+      new Date('2026-10-11T00:00:00Z'),
+    );
+
+  it('marks packages created by auto-renewal', () => {
+    expect(view('a1').autoRenewed).toBe(true);
+    expect(view(null).autoRenewed).toBe(false);
+  });
+});
 
 const day = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const d = (value: string) => new Prisma.Decimal(value);

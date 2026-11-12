@@ -21,6 +21,7 @@ import { assertGroupAccess, parseDay } from './access';
 import { personSelect } from './class-views';
 import {
   effectiveExpiry,
+  expiresAtFor,
   packageRemaining,
   pickPackage,
   shouldConsume,
@@ -36,6 +37,7 @@ const markGroupInclude = {
   direction: true,
   teachers: { select: { id: true } },
   singleTariff: { include: { prices: true } },
+  packageTariff: { include: { prices: true } },
 } satisfies Prisma.ClassGroupInclude;
 
 type MarkGroup = Prisma.ClassGroupGetPayload<{
@@ -276,6 +278,7 @@ export class LessonsService {
         where: { id: attendance.usage.id },
         data,
       });
+      await this.voidUnusedRenewal(tx, attendance.id, reason, userId);
     }
     await tx.lessonAttendance.update({ where: { id: attendance.id }, data });
   }
@@ -298,6 +301,9 @@ export class LessonsService {
       await tx.sessionUsage.create({
         data: { attendanceId, packageId: pkg.id },
       });
+      const others = packages.filter((p) => p.id !== pkg.id);
+      if (packageRemaining(pkg) === 1 && !pickPackage(others, date))
+        await this.renew(tx, group, attendanceId, childId, date, userId);
       return;
     }
 
@@ -321,6 +327,82 @@ export class LessonsService {
     });
     await tx.sessionUsage.create({
       data: { attendanceId, chargeId: charge.id },
+    });
+  }
+
+  private async renew(
+    tx: Prisma.TransactionClient,
+    group: MarkGroup,
+    attendanceId: string,
+    childId: string,
+    date: Date,
+    userId: string,
+  ) {
+    const tariff = group.packageTariff;
+    if (!tariff || !tariff.isActive || !tariff.packageSize) return;
+    const price = priceOn(tariff.prices, date);
+    if (!price) return;
+    const member = await tx.classGroupMember.findFirst({
+      where: {
+        classGroupId: group.id,
+        childId,
+        startDate: { lte: date },
+        endDate: null,
+      },
+    });
+    if (!member) return;
+
+    const packageId = randomUUID();
+    const charge = await tx.charge.create({
+      data: {
+        childId,
+        category: tariff.category,
+        amount: price,
+        description: `${tariff.name} (${group.direction.name}), ${uaDay(date)}: автопродовження`,
+        periodStart: date,
+        periodEnd: date,
+        sourceType: ChargeSource.extra_package,
+        sourceId: packageId,
+        createdById: userId,
+      },
+    });
+    await tx.package.create({
+      data: {
+        id: packageId,
+        childId,
+        directionId: group.directionId,
+        tariffId: tariff.id,
+        sessionsTotal: tariff.packageSize,
+        purchaseDate: date,
+        expiresAt: expiresAtFor(date, tariff.validityDays),
+        chargeId: charge.id,
+        createdById: userId,
+        renewedByAttendanceId: attendanceId,
+      },
+    });
+  }
+
+  private async voidUnusedRenewal(
+    tx: Prisma.TransactionClient,
+    attendanceId: string,
+    reason: string,
+    userId: string,
+  ) {
+    const renewal = await tx.package.findFirst({
+      where: { renewedByAttendanceId: attendanceId, voidedAt: null },
+      include: { usages: { where: { voidedAt: null } } },
+    });
+    if (!renewal || renewal.usages.length > 0) return;
+    if (renewal.chargeId) {
+      const charge = await tx.charge.findUnique({
+        where: { id: renewal.chargeId },
+      });
+      if (charge && !charge.voidedAt)
+        await voidChargeInTx(tx, renewal.chargeId, reason, userId);
+    }
+    await tx.package.update({
+      where: { id: renewal.id },
+      data: { voidedAt: new Date(), voidedById: userId, voidReason: reason },
     });
   }
 }

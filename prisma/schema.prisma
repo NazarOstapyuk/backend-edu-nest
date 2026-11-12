@@ -544,29 +544,31 @@ model ClassGroupMember {
 }
 
 model Package {
-  id                   String        @id @default(uuid())
-  childId              String
-  child                Child         @relation(fields: [childId], references: [id])
-  directionId          String
-  direction            Direction     @relation(fields: [directionId], references: [id])
-  tariffId             String?
-  tariff               Tariff?       @relation(fields: [tariffId], references: [id], onDelete: Restrict)
-  sessionsTotal        Int
-  usedBefore           Int           @default(0)
-  purchaseDate         DateTime      @db.Date
-  expiresAt            DateTime?     @db.Date
-  chargeId             String?       @unique
-  charge               Charge?       @relation("PackageCharge", fields: [chargeId], references: [id], onDelete: Restrict)
-  legacySubscriptionId String?       @unique
-  legacySubscription   Subscription? @relation(fields: [legacySubscriptionId], references: [id], onDelete: Restrict)
-  needsReconciliation  Boolean       @default(false)
-  reconciledAt         DateTime?
-  reconciledById       String?
-  reconciledBy         User?         @relation("PackageReconciledBy", fields: [reconciledById], references: [id], onDelete: Restrict)
-  reconciliationNote   String?
-  createdById          String?
-  createdBy            User?         @relation("PackageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt            DateTime      @default(now())
+  id                    String            @id @default(uuid())
+  childId               String
+  child                 Child             @relation(fields: [childId], references: [id])
+  directionId           String
+  direction             Direction         @relation(fields: [directionId], references: [id])
+  tariffId              String?
+  tariff                Tariff?           @relation(fields: [tariffId], references: [id], onDelete: Restrict)
+  sessionsTotal         Int
+  usedBefore            Int               @default(0)
+  purchaseDate          DateTime          @db.Date
+  expiresAt             DateTime?         @db.Date
+  chargeId              String?           @unique
+  charge                Charge?           @relation("PackageCharge", fields: [chargeId], references: [id], onDelete: Restrict)
+  legacySubscriptionId  String?           @unique
+  legacySubscription    Subscription?     @relation(fields: [legacySubscriptionId], references: [id], onDelete: Restrict)
+  needsReconciliation   Boolean           @default(false)
+  reconciledAt          DateTime?
+  reconciledById        String?
+  reconciledBy          User?             @relation("PackageReconciledBy", fields: [reconciledById], references: [id], onDelete: Restrict)
+  reconciliationNote    String?
+  createdById           String?
+  createdBy             User?             @relation("PackageCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt             DateTime          @default(now())
+  renewedByAttendanceId String?           @unique
+  renewedByAttendance   LessonAttendance? @relation("PackageRenewedBy", fields: [renewedByAttendanceId], references: [id], onDelete: Restrict)
 
   voidedAt   DateTime?
   voidedById String?
@@ -622,7 +624,8 @@ model LessonAttendance {
   voidedBy   User?     @relation("AttendanceVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   voidReason String?
 
-  usage SessionUsage?
+  usage          SessionUsage?
+  renewedPackage Package?      @relation("PackageRenewedBy")
 
   @@index([lessonId])
   @@index([childId])

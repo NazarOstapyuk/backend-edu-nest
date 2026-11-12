@@ -46,9 +46,14 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
-  classGroupMember: { findMany: jest.fn() },
+  classGroupMember: { findMany: jest.fn(), findFirst: jest.fn() },
   child: { findMany: jest.fn() },
-  package: { findMany: jest.fn() },
+  package: {
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
   sessionUsage: { create: jest.fn(), update: jest.fn() },
   charge: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   allocation: { updateMany: jest.fn() },
@@ -429,6 +434,214 @@ describe('LessonsService.mark', () => {
           TODAY,
         ),
       ).resolves.toEqual({ lessonId: 'l1' });
+    });
+  });
+
+  describe('package renewal', () => {
+    const packageTariff = {
+      id: 'tp',
+      name: 'LEGO пакет',
+      category: FinanceCategory.extra_classes,
+      unit: 'package',
+      isActive: true,
+      packageSize: 4,
+      validityDays: null,
+      prices: [{ price: d('1000'), effectiveFrom: day('2026-01-01') }],
+    };
+
+    const lastSession = () => packageRow({ usedBefore: 3 });
+
+    beforeEach(() => {
+      mockPrisma.classGroup.findUnique.mockResolvedValue(
+        group({ packageTariffId: 'tp', packageTariff }),
+      );
+      mockPrisma.package.findMany.mockResolvedValue([lastSession()]);
+      mockPrisma.classGroupMember.findFirst.mockResolvedValue({ id: 'm1' });
+      mockPrisma.charge.create.mockResolvedValue({ id: 'ch-renew' });
+    });
+
+    const markPresent = () =>
+      service.mark(
+        'g1',
+        '2026-10-11',
+        mark(AttendanceStatus.present),
+        admin,
+        TODAY,
+      );
+
+    it('charges the next package when the last session is used', async () => {
+      await markPresent();
+
+      expect(mockPrisma.classGroupMember.findFirst).toHaveBeenCalledWith({
+        where: {
+          classGroupId: 'g1',
+          childId: 'c1',
+          startDate: { lte: day('2026-10-11') },
+          endDate: null,
+        },
+      });
+      const charge = firstArg<{ data: Record<string, unknown> }>(
+        mockPrisma.charge.create,
+      ).data;
+      expect(charge).toMatchObject({
+        childId: 'c1',
+        category: FinanceCategory.extra_classes,
+        amount: d('1000'),
+        description: 'LEGO пакет (LEGO), 11.10.2026: автопродовження',
+        sourceType: ChargeSource.extra_package,
+        createdById: 'u1',
+      });
+      const created = firstArg<{ data: Record<string, unknown> }>(
+        mockPrisma.package.create,
+      ).data;
+      expect(created).toMatchObject({
+        id: charge.sourceId,
+        childId: 'c1',
+        directionId: 'd1',
+        tariffId: 'tp',
+        sessionsTotal: 4,
+        purchaseDate: day('2026-10-11'),
+        expiresAt: null,
+        chargeId: 'ch-renew',
+        createdById: 'u1',
+        renewedByAttendanceId: 'a-new',
+      });
+    });
+
+    it('does not renew while sessions are left', async () => {
+      mockPrisma.package.findMany.mockResolvedValue([
+        packageRow({ usedBefore: 2 }),
+      ]);
+
+      await markPresent();
+
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+    });
+
+    it('does not renew when another package is still usable', async () => {
+      mockPrisma.package.findMany.mockResolvedValue([
+        lastSession(),
+        packageRow({ id: 'p2', createdAt: new Date('2026-10-05T10:00:00Z') }),
+      ]);
+
+      await markPresent();
+
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+    });
+
+    it('does not renew without a package tariff', async () => {
+      mockPrisma.classGroup.findUnique.mockResolvedValue(group());
+
+      await markPresent();
+
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+    });
+
+    it('does not renew for a child who left the group', async () => {
+      mockPrisma.classGroupMember.findFirst.mockResolvedValue(null);
+
+      await markPresent();
+
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+      expect(mockPrisma.charge.create).not.toHaveBeenCalled();
+    });
+
+    it('does not renew when the package tariff has no price', async () => {
+      mockPrisma.classGroup.findUnique.mockResolvedValue(
+        group({
+          packageTariffId: 'tp',
+          packageTariff: { ...packageTariff, prices: [] },
+        }),
+      );
+
+      await markPresent();
+
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+    });
+
+    it('voids an unused renewal when the lesson is corrected', async () => {
+      mockPrisma.lessonAttendance.findMany.mockResolvedValue([
+        {
+          id: 'a-old',
+          childId: 'c1',
+          status: AttendanceStatus.present,
+          isGuest: false,
+          usage: {
+            id: 'u-old',
+            packageId: 'p1',
+            chargeId: null,
+            voidedAt: null,
+          },
+        },
+      ]);
+      mockPrisma.package.findFirst.mockResolvedValue({
+        id: 'p-renew',
+        chargeId: 'ch-renew',
+        usages: [],
+      });
+      mockPrisma.charge.findUnique.mockResolvedValue({
+        id: 'ch-renew',
+        voidedAt: null,
+      });
+
+      await service.mark(
+        'g1',
+        '2026-10-11',
+        mark(AttendanceStatus.absent_excused),
+        admin,
+        TODAY,
+      );
+
+      expect(mockPrisma.package.findFirst).toHaveBeenCalledWith({
+        where: { renewedByAttendanceId: 'a-old', voidedAt: null },
+        include: { usages: { where: { voidedAt: null } } },
+      });
+      const voided = {
+        voidedAt: expect.any(Date) as Date,
+        voidedById: 'u1',
+        voidReason: 'Виправлення відмітки',
+      };
+      expect(mockPrisma.charge.update).toHaveBeenCalledWith({
+        where: { id: 'ch-renew' },
+        data: voided,
+      });
+      expect(mockPrisma.package.update).toHaveBeenCalledWith({
+        where: { id: 'p-renew' },
+        data: voided,
+      });
+    });
+
+    it('keeps a renewal that is already in use', async () => {
+      mockPrisma.lessonAttendance.findMany.mockResolvedValue([
+        {
+          id: 'a-old',
+          childId: 'c1',
+          status: AttendanceStatus.present,
+          isGuest: false,
+          usage: {
+            id: 'u-old',
+            packageId: 'p1',
+            chargeId: null,
+            voidedAt: null,
+          },
+        },
+      ]);
+      mockPrisma.package.findFirst.mockResolvedValue({
+        id: 'p-renew',
+        chargeId: 'ch-renew',
+        usages: [{ id: 'u-next' }],
+      });
+
+      await service.mark(
+        'g1',
+        '2026-10-11',
+        mark(AttendanceStatus.absent_excused),
+        admin,
+        TODAY,
+      );
+
+      expect(mockPrisma.package.update).not.toHaveBeenCalled();
+      expect(mockPrisma.charge.update).not.toHaveBeenCalled();
     });
   });
 });
