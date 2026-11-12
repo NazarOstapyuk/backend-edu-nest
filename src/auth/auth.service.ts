@@ -19,6 +19,7 @@ import type { StringValue } from 'ms';
 import { JwtService } from '@nestjs/jwt';
 import { Request, Response } from 'express';
 import * as bcrypt from 'bcryptjs';
+import { storePasswordCopy } from '../users/password-vault';
 import { positionRef, positionSelect } from '../positions/position-select';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -225,6 +226,7 @@ export class AuthService {
         refreshToken: null,
       },
     });
+    await storePasswordCopy(this.prisma, userId, dto.newPassword);
     const tokens = await this.generateTokens(user.id, user.role);
     await this.storeRefreshToken(user.id, tokens.refreshToken);
     this.setCookies(res, tokens);

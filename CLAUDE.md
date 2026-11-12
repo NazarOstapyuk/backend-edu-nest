@@ -34,7 +34,7 @@ NestJS 11 and **Prisma 7** are newer than most of the model's training data. Pri
 
 ## Environment
 
-`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies), `CORS_ORIGIN` (default `http://localhost:5173`), `TRUST_PROXY` (Express `trust proxy`: `true` behind Render/Netlify, default `loopback`). `docker-compose.prod.yml` also needs `POSTGRES_PASSWORD`.
+`.env` keys: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_EXPIRES`, `JWT_REFRESH_EXPIRES`, `ROOT_LOGIN`, `ROOT_PASSWORD`. Optional: `PORT`, `NODE_ENV` (`production` enables `secure` cookies), `CORS_ORIGIN` (default `http://localhost:5173`), `TRUST_PROXY` (Express `trust proxy`: `true` behind Render/Netlify, default `loopback`). `PASSWORD_VIEW_KEY` (base64 of 32 random bytes) enables the root password view; without it copies are not stored and the view answers 400 `Password view is not configured`. `docker-compose.prod.yml` also needs `POSTGRES_PASSWORD`.
 Optional backups: `BACKUP_DIR` (folder for database copies; empty disables backups), `BACKUP_PG_CONTAINER` (default `edu_postgres`, empty = local `pg_dump`).
 Optional online payments: `PAYMENT_PROVIDER` (`test` | `monobank`; empty disables), `PAYMENT_WEBHOOK_URL` (public base for webhooks; empty = polling only), `PUBLIC_APP_URL` (frontend base, default `http://localhost:5173`), `INSTITUTION_NAME` (default `EduNest`).
 
@@ -67,6 +67,7 @@ Roles (`Role` enum): `root`, `admin`, `teacher`, `parent`. Rules enforced in ser
 - `root` can be created only by root via `POST /users` and is never assigned through update; `root` user cannot be deleted and is hidden from `GET /users`.
 - `parent` can only read subscriptions of their own children (`SubscriptionsService.findByChild`) and the parent cabinet views (`src/parent-cabinet/`).
 - User responses must strip `password` and `refreshToken` (`omit` in UsersService and Prisma includes elsewhere).
+- Root password view: besides the bcrypt hash, every password set on create, `PATCH /users/:id` with `password` and `POST /auth/change-password` is stored AES-256-GCM sealed in `UserPasswordCopy` (separate table so user includes never carry it; `src/users/password-vault.ts`, key `PASSWORD_VIEW_KEY`). `POST /users/:id/password` (root only, otherwise 403 `Insufficient permissions`; root target 403 `Root password cannot be viewed`) returns `{ password }`, `null` for passwords set before the copy existed or sealed with another key. It is a POST so the audit middleware records each view.
 
 ### Domain: subscriptions
 

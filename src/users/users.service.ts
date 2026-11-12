@@ -32,6 +32,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateAccessDto } from './dto/update-access.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { openPassword, storePasswordCopy, vaultKey } from './password-vault';
 
 const institutionSelect = { select: { institutionId: true } } as const;
 const userInclude = {
@@ -252,6 +253,7 @@ export class UsersService {
         include: userInclude,
         omit: userOmit,
       });
+      await storePasswordCopy(tx, user.id, dto.password);
       await this.audit.recordChange(tx, {
         actorId: actor.id,
         entityType: 'users',
@@ -353,6 +355,22 @@ export class UsersService {
       })
     )
       throw new ForbiddenException('Cannot manage this user');
+  }
+
+  async revealPassword(id: string, actor: AuthenticatedUser) {
+    if (actor.role !== Role.root)
+      throw new ForbiddenException('Insufficient permissions');
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { role: true, passwordCopy: { select: { sealed: true } } },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === Role.root)
+      throw new ForbiddenException('Root password cannot be viewed');
+    const key = vaultKey();
+    if (!key) throw new BadRequestException('Password view is not configured');
+    const sealed = user.passwordCopy?.sealed;
+    return { password: sealed ? openPassword(sealed, key) : null };
   }
 
   async delete(id: string, actor: AuthenticatedUser) {
@@ -584,6 +602,7 @@ export class UsersService {
         include: userInclude,
         omit: userOmit,
       });
+      if (dto.password) await storePasswordCopy(tx, id, dto.password);
       await this.audit.recordChange(tx, {
         actorId: actor.id,
         entityType: 'users',

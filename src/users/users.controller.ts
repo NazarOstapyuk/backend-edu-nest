@@ -72,6 +72,14 @@ export class UsersController {
     return this.usersService.delete(id, user);
   }
 
+  @Post(':id/password')
+  revealPassword(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.usersService.revealPassword(id, user);
+  }
+
   @Patch(':id/access')
   @Permission(PermissionArea.users, PermissionLevel.edit)
   setAccess(

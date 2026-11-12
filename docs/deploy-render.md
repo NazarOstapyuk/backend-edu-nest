@@ -42,6 +42,7 @@
    | `CORS_ORIGIN` | адреса Netlify, наприклад `https://edunest.netlify.app` |
    | `PUBLIC_APP_URL` | та сама адреса Netlify |
    | `TRUST_PROXY` | `true` |
+   | `PASSWORD_VIEW_KEY` | 32 випадкові байти в base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`); потрібен, щоб root бачив паролі. Не змінюйте: зі старим ключем збережені паролі стануть недоступні |
 
    `BACKUP_DIR` і `PAYMENT_PROVIDER` не додавайте.
 4. Create Web Service. У Logs мають з'явитися застосовані міграції і запуск Nest без помилок.

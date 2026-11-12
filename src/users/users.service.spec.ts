@@ -14,8 +14,11 @@ import {
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { randomBytes } from 'node:crypto';
+import { openPassword, sealPassword } from './password-vault';
 
 const mockPrisma = {
+  userPasswordCopy: { upsert: jest.fn() },
   user: {
     findUnique: jest.fn(),
     create: jest.fn(),
@@ -115,6 +118,12 @@ const zeroSalaryRecords = () => {
   mockPrisma.salaryTerms.count.mockResolvedValue(0);
   mockPrisma.payrollExtraHours.count.mockResolvedValue(0);
   mockPrisma.teacherAbsence.count.mockResolvedValue(0);
+};
+
+type UpsertArgs = {
+  where: { userId: string };
+  create: { sealed: string };
+  update: { sealed: string };
 };
 
 describe('UsersService', () => {
@@ -1953,6 +1962,89 @@ describe('UsersService', () => {
       expect(input.before.position).toBeNull();
       expect(input.after.position).toBe('Бухгалтер');
       expect(input.after).toMatchObject({ positionId: 'pos-acc' });
+    });
+  });
+  describe('password view', () => {
+    const key = randomBytes(32);
+    const original = process.env.PASSWORD_VIEW_KEY;
+    beforeEach(() => {
+      process.env.PASSWORD_VIEW_KEY = key.toString('base64');
+    });
+    afterEach(() => {
+      if (original === undefined) delete process.env.PASSWORD_VIEW_KEY;
+      else process.env.PASSWORD_VIEW_KEY = original;
+    });
+
+    it('shows the stored password to root', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        role: Role.parent,
+        passwordCopy: { sealed: sealPassword('secret12', key) },
+      });
+      await expect(service.revealPassword('u1', rootActor)).resolves.toEqual({
+        password: 'secret12',
+      });
+    });
+
+    it('returns null when no copy exists', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        role: Role.teacher,
+        passwordCopy: null,
+      });
+      await expect(service.revealPassword('u1', rootActor)).resolves.toEqual({
+        password: null,
+      });
+    });
+
+    it('refuses non-root actors', async () => {
+      await expect(service.revealPassword('u1', adminActor)).rejects.toThrow(
+        'Insufficient permissions',
+      );
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('refuses to show the root password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        role: Role.root,
+        passwordCopy: { sealed: sealPassword('x', key) },
+      });
+      await expect(service.revealPassword('r', rootActor)).rejects.toThrow(
+        'Root password cannot be viewed',
+      );
+    });
+
+    it('reports a missing key', async () => {
+      delete process.env.PASSWORD_VIEW_KEY;
+      mockPrisma.user.findUnique.mockResolvedValue({
+        role: Role.parent,
+        passwordCopy: null,
+      });
+      await expect(service.revealPassword('u1', rootActor)).rejects.toThrow(
+        'Password view is not configured',
+      );
+    });
+
+    it('stores a sealed copy when a user is created', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new',
+        role: Role.parent,
+      });
+      await service.create(
+        {
+          login: 'parent1',
+          password: 'pass123',
+          role: Role.parent,
+          firstName: 'A',
+          lastName: 'B',
+          phone: '+380000000000',
+        },
+        rootActor,
+      );
+      const args = (
+        mockPrisma.userPasswordCopy.upsert.mock.calls[0] as [UpsertArgs]
+      )[0];
+      expect(args.where).toEqual({ userId: 'new' });
+      expect(openPassword(args.create.sealed, key)).toBe('pass123');
     });
   });
 });

@@ -24,6 +24,13 @@ enum SubscriptionStatus {
   cancelled
 }
 
+model UserPasswordCopy {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sealed    String
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   id                       String                 @id @default(uuid())
   login                    String                 @unique
@@ -36,6 +43,7 @@ model User {
   email                    String?
   mustChangePassword       Boolean                @default(false)
   refreshToken             String?
+  passwordCopy             UserPasswordCopy?
   isActive                 Boolean                @default(true)
   accessScope              AccessScope            @default(all)
   institutions             UserInstitution[]
