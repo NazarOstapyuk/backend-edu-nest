@@ -31,6 +31,11 @@ const mockPrisma = {
   menuDay: { count: jest.fn() },
   calendarDay: { count: jest.fn() },
   noteSet: { count: jest.fn() },
+  assessmentLevel: {
+    findMany: jest.fn(),
+    deleteMany: jest.fn(),
+    createMany: jest.fn(),
+  },
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
@@ -226,6 +231,98 @@ describe('InstitutionsService', () => {
     expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       mockPrisma.group.count.mock.invocationCallOrder[0],
     );
+  });
+
+  describe('assessment levels', () => {
+    const rows = [
+      { name: 'Високий', code: 'В', minPercent: 85 },
+      { name: 'Початковий', code: 'П', minPercent: 0 },
+    ];
+
+    it('set rejects a user without full scope', async () => {
+      await expect(
+        service.setLevels('i1', { levels: rows }, scoped),
+      ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+    });
+
+    it('set throws Institution not found for an unknown id', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(null);
+      await expect(
+        service.setLevels('x', { levels: rows }, root),
+      ).rejects.toThrow(new NotFoundException('Institution not found'));
+    });
+
+    it('set rejects an invalid scale', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(existing);
+      await expect(
+        service.setLevels(
+          'i1',
+          { levels: [rows[0], { ...rows[0], name: 'Y' }] },
+          root,
+        ),
+      ).rejects.toThrow(new BadRequestException('Duplicate level bound'));
+    });
+
+    it('set replaces the scale with trimmed values and records an audit change', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(existing);
+      mockPrisma.assessmentLevel.findMany
+        .mockResolvedValueOnce([{ name: 'Старий', code: 'С', minPercent: 0 }])
+        .mockResolvedValueOnce(rows);
+      const result = await service.setLevels(
+        'i1',
+        {
+          levels: [{ name: ' Високий ', code: ' В ', minPercent: 85 }, rows[1]],
+        },
+        root,
+      );
+      expect(mockPrisma.assessmentLevel.deleteMany).toHaveBeenCalledWith({
+        where: { institutionId: 'i1' },
+      });
+      expect(mockPrisma.assessmentLevel.createMany).toHaveBeenCalledWith({
+        data: [
+          { institutionId: 'i1', name: 'Високий', code: 'В', minPercent: 85 },
+          { institutionId: 'i1', name: 'Початковий', code: 'П', minPercent: 0 },
+        ],
+      });
+      expect(mockAudit.recordChange).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'institutions',
+          entityId: 'i1',
+          action: 'update',
+        }),
+      );
+      expect(result).toEqual(rows);
+    });
+
+    it('get rejects a user without the institution in scope', async () => {
+      await expect(
+        service.getLevels(
+          'i1',
+          user({
+            accessScope: AccessScope.institutions,
+            scopeInstitutionIds: ['i2'],
+          }),
+        ),
+      ).rejects.toThrow(new ForbiddenException('Outside access scope'));
+    });
+
+    it('get rejects parents', async () => {
+      await expect(
+        service.getLevels('i1', user({ role: Role.parent })),
+      ).rejects.toThrow(new ForbiddenException('Insufficient permissions'));
+    });
+
+    it('get returns the scale sorted by bound descending', async () => {
+      mockPrisma.institution.findUnique.mockResolvedValue(existing);
+      mockPrisma.assessmentLevel.findMany.mockResolvedValue(rows);
+      await expect(service.getLevels('i1', root)).resolves.toEqual(rows);
+      expect(mockPrisma.assessmentLevel.findMany).toHaveBeenCalledWith({
+        where: { institutionId: 'i1' },
+        select: { name: true, code: true, minPercent: true },
+        orderBy: { minPercent: 'desc' },
+      });
+    });
   });
 
   describe('delete', () => {

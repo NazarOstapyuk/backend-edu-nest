@@ -1468,18 +1468,32 @@ enum InstitutionType {
 }
 
 model Institution {
-  id           String            @id @default(uuid())
-  name         String            @unique
-  type         InstitutionType
-  isActive     Boolean           @default(true)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  groups       Group[]
-  tariffs      Tariff[]
-  menuDays     MenuDay[]
-  calendarDays CalendarDay[]
-  users        UserInstitution[]
-  noteSets     NoteSet[]
+  id               String            @id @default(uuid())
+  name             String            @unique
+  type             InstitutionType
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  groups           Group[]
+  tariffs          Tariff[]
+  menuDays         MenuDay[]
+  calendarDays     CalendarDay[]
+  users            UserInstitution[]
+  noteSets         NoteSet[]
+  assessmentLevels AssessmentLevel[]
+}
+
+model AssessmentLevel {
+  id            String      @id @default(uuid())
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  name          String
+  code          String
+  minPercent    Int
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([institutionId, minPercent])
 }
 
 model UserInstitution {

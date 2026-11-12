@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { PermissionArea, PermissionLevel } from '@prisma/client';
@@ -14,6 +15,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Permission } from '../common/decorators/permission.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { SetAssessmentLevelsDto } from './dto/assessment-levels.dto';
 import { CreateInstitutionDto } from './dto/create-institution.dto';
 import { UpdateInstitutionDto } from './dto/update-institution.dto';
 import { InstitutionsService } from './institutions.service';
@@ -45,6 +47,21 @@ export class InstitutionsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.institutions.update(id, dto, user);
+  }
+
+  @Get(':id/assessment-levels')
+  getLevels(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.institutions.getLevels(id, user);
+  }
+
+  @Permission(PermissionArea.settings, PermissionLevel.edit)
+  @Put(':id/assessment-levels')
+  setLevels(
+    @Param('id') id: string,
+    @Body() dto: SetAssessmentLevelsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.institutions.setLevels(id, dto, user);
   }
 
   @Permission(PermissionArea.settings, PermissionLevel.edit)

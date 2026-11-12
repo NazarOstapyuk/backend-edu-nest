@@ -7,7 +7,10 @@ import {
 import { AccessScope, AuditAction, Prisma, Role } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { assertInstitutionInScope } from '../access/scope';
 import { PrismaService } from '../prisma/prisma.service';
+import { validateLevels } from './assessment-levels';
+import { SetAssessmentLevelsDto } from './dto/assessment-levels.dto';
 import { CreateInstitutionDto } from './dto/create-institution.dto';
 import { UpdateInstitutionDto } from './dto/update-institution.dto';
 import { findInstitution } from './institution-checks';
@@ -15,6 +18,8 @@ import { findInstitution } from './institution-checks';
 const INSTITUTION_FIELDS = ['name', 'type', 'isActive'] as const;
 
 const SELECT = { id: true, name: true, type: true, isActive: true } as const;
+
+const LEVEL_SELECT = { name: true, code: true, minPercent: true } as const;
 
 const hasFullScope = (user: AuthenticatedUser) =>
   user.role === Role.root || user.accessScope === AccessScope.all;
@@ -48,6 +53,61 @@ export class InstitutionsService {
       where: { id: { in: grants.map((g) => g.institutionId) } },
       select: SELECT,
       orderBy,
+    });
+  }
+
+  async getLevels(id: string, user: AuthenticatedUser) {
+    if (user.role === Role.parent) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+    assertInstitutionInScope(user.scopeInstitutionIds, id);
+    await findInstitution(this.prisma, id);
+    return this.prisma.assessmentLevel.findMany({
+      where: { institutionId: id },
+      select: LEVEL_SELECT,
+      orderBy: { minPercent: 'desc' },
+    });
+  }
+
+  async setLevels(
+    id: string,
+    dto: SetAssessmentLevelsDto,
+    user: AuthenticatedUser,
+  ) {
+    this.assertFullScope(user);
+    await findInstitution(this.prisma, id);
+    const levels = dto.levels.map((l) => ({
+      name: l.name.trim(),
+      code: l.code.trim(),
+      minPercent: l.minPercent,
+    }));
+    const error = validateLevels(levels);
+    if (error) throw new BadRequestException(error);
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.assessmentLevel.findMany({
+        where: { institutionId: id },
+        select: LEVEL_SELECT,
+        orderBy: { minPercent: 'desc' },
+      });
+      await tx.assessmentLevel.deleteMany({ where: { institutionId: id } });
+      await tx.assessmentLevel.createMany({
+        data: levels.map((l) => ({ institutionId: id, ...l })),
+      });
+      const after = await tx.assessmentLevel.findMany({
+        where: { institutionId: id },
+        select: LEVEL_SELECT,
+        orderBy: { minPercent: 'desc' },
+      });
+      await this.audit.recordChange(tx, {
+        actorId: user.id,
+        entityType: 'institutions',
+        entityId: id,
+        action: AuditAction.update,
+        before: { assessmentLevels: JSON.stringify(before) },
+        after: { assessmentLevels: JSON.stringify(after) },
+        fields: ['assessmentLevels'],
+      });
+      return after;
     });
   }
 
