@@ -5,6 +5,7 @@ import {
   expiresAtFor,
   isValidOn,
   packageRemaining,
+  packageBlock,
   packageState,
   pickPackage,
   shouldConsume,
@@ -144,5 +145,51 @@ describe('packageState', () => {
     expect(packageState(pkg({ usedBefore: 4 }), today)).toBe('exhausted');
     expect(packageState(pkg(), day('2026-11-01'))).toBe('expired');
     expect(packageState(pkg(), today)).toBe('active');
+  });
+});
+
+describe('packageBlock', () => {
+  it('is null when a package is usable', () => {
+    expect(packageBlock([pkg()], day('2026-10-10'))).toBeNull();
+  });
+
+  it('reports no package', () => {
+    expect(packageBlock([], day('2026-10-10'))).toEqual({
+      reason: 'none',
+      date: null,
+    });
+    expect(
+      packageBlock([pkg({ voidedAt: new Date() })], day('2026-10-10')),
+    ).toEqual({ reason: 'none', date: null });
+  });
+
+  it('reports the latest expiry of a package with sessions left', () => {
+    expect(
+      packageBlock(
+        [
+          pkg({ expiresAt: day('2026-10-14') }),
+          pkg({ id: 'p2', expiresAt: day('2026-10-05') }),
+        ],
+        day('2026-10-20'),
+      ),
+    ).toEqual({ reason: 'expired', date: day('2026-10-14') });
+  });
+
+  it('reports used-up packages', () => {
+    expect(
+      packageBlock(
+        [pkg({ expiresAt: null, usedBefore: 4 })],
+        day('2026-10-20'),
+      ),
+    ).toEqual({ reason: 'used_up', date: null });
+  });
+
+  it('reports a package bought after the lesson date', () => {
+    expect(
+      packageBlock(
+        [pkg({ purchaseDate: day('2026-10-15') })],
+        day('2026-10-10'),
+      ),
+    ).toEqual({ reason: 'starts_later', date: day('2026-10-15') });
   });
 });

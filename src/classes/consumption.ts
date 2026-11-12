@@ -79,6 +79,33 @@ export function pickPackage<T extends PackageLike>(
   return usable[0] ?? null;
 }
 
+export type PackageBlock =
+  | { reason: 'none'; date: null }
+  | { reason: 'expired'; date: Date }
+  | { reason: 'used_up'; date: null }
+  | { reason: 'starts_later'; date: Date };
+
+export function packageBlock(
+  packages: PackageLike[],
+  day: Date,
+): PackageBlock | null {
+  if (pickPackage(packages, day)) return null;
+  const live = packages.filter((p) => !p.voidedAt);
+  const started = live.filter((p) => time(p.purchaseDate) <= time(day));
+  const expiries = started
+    .filter((p) => packageRemaining(p) > 0)
+    .map((p) => effectiveExpiry(p))
+    .filter((e): e is Date => e !== null && time(e) < time(day))
+    .sort((a, b) => time(b) - time(a));
+  if (expiries[0]) return { reason: 'expired', date: expiries[0] };
+  if (started.length > 0) return { reason: 'used_up', date: null };
+  const later = live
+    .map((p) => p.purchaseDate)
+    .sort((a, b) => time(a) - time(b));
+  if (later[0]) return { reason: 'starts_later', date: later[0] };
+  return { reason: 'none', date: null };
+}
+
 export function packageState(p: PackageLike, today: Date): PackageState {
   if (p.voidedAt) return 'voided';
   if (p.needsReconciliation) return 'needs_reconciliation';

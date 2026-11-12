@@ -745,6 +745,7 @@ describe('LessonsService.getRoster', () => {
           total: 4,
           expiresAt: null,
         },
+        packageBlock: null,
       },
       {
         child: { id: 'c2', firstName: 'Bob', lastName: 'Bee' },
@@ -755,6 +756,7 @@ describe('LessonsService.getRoster', () => {
           isGuest: true,
         },
         packageInfo: null,
+        packageBlock: { reason: 'none', date: null },
       },
     ]);
   });

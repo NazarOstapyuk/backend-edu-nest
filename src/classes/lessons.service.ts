@@ -24,6 +24,7 @@ import {
   expiresAtFor,
   packageRemaining,
   pickPackage,
+  packageBlock,
   shouldConsume,
 } from './consumption';
 import { MarkLessonDto } from './dto/mark-lesson.dto';
@@ -107,10 +108,8 @@ export class LessonsService {
       .map((child) => {
         const attendance =
           lesson?.attendances.find((a) => a.childId === child.id) ?? null;
-        const pkg = pickPackage(
-          packages.filter((p) => p.childId === child.id),
-          date,
-        );
+        const own = packages.filter((p) => p.childId === child.id);
+        const pkg = pickPackage(own, date);
         return {
           child,
           isMember: memberIds.has(child.id),
@@ -129,6 +128,7 @@ export class LessonsService {
                 expiresAt: effectiveExpiry(pkg),
               }
             : null,
+          packageBlock: pkg ? null : packageBlock(own, date),
         };
       });
 
