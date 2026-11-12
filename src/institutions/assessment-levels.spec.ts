@@ -35,6 +35,15 @@ describe('assessment levels', () => {
       'Invalid level',
     );
     expect(
+      validateLevels([{ name: 'a'.repeat(50), code: 'A', minPercent: 10 }]),
+    ).toBeNull();
+    expect(
+      validateLevels([{ name: 'a'.repeat(51), code: 'A', minPercent: 10 }]),
+    ).toBe('Invalid level');
+    expect(
+      validateLevels([{ name: 'A', code: 'ABCDE', minPercent: 10 }]),
+    ).toBeNull();
+    expect(
       validateLevels(
         Array.from({ length: 11 }, (_, i) => ({
           name: `L${i}`,

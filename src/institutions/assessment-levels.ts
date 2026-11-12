@@ -10,7 +10,7 @@ export function validateLevels(levels: LevelInput[]): string | null {
     const code = level.code.trim();
     if (
       name.length < 1 ||
-      name.length > 40 ||
+      name.length > 50 ||
       code.length < 1 ||
       code.length > 5 ||
       !Number.isInteger(level.minPercent) ||
