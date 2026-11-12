@@ -23,6 +23,7 @@ import {
   money,
   sumMoney,
 } from '../finance/finance-calc';
+import { levelFor } from '../institutions/assessment-levels';
 import { ChargeMoneyLike, childMoney } from '../parent-cabinet/cabinet-calc';
 import { isoDay, kyivToday } from '../tariffs/dates';
 import { Report, ReportColumn, ReportRow, ReportSheet } from './report.types';
@@ -843,6 +844,97 @@ export function payrollReport(
       teacher: TOTAL_LABEL,
       ...moneyTotals(lines, ['accrued', 'paid', 'balance']),
     },
+    sheets: [],
+  };
+}
+
+export interface AssessmentAnswerRow {
+  child: string;
+  group: string;
+  institution: string;
+  institutionId: string;
+  questionId: string;
+  question: string;
+  setName: string;
+  sortOrder: number;
+  percent: number;
+}
+
+interface AssessmentBucket {
+  child: string;
+  group: string;
+  institution: string;
+  institutionId: string;
+  question: string;
+  setName: string;
+  sortOrder: number;
+  sum: number;
+  count: number;
+}
+
+export function assessmentReport(
+  period: PeriodRef,
+  answers: AssessmentAnswerRow[],
+  levels: Map<string, { name: string; code: string; minPercent: number }[]>,
+): Report {
+  const map = new Map<string, AssessmentBucket>();
+  for (const a of answers) {
+    const key = JSON.stringify([a.group, a.child, a.questionId]);
+    const existing = map.get(key);
+    if (existing) {
+      existing.sum += a.percent;
+      existing.count += 1;
+      existing.question = a.question;
+    } else {
+      map.set(key, {
+        child: a.child,
+        group: a.group,
+        institution: a.institution,
+        institutionId: a.institutionId,
+        question: a.question,
+        setName: a.setName,
+        sortOrder: a.sortOrder,
+        sum: a.percent,
+        count: 1,
+      });
+    }
+  }
+  const buckets = [...map.values()].sort(
+    (a, b) =>
+      a.group.localeCompare(b.group) ||
+      a.child.localeCompare(b.child) ||
+      a.setName.localeCompare(b.setName) ||
+      a.sortOrder - b.sortOrder ||
+      a.question.localeCompare(b.question),
+  );
+  const rows: ReportRow[] = buckets.map((b) => {
+    const whole = Math.round(b.sum / b.count);
+    const level = levelFor(levels.get(b.institutionId) ?? [], whole);
+    return {
+      child: b.child,
+      group: b.group,
+      institution: b.institution,
+      question: b.question,
+      days: b.count,
+      average: whole / 100,
+      level: level ? `${level.name} (${level.code})` : null,
+    };
+  });
+  return {
+    title: 'Оцінювання',
+    fileName: 'оцінювання',
+    period: periodOf(period),
+    columns: [
+      { key: 'child', label: 'Дитина', type: 'text' },
+      { key: 'group', label: 'Група', type: 'text' },
+      { key: 'institution', label: 'Заклад', type: 'text' },
+      { key: 'question', label: 'Питання', type: 'text' },
+      { key: 'days', label: 'Днів з оцінкою', type: 'number' },
+      { key: 'average', label: 'Середній %', type: 'percent' },
+      { key: 'level', label: 'Рівень', type: 'text' },
+    ],
+    rows,
+    totals: null,
     sheets: [],
   };
 }

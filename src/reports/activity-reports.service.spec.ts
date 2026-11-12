@@ -60,6 +60,8 @@ describe('ActivityReportsService', () => {
     schoolLesson: { findMany: jest.fn() },
     lesson: { findMany: jest.fn() },
     payrollPayment: { findMany: jest.fn() },
+    noteAnswer: { findMany: jest.fn() },
+    assessmentLevel: { findMany: jest.fn() },
   };
   const calendar = { entriesBetween: jest.fn() };
   const payroll = { list: jest.fn() };
@@ -73,6 +75,8 @@ describe('ActivityReportsService', () => {
     prisma.schoolLesson.findMany.mockResolvedValue([]);
     prisma.lesson.findMany.mockResolvedValue([]);
     prisma.payrollPayment.findMany.mockResolvedValue([]);
+    prisma.noteAnswer.findMany.mockResolvedValue([]);
+    prisma.assessmentLevel.findMany.mockResolvedValue([]);
     calendar.entriesBetween.mockResolvedValue([]);
     payroll.list.mockResolvedValue({ rows: [] });
     service = new ActivityReportsService(
@@ -124,6 +128,61 @@ describe('ActivityReportsService', () => {
         excused: 1,
         unexcused: 0,
       });
+    });
+  });
+
+  describe('assessment', () => {
+    it('reads active percent answers and applies the scale', async () => {
+      prisma.noteAnswer.findMany.mockResolvedValue([
+        {
+          valueNumber: new Prisma.Decimal('80'),
+          child: { firstName: 'Олег', lastName: 'Іваненко' },
+          group: {
+            name: 'Сонечко',
+            institutionId: 'i1',
+            institution: { name: 'Школа' },
+          },
+          question: {
+            id: 'q1',
+            text: 'Математика',
+            sortOrder: 0,
+            set: { name: 'Щоденні' },
+          },
+        },
+      ]);
+      prisma.assessmentLevel.findMany.mockResolvedValue([
+        { institutionId: 'i1', name: 'Достатній', code: 'Д', minPercent: 65 },
+      ]);
+      const report = await service.assessment(
+        { ...range, childId: 'c1' },
+        user(),
+      );
+      const where = (firstArg(prisma.noteAnswer.findMany) as { where: object })
+        .where;
+      expect(where).toMatchObject({
+        voidedAt: null,
+        questionType: 'percent',
+        date: {
+          gte: new Date('2026-10-01T00:00:00.000Z'),
+          lte: new Date('2026-10-31T00:00:00.000Z'),
+        },
+        childId: 'c1',
+      });
+      expect(where).not.toHaveProperty('question');
+      expect(firstArg(prisma.assessmentLevel.findMany)).toEqual({
+        where: { institutionId: { in: ['i1'] } },
+      });
+      expect(report.rows).toEqual([
+        {
+          child: 'Іваненко Олег',
+          group: 'Сонечко',
+          institution: 'Школа',
+          question: 'Математика',
+          days: 1,
+          average: 0.8,
+          level: 'Достатній (Д)',
+        },
+      ]);
     });
   });
 

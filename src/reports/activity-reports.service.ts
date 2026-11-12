@@ -22,6 +22,7 @@ import {
 import { Report } from './report.types';
 import {
   PayrollMonthRow,
+  assessmentReport,
   attendanceReport,
   lessonsReport,
   mealsReport,
@@ -108,6 +109,81 @@ export class ActivityReportsService {
       entries,
       new Set(reasons.map((r) => r.id)),
       kyivToday(),
+    );
+  }
+
+  async assessment(
+    query: ReportQueryDto,
+    user: AuthenticatedUser,
+  ): Promise<Report> {
+    const period = reportPeriod(query.from, query.to);
+    const filter = await resolveFilter(this.prisma, user, query);
+    const answers = await this.prisma.noteAnswer.findMany({
+      where: {
+        voidedAt: null,
+        questionType: 'percent',
+        date: { gte: period.from, lte: period.to },
+        group: groupFilterWhere(filter),
+        ...(filter.groupId ? { groupId: filter.groupId } : {}),
+        ...(query.childId ? { childId: query.childId } : {}),
+      },
+      select: {
+        valueNumber: true,
+        child: { select: { firstName: true, lastName: true } },
+        group: {
+          select: {
+            name: true,
+            institutionId: true,
+            institution: { select: { name: true } },
+          },
+        },
+        question: {
+          select: {
+            id: true,
+            text: true,
+            sortOrder: true,
+            set: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const institutionIds = [
+      ...new Set(answers.map((a) => a.group.institutionId)),
+    ];
+    const levels = institutionIds.length
+      ? await this.prisma.assessmentLevel.findMany({
+          where: { institutionId: { in: institutionIds } },
+        })
+      : [];
+    const byInstitution = new Map<
+      string,
+      { name: string; code: string; minPercent: number }[]
+    >();
+    for (const level of levels) {
+      const list = byInstitution.get(level.institutionId) ?? [];
+      list.push(level);
+      byInstitution.set(level.institutionId, list);
+    }
+    return assessmentReport(
+      period,
+      answers.flatMap((a) =>
+        a.valueNumber
+          ? [
+              {
+                child: fullName(a.child),
+                group: a.group.name,
+                institution: a.group.institution.name,
+                institutionId: a.group.institutionId,
+                questionId: a.question.id,
+                question: a.question.text,
+                setName: a.question.set.name,
+                sortOrder: a.question.sortOrder,
+                percent: a.valueNumber.toNumber(),
+              },
+            ]
+          : [],
+      ),
+      byInstitution,
     );
   }
 

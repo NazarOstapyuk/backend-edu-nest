@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { childMoney } from '../parent-cabinet/cabinet-calc';
 import {
+  assessmentReport,
   attendanceReport,
   chargeDay,
   chargeTariff,
@@ -756,5 +757,79 @@ describe('payrollReport', () => {
     });
     expect(r.title).toBe('Зарплати');
     expect(r.fileName).toBe('зарплати');
+  });
+});
+
+describe('assessmentReport', () => {
+  const base = {
+    child: 'Іваненко Олег',
+    group: 'Сонечко',
+    institution: 'Школа',
+    institutionId: 's',
+    questionId: 'q1',
+    question: 'Математика',
+    setName: 'Щоденні',
+    sortOrder: 0,
+  };
+  const levels = new Map([
+    [
+      's',
+      [
+        { name: 'Достатній', code: 'Д', minPercent: 65 },
+        { name: 'Початковий', code: 'П', minPercent: 0 },
+      ],
+    ],
+  ]);
+  it('averages, rounds half up and applies the level', () => {
+    const r = assessmentReport(
+      period,
+      [
+        { ...base, percent: 100 },
+        { ...base, percent: 50 },
+        { ...base, percent: 50 },
+      ],
+      levels,
+    );
+    expect(r.rows).toEqual([
+      {
+        child: 'Іваненко Олег',
+        group: 'Сонечко',
+        institution: 'Школа',
+        question: 'Математика',
+        days: 3,
+        average: 0.67,
+        level: 'Достатній (Д)',
+      },
+    ]);
+    expect(r.totals).toBeNull();
+    expect(r.sheets).toEqual([]);
+  });
+  it('gives the zero-bound level to 0%', () => {
+    expect(
+      assessmentReport(period, [{ ...base, percent: 0 }], levels).rows[0].level,
+    ).toBe('Початковий (П)');
+  });
+  it('leaves the level empty without a scale', () => {
+    expect(
+      assessmentReport(
+        period,
+        [{ ...base, institutionId: 'k', percent: 50 }],
+        levels,
+      ).rows[0].level,
+    ).toBeNull();
+  });
+  it('splits a child by group', () => {
+    const rows = assessmentReport(
+      period,
+      [
+        { ...base, percent: 50 },
+        { ...base, group: 'Зірочка', percent: 100 },
+      ],
+      levels,
+    ).rows;
+    expect(rows.map((r) => [r.group, r.average])).toEqual([
+      ['Зірочка', 1],
+      ['Сонечко', 0.5],
+    ]);
   });
 });

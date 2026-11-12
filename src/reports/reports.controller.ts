@@ -75,6 +75,20 @@ export class ReportsController {
     );
   }
 
+  @Get('assessment')
+  @Permission(PermissionArea.register, PermissionLevel.view)
+  async assessment(
+    @Query() query: ReportQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.respond(
+      await this.activity.assessment(query, user),
+      query,
+      res,
+    );
+  }
+
   @Get('lessons')
   @PermissionAny(
     [PermissionArea.timetable, PermissionArea.classes],
