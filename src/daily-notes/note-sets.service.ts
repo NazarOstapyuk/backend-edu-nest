@@ -122,18 +122,20 @@ const normalizeQuestion = (
   const error = validateQuestion(q);
   if (error) throw new BadRequestException(error);
   const isNumber = q.type === NoteQuestionType.number;
+  const isPercent = q.type === NoteQuestionType.percent;
   const unit = q.unit?.trim();
   return {
     text: q.text.trim(),
     type: q.type,
     required: q.required ?? false,
-    options:
-      q.type === NoteQuestionType.choice
+    options: isPercent
+      ? (q.options ?? []).map((o) => String(Number(o.trim())))
+      : q.type === NoteQuestionType.choice
         ? (q.options ?? []).map((o) => o.trim())
         : [],
     min: isNumber ? (q.min ?? null) : null,
     max: isNumber ? (q.max ?? null) : null,
-    unit: unit ? unit : null,
+    unit: unit && !isPercent ? unit : null,
     sortOrder,
   };
 };

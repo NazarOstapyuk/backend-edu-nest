@@ -338,6 +338,18 @@ describe('DailyNotesService', () => {
       ]);
     });
 
+    it('returns a percent answer as a number', async () => {
+      mockPrisma.noteAnswer.findMany.mockResolvedValue([
+        answer({
+          questionType: NoteQuestionType.percent,
+          valueText: null,
+          valueNumber: new Prisma.Decimal('50'),
+        }),
+      ]);
+      const view = await service.day('g1', '2026-11-03', manager, LATE);
+      expect(view.children[0].answers[0].value).toBe(50);
+    });
+
     it('is not overdue before the Kyiv deadline', async () => {
       const view = await service.day(
         'g1',
@@ -649,6 +661,32 @@ describe('DailyNotesService', () => {
           { childId: 'c1', questionId: 'q1', value: '50%' },
           { childId: 'c1', questionId: 'q2', value: '2.50' },
         ]),
+        teacher,
+        NOW,
+      );
+      expect(mockPrisma.noteAnswer.update).not.toHaveBeenCalled();
+      expect(mockPrisma.noteAnswer.create).not.toHaveBeenCalled();
+    });
+
+    it('does not void a percent answer saved with the same value', async () => {
+      const percent = question({
+        id: 'q3',
+        type: NoteQuestionType.percent,
+        options: ['0', '50', '100'],
+      });
+      mockPrisma.noteQuestion.findMany.mockResolvedValue([
+        { ...percent, setId: 's1' },
+      ]);
+      mockPrisma.noteAnswer.findMany.mockResolvedValueOnce([
+        answer({
+          questionId: 'q3',
+          questionType: NoteQuestionType.percent,
+          valueText: null,
+          valueNumber: new Prisma.Decimal('50'),
+        }),
+      ]);
+      await save(
+        dto([{ childId: 'c1', questionId: 'q3', value: 50 }]),
         teacher,
         NOW,
       );

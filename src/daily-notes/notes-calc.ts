@@ -23,6 +23,7 @@ export type PendingSet = {
 };
 
 const NUMBER_LIMIT = 99999999.99;
+const PERCENT_PATTERN = /^\d{1,3}$/;
 const NUMBER_PATTERN = /^-?\d{1,8}(\.\d{1,2})?$/;
 
 const hasTwoDecimals = (value: number): boolean =>
@@ -40,7 +41,26 @@ export function validateQuestion(q: QuestionInput): string | null {
   if (text.length < 1 || text.length > 300) return 'Invalid question text';
 
   const options = q.options ?? [];
-  if (q.type !== 'choice') {
+  if (q.type === 'percent') {
+    if (options.length < 2 || options.length > 10) {
+      return 'Percent needs 2 to 10 options';
+    }
+    const seen = new Set<number>();
+    for (const option of options) {
+      const trimmed = option.trim();
+      if (!PERCENT_PATTERN.test(trimmed) || Number(trimmed) > 100) {
+        return 'Invalid percent option';
+      }
+      const value = Number(trimmed);
+      if (seen.has(value)) return 'Duplicate option';
+      seen.add(value);
+    }
+    const blank = (value: string | number | null | undefined) =>
+      value === null || value === undefined || value === '';
+    if (!blank(q.unit) || !blank(q.min) || !blank(q.max)) {
+      return 'Unit and range are not allowed for percent';
+    }
+  } else if (q.type !== 'choice') {
     if (options.length > 0) return 'Options are only for choice questions';
   } else {
     if (options.length < 2 || options.length > 10) {
@@ -127,6 +147,20 @@ export function normalizeAnswer(
       }
       if (q.min !== null && value < Number(q.min)) return INVALID;
       if (q.max !== null && value > Number(q.max)) return INVALID;
+      return answer({ valueNumber: value.toFixed(2) });
+    }
+    case 'percent': {
+      let value: number;
+      if (typeof raw === 'number') {
+        value = raw;
+      } else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (!PERCENT_PATTERN.test(trimmed)) return INVALID;
+        value = Number(trimmed);
+      } else {
+        return INVALID;
+      }
+      if (!q.options.map(Number).includes(value)) return INVALID;
       return answer({ valueNumber: value.toFixed(2) });
     }
     default:

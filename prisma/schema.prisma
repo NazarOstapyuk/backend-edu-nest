@@ -1609,6 +1609,7 @@ enum NoteQuestionType {
   text
   yes_no
   number
+  percent
 }
 
 model NoteSet {

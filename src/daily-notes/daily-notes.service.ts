@@ -84,7 +84,10 @@ type Presence = {
 
 const answerValue = (a: StoredValue): string | number | boolean | null => {
   if (a.questionType === NoteQuestionType.yes_no) return a.valueBool;
-  if (a.questionType === NoteQuestionType.number)
+  if (
+    a.questionType === NoteQuestionType.number ||
+    a.questionType === NoteQuestionType.percent
+  )
     return a.valueNumber === null ? null : a.valueNumber.toNumber();
   return a.valueText;
 };

@@ -1,3 +1,4 @@
+import { NoteQuestionType } from '@prisma/client';
 import {
   isComplete,
   normalizeAnswer,
@@ -257,4 +258,59 @@ describe('pendingForGroup', () => {
       ),
     ).toEqual({ pending: 1, overdue: false });
   });
+});
+
+describe('percent questions', () => {
+  const q = {
+    type: NoteQuestionType.percent,
+    options: ['20', '50', '100'],
+    min: null,
+    max: null,
+  };
+  it('accepts valid options', () =>
+    expect(
+      validateQuestion({
+        text: 'LEGO',
+        type: 'percent',
+        options: ['0', '50', '100'],
+      }),
+    ).toBeNull());
+  it('rejects fewer than 2', () =>
+    expect(
+      validateQuestion({ text: 'x', type: 'percent', options: ['50'] }),
+    ).toBe('Percent needs 2 to 10 options'));
+  it('rejects non-integers and >100', () => {
+    expect(
+      validateQuestion({ text: 'x', type: 'percent', options: ['20', '50%'] }),
+    ).toBe('Invalid percent option');
+    expect(
+      validateQuestion({ text: 'x', type: 'percent', options: ['20', '101'] }),
+    ).toBe('Invalid percent option');
+  });
+  it('rejects duplicates', () =>
+    expect(
+      validateQuestion({ text: 'x', type: 'percent', options: ['20', '020'] }),
+    ).toBe('Duplicate option'));
+  it('rejects unit and bounds', () =>
+    expect(
+      validateQuestion({
+        text: 'x',
+        type: 'percent',
+        options: ['0', '100'],
+        unit: '%',
+      }),
+    ).toBe('Unit and range are not allowed for percent'));
+  it('stores a number answer', () =>
+    expect(normalizeAnswer(q, 50)).toEqual({
+      clear: false,
+      value: { valueText: null, valueBool: null, valueNumber: '50.00' },
+    }));
+  it('accepts a numeric string', () =>
+    expect(normalizeAnswer(q, '100')).toMatchObject({
+      value: { valueNumber: '100.00' },
+    }));
+  it('rejects a value outside options', () =>
+    expect(normalizeAnswer(q, 30)).toEqual({ error: 'Invalid answer' }));
+  it('clears on null', () =>
+    expect(normalizeAnswer(q, null)).toEqual({ clear: true }));
 });
