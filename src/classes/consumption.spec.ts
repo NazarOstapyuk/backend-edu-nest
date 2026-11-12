@@ -157,10 +157,11 @@ describe('packageBlock', () => {
     expect(packageBlock([], day('2026-10-10'))).toEqual({
       reason: 'none',
       date: null,
+      packageId: null,
     });
     expect(
       packageBlock([pkg({ voidedAt: new Date() })], day('2026-10-10')),
-    ).toEqual({ reason: 'none', date: null });
+    ).toEqual({ reason: 'none', date: null, packageId: null });
   });
 
   it('reports the latest expiry of a package with sessions left', () => {
@@ -172,7 +173,11 @@ describe('packageBlock', () => {
         ],
         day('2026-10-20'),
       ),
-    ).toEqual({ reason: 'expired', date: day('2026-10-14') });
+    ).toEqual({
+      reason: 'expired',
+      date: day('2026-10-14'),
+      packageId: 'p1',
+    });
   });
 
   it('reports used-up packages', () => {
@@ -181,7 +186,7 @@ describe('packageBlock', () => {
         [pkg({ expiresAt: null, usedBefore: 4 })],
         day('2026-10-20'),
       ),
-    ).toEqual({ reason: 'used_up', date: null });
+    ).toEqual({ reason: 'used_up', date: null, packageId: null });
   });
 
   it('reports a package bought after the lesson date', () => {
@@ -190,6 +195,10 @@ describe('packageBlock', () => {
         [pkg({ purchaseDate: day('2026-10-15') })],
         day('2026-10-10'),
       ),
-    ).toEqual({ reason: 'starts_later', date: day('2026-10-15') });
+    ).toEqual({
+      reason: 'starts_later',
+      date: day('2026-10-15'),
+      packageId: 'p1',
+    });
   });
 });

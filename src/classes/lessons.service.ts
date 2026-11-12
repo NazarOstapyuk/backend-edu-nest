@@ -145,6 +145,19 @@ export class LessonsService {
       date,
       lessonId: lesson?.id ?? null,
       conductedBy: lesson?.conductedBy ?? null,
+      packageTariff:
+        group.packageTariff &&
+        group.packageTariff.isActive &&
+        group.packageTariff.packageSize
+          ? {
+              id: group.packageTariff.id,
+              name: group.packageTariff.name,
+              packageSize: group.packageTariff.packageSize,
+              validityDays: group.packageTariff.validityDays,
+              price:
+                priceOn(group.packageTariff.prices, date)?.toFixed(2) ?? null,
+            }
+          : null,
       hasSingleTariff:
         !!group.singleTariff &&
         priceOn(group.singleTariff.prices, date) !== null,

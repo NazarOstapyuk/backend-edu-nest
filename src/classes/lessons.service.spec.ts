@@ -756,7 +756,7 @@ describe('LessonsService.getRoster', () => {
           isGuest: true,
         },
         packageInfo: null,
-        packageBlock: { reason: 'none', date: null },
+        packageBlock: { reason: 'none', date: null, packageId: null },
       },
     ]);
   });

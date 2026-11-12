@@ -79,11 +79,17 @@ export function pickPackage<T extends PackageLike>(
   return usable[0] ?? null;
 }
 
-export type PackageBlock =
-  | { reason: 'none'; date: null }
-  | { reason: 'expired'; date: Date }
-  | { reason: 'used_up'; date: null }
-  | { reason: 'starts_later'; date: Date };
+export type PackageBlockReason =
+  | 'none'
+  | 'expired'
+  | 'used_up'
+  | 'starts_later';
+
+export interface PackageBlock {
+  reason: PackageBlockReason;
+  date: Date | null;
+  packageId: string | null;
+}
 
 export function packageBlock(
   packages: PackageLike[],
@@ -92,18 +98,28 @@ export function packageBlock(
   if (pickPackage(packages, day)) return null;
   const live = packages.filter((p) => !p.voidedAt);
   const started = live.filter((p) => time(p.purchaseDate) <= time(day));
-  const expiries = started
+  const expired = started
     .filter((p) => packageRemaining(p) > 0)
-    .map((p) => effectiveExpiry(p))
-    .filter((e): e is Date => e !== null && time(e) < time(day))
-    .sort((a, b) => time(b) - time(a));
-  if (expiries[0]) return { reason: 'expired', date: expiries[0] };
-  if (started.length > 0) return { reason: 'used_up', date: null };
-  const later = live
-    .map((p) => p.purchaseDate)
-    .sort((a, b) => time(a) - time(b));
-  if (later[0]) return { reason: 'starts_later', date: later[0] };
-  return { reason: 'none', date: null };
+    .map((p) => ({ p, expiry: effectiveExpiry(p) }))
+    .filter(
+      (x): x is { p: PackageLike; expiry: Date } =>
+        x.expiry !== null && time(x.expiry) < time(day),
+    )
+    .sort((a, b) => time(b.expiry) - time(a.expiry))[0];
+  if (expired)
+    return { reason: 'expired', date: expired.expiry, packageId: expired.p.id };
+  if (started.length > 0)
+    return { reason: 'used_up', date: null, packageId: null };
+  const later = [...live].sort(
+    (a, b) => time(a.purchaseDate) - time(b.purchaseDate),
+  )[0];
+  if (later)
+    return {
+      reason: 'starts_later',
+      date: later.purchaseDate,
+      packageId: later.id,
+    };
+  return { reason: 'none', date: null, packageId: null };
 }
 
 export function packageState(p: PackageLike, today: Date): PackageState {
