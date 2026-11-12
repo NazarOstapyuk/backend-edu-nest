@@ -136,6 +136,8 @@ describe('ActivityReportsService', () => {
       prisma.noteAnswer.findMany.mockResolvedValue([
         {
           valueNumber: new Prisma.Decimal('80'),
+          childId: 'c1',
+          groupId: 'g1',
           child: { firstName: 'Олег', lastName: 'Іваненко' },
           group: {
             name: 'Сонечко',

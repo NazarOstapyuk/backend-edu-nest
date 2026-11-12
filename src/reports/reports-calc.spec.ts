@@ -762,6 +762,8 @@ describe('payrollReport', () => {
 
 describe('assessmentReport', () => {
   const base = {
+    childId: 'c1',
+    groupId: 'g1',
     child: 'Іваненко Олег',
     group: 'Сонечко',
     institution: 'Школа',
@@ -823,7 +825,7 @@ describe('assessmentReport', () => {
       period,
       [
         { ...base, percent: 50 },
-        { ...base, group: 'Зірочка', percent: 100 },
+        { ...base, groupId: 'g2', group: 'Зірочка', percent: 100 },
       ],
       levels,
     ).rows;
@@ -831,5 +833,17 @@ describe('assessmentReport', () => {
       ['Зірочка', 1],
       ['Сонечко', 0.5],
     ]);
+  });
+  it('keeps same-named children of one group apart by id', () => {
+    const rows = assessmentReport(
+      period,
+      [
+        { ...base, percent: 50 },
+        { ...base, childId: 'c2', percent: 100 },
+      ],
+      levels,
+    ).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.average).sort()).toEqual([0.5, 1]);
   });
 });

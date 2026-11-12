@@ -129,6 +129,8 @@ export class ActivityReportsService {
       },
       select: {
         valueNumber: true,
+        childId: true,
+        groupId: true,
         child: { select: { firstName: true, lastName: true } },
         group: {
           select: {
@@ -170,6 +172,8 @@ export class ActivityReportsService {
         a.valueNumber
           ? [
               {
+                childId: a.childId,
+                groupId: a.groupId,
                 child: fullName(a.child),
                 group: a.group.name,
                 institution: a.group.institution.name,

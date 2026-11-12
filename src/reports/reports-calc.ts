@@ -849,6 +849,8 @@ export function payrollReport(
 }
 
 export interface AssessmentAnswerRow {
+  childId: string;
+  groupId: string;
   child: string;
   group: string;
   institution: string;
@@ -879,7 +881,7 @@ export function assessmentReport(
 ): Report {
   const map = new Map<string, AssessmentBucket>();
   for (const a of answers) {
-    const key = JSON.stringify([a.group, a.child, a.questionId]);
+    const key = JSON.stringify([a.groupId, a.childId, a.questionId]);
     const existing = map.get(key);
     if (existing) {
       existing.sum += a.percent;
