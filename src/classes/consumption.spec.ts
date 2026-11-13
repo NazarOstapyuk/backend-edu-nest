@@ -202,3 +202,16 @@ describe('packageBlock', () => {
     });
   });
 });
+
+describe('open-ended extension', () => {
+  it('removes the expiry', () => {
+    const p = pkg({
+      expiresAt: day('2026-10-03'),
+      extensions: [
+        { newExpiresAt: null, createdAt: new Date('2026-11-13T10:00:00Z') },
+      ],
+    });
+    expect(effectiveExpiry(p)).toBeNull();
+    expect(isValidOn(p, day('2027-03-01'))).toBe(true);
+  });
+});

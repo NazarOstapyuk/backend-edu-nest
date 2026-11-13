@@ -151,6 +151,16 @@ export class PackagesService {
       );
 
     const purchaseDate = toDay(dto.purchaseDate);
+    const expiresAt =
+      dto.expiresAt === undefined
+        ? expiresAtFor(purchaseDate, tariff.validityDays)
+        : dto.expiresAt === null
+          ? null
+          : toDay(dto.expiresAt);
+    if (expiresAt && expiresAt.getTime() < purchaseDate.getTime())
+      throw new BadRequestException(
+        'Expiry must not be before the purchase date',
+      );
     const price = priceOn(tariff.prices, purchaseDate);
     if (!price) throw new BadRequestException('No price for this date');
 
@@ -177,7 +187,7 @@ export class PackagesService {
           tariffId: tariff.id,
           sessionsTotal: tariff.packageSize ?? 1,
           purchaseDate,
-          expiresAt: expiresAtFor(purchaseDate, tariff.validityDays),
+          expiresAt,
           chargeId: charge.id,
           createdById: userId,
         },
@@ -211,6 +221,43 @@ export class PackagesService {
       },
     });
     return this.listForChild(pkg.childId);
+  }
+
+  private async expiringPackages(
+    db: Pick<PrismaService, 'package'>,
+    tariffId: string,
+  ) {
+    const packages = await db.package.findMany({
+      where: { tariffId, voidedAt: null },
+      include: { extensions: true, usages: true },
+    });
+    return packages.filter(
+      (p) => effectiveExpiry(p) !== null && packageRemaining(p) > 0,
+    );
+  }
+
+  async countWithExpiry(tariffId: string) {
+    return {
+      count: (await this.expiringPackages(this.prisma, tariffId)).length,
+    };
+  }
+
+  async clearExpiry(tariffId: string, reason: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const packages = await this.expiringPackages(tx, tariffId);
+      for (const p of packages) {
+        await tx.packageExtension.create({
+          data: {
+            packageId: p.id,
+            previousExpiresAt: effectiveExpiry(p),
+            newExpiresAt: null,
+            reason,
+            createdById: userId,
+          },
+        });
+      }
+      return { updated: packages.length };
+    });
   }
 
   async void(id: string, reason: string, userId: string) {

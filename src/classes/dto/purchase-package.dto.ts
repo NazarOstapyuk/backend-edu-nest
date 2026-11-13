@@ -1,4 +1,4 @@
-import { IsDateString, IsUUID } from 'class-validator';
+import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 
 export class PurchasePackageDto {
   @IsUUID('4')
@@ -9,4 +9,8 @@ export class PurchasePackageDto {
 
   @IsDateString()
   purchaseDate: string;
+
+  @IsOptional()
+  @IsDateString()
+  expiresAt?: string | null;
 }

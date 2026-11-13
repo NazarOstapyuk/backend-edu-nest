@@ -10,7 +10,7 @@ export interface PackageLike {
   createdAt: Date;
   voidedAt: Date | null;
   needsReconciliation: boolean;
-  extensions: { newExpiresAt: Date; createdAt: Date }[];
+  extensions: { newExpiresAt: Date | null; createdAt: Date }[];
   usages: { voidedAt: Date | null }[];
 }
 

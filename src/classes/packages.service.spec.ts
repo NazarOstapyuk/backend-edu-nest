@@ -170,6 +170,36 @@ describe('PackagesService', () => {
       });
     });
 
+    it('sells a package without expiry when expiresAt is null', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      await service.purchase('child-1', { ...dto, expiresAt: null }, actor);
+      const created = firstArg<{ data: Record<string, unknown> }>(
+        mockPrisma.package.create,
+      );
+      expect(created.data.expiresAt).toBeNull();
+    });
+
+    it('uses a chosen expiry date', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      await service.purchase(
+        'child-1',
+        { ...dto, expiresAt: '2027-05-31' },
+        actor,
+      );
+      const created = firstArg<{ data: Record<string, unknown> }>(
+        mockPrisma.package.create,
+      );
+      expect(created.data.expiresAt).toEqual(day('2027-05-31'));
+    });
+
+    it('refuses an expiry before the purchase date', async () => {
+      mockPrisma.tariff.findUnique.mockResolvedValue(tariff());
+      await expect(
+        service.purchase('child-1', { ...dto, expiresAt: '2026-09-30' }, actor),
+      ).rejects.toThrow('Expiry must not be before the purchase date');
+      expect(mockPrisma.package.create).not.toHaveBeenCalled();
+    });
+
     it.each([
       [{ unit: TariffUnit.session }, 'Tariff unit must be package'],
       [{ isActive: false }, 'Tariff is not active'],
@@ -417,6 +447,48 @@ describe('PackagesService', () => {
       await expect(
         service.reconcile('p1', { outcome: 'not_paid' }, 'u1'),
       ).rejects.toThrow('Package does not need reconciliation');
+    });
+  });
+
+  describe('clearExpiry', () => {
+    const rows = [
+      pkgRow({ id: 'p1', sessionsTotal: 4, usedBefore: 0 }),
+      pkgRow({ id: 'p2', sessionsTotal: 4, usedBefore: 0, expiresAt: null }),
+      pkgRow({ id: 'p3', sessionsTotal: 4, usedBefore: 4 }),
+    ];
+
+    it('counts unused-up packages that still have an expiry', async () => {
+      mockPrisma.package.findMany.mockResolvedValue(rows);
+      await expect(service.countWithExpiry('tp')).resolves.toEqual({
+        count: 1,
+      });
+      expect(
+        firstArg<{ where: unknown }>(mockPrisma.package.findMany).where,
+      ).toEqual({
+        tariffId: 'tp',
+        voidedAt: null,
+      });
+    });
+
+    it('adds an open-ended extension to each of them', async () => {
+      mockPrisma.package.findMany.mockResolvedValue(rows);
+      await expect(
+        service.clearExpiry('tp', 'Без терміну', 'u1'),
+      ).resolves.toEqual({
+        updated: 1,
+      });
+      expect(mockPrisma.packageExtension.create).toHaveBeenCalledTimes(1);
+      expect(
+        firstArg<{ data: Record<string, unknown> }>(
+          mockPrisma.packageExtension.create,
+        ).data,
+      ).toEqual({
+        packageId: 'p1',
+        previousExpiresAt: day('2026-10-30'),
+        newExpiresAt: null,
+        reason: 'Без терміну',
+        createdById: 'u1',
+      });
     });
   });
 });

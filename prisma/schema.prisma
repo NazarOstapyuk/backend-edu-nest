@@ -594,7 +594,7 @@ model PackageExtension {
   packageId         String
   package           Package   @relation(fields: [packageId], references: [id])
   previousExpiresAt DateTime? @db.Date
-  newExpiresAt      DateTime  @db.Date
+  newExpiresAt      DateTime? @db.Date
   reason            String
   createdById       String
   createdBy         User      @relation("ExtensionCreatedBy", fields: [createdById], references: [id])

@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   HttpCode,
+  ParseUUIDPipe,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { PermissionArea, PermissionLevel } from '@prisma/client';
@@ -14,6 +16,7 @@ import { Permission } from '../common/decorators/permission.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { VoidDto } from '../finance/dto/void.dto';
+import { ClearExpiryDto } from './dto/clear-expiry.dto';
 import { ExtendPackageDto } from './dto/extend-package.dto';
 import { PurchasePackageDto } from './dto/purchase-package.dto';
 import { ReconcilePackageDto } from './dto/reconcile-package.dto';
@@ -72,6 +75,21 @@ export class PackagesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.packages.reconcile(id, dto, user.id);
+  }
+
+  @Get('packages/with-expiry')
+  countWithExpiry(@Query('tariffId', ParseUUIDPipe) tariffId: string) {
+    return this.packages.countWithExpiry(tariffId);
+  }
+
+  @Permission(PermissionArea.classes, PermissionLevel.edit)
+  @Post('packages/clear-expiry')
+  @HttpCode(200)
+  clearExpiry(
+    @Body() dto: ClearExpiryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.packages.clearExpiry(dto.tariffId, dto.reason, user.id);
   }
 
   @Get('packages/reconciliation')
