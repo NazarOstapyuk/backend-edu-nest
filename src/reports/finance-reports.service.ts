@@ -248,8 +248,9 @@ export class FinanceReportsService {
       query.groupId ||
       query.childId ||
       query.category ||
-      filter.institutionIds,
+      query.institutionId,
     );
+    const scopedOnly = !byPayment && filter.institutionIds !== null;
     const child = childFilterWhere(filter, query.childId);
     const entryWhere: Prisma.CashEntryWhereInput =
       byPayment && query.entryKind && query.entryKind !== 'income'
@@ -272,6 +273,11 @@ export class FinanceReportsService {
               : query.entryKind
                 ? { kind: query.entryKind }
                 : {}),
+            ...(scopedOnly && (!query.entryKind || query.entryKind === 'income')
+              ? {
+                  OR: [{ kind: { not: 'income' } }, { payment: { child } }],
+                }
+              : {}),
           };
     const [entries, payments, shifts] = await Promise.all([
       this.prisma.cashEntry.findMany({
@@ -349,18 +355,21 @@ export class FinanceReportsService {
         payer: e.payment?.payerName ?? null,
         periodFrom: e.payment?.periodFrom ?? null,
         periodTo: e.payment?.periodTo ?? null,
+        employeeId: e.createdById,
         employee: fullName(e.createdBy),
         recipient: e.recipient ? fullName(e.recipient) : null,
         transferStatus: e.transferStatus,
         comment: e.comment,
         voidedAt: e.voidedAt,
       })),
-      payments: payments.map((p) => ({
-        category: p.category,
-        method: p.method,
-        amount: p.amount,
-        direction: directionForInstitution(p.child.group?.institution?.type),
-      })),
+      payments: payments
+        .map((p) => ({
+          category: p.category,
+          method: p.method,
+          amount: p.amount,
+          direction: directionForInstitution(p.child.group?.institution?.type),
+        }))
+        .filter((p) => !query.direction || p.direction === query.direction),
       shifts: shifts.map((s) => ({
         desk: s.desk.name,
         openedAt: s.openedAt,

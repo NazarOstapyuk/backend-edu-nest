@@ -22,6 +22,7 @@ const entry = (over: Partial<CashReportEntry> = {}): CashReportEntry => ({
   payer: 'Іваненко Ольга',
   periodFrom: new Date('2026-11-01T00:00:00.000Z'),
   periodTo: new Date('2026-11-30T00:00:00.000Z'),
+  employeeId: 'e1',
   employee: 'Петренко Анна',
   recipient: null,
   transferStatus: null,
@@ -235,6 +236,8 @@ describe('cashReport', () => {
       ],
     });
     expect(report.fileName).toBe('каса-зміна-10.11.2026');
+    expect(report.period).toBeNull();
+    expect(report.datedFileName).toBe(true);
     const sheet = report.sheets.find((s) => s.name === 'Зміни');
     expect(sheet?.rows[0]).toMatchObject({
       opened: '10.11.2026 08:00',
@@ -250,5 +253,24 @@ describe('cashReport', () => {
       expected: null,
       difference: null,
     });
+  });
+
+  it('groups the employee sheet by id, not by name', () => {
+    const report = build([
+      entry({ employeeId: 'e1', employee: 'Петренко Анна' }),
+      entry({ employeeId: 'e2', employee: 'Петренко Анна' }),
+    ]);
+    const rows = report.sheets.find((s) => s.name === 'За працівниками')?.rows;
+    expect(rows).toHaveLength(2);
+    expect(rows?.map((r) => r.count)).toEqual([1, 1]);
+  });
+
+  it('labels an expense without a category as other in the main sheet', () => {
+    const report = build([
+      entry({ kind: 'expense', expenseCategory: null, paymentCategory: null }),
+    ]);
+    const sheetLabel = report.sheets.find((s) => s.name === 'Видатки')?.rows[0]
+      .category;
+    expect(report.rows[0].category).toBe(sheetLabel);
   });
 });

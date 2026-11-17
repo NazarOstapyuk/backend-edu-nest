@@ -20,6 +20,7 @@ export interface ReportSheet {
 export interface Report {
   title: string;
   fileName: string;
+  datedFileName?: boolean;
   period: { from: string; to: string } | null;
   columns: ReportColumn[];
   rows: ReportRow[];

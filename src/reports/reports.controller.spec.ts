@@ -50,3 +50,31 @@ describe('ReportsController cash', () => {
     expect(result).toBe(report);
   });
 });
+
+describe('ReportsController xlsx file name', () => {
+  it('does not append a period suffix to a dated report', async () => {
+    const set = jest.fn();
+    const finance = {
+      cash: jest.fn().mockResolvedValue({
+        title: 'Каса',
+        fileName: 'каса-зміна-10.11.2026',
+        datedFileName: true,
+        period: null,
+        columns: [],
+        rows: [],
+        totals: null,
+        sheets: [],
+      }),
+    };
+    const controller = new ReportsController(finance as never, {} as never);
+    await controller.cash(
+      { shiftId: 's1', format: 'xlsx' },
+      user({ cash: PermissionLevel.view }),
+      { set } as never,
+    );
+    const header = (set.mock.calls as [Record<string, string>][])[0][0][
+      'Content-Disposition'
+    ];
+    expect(decodeURIComponent(header)).toMatch(/каса-зміна-10.11.2026.xlsx$/);
+  });
+});

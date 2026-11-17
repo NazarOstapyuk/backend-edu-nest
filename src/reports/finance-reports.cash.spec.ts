@@ -78,6 +78,59 @@ describe('FinanceReportsService cash', () => {
     });
   });
 
+  it('returns no rows for a non-income kind combined with a payment filter', async () => {
+    await service.cash(
+      {
+        from: '2026-11-01',
+        to: '2026-11-30',
+        childId: 'c1',
+        entryKind: 'expense',
+      },
+      admin,
+    );
+    expect(wherePassed()).toEqual({ id: { in: [] } });
+  });
+
+  it('keeps non-income entries for a scoped user without explicit filters', async () => {
+    const scoped = {
+      ...(admin as object),
+      accessScope: AccessScope.institutions,
+      institutionIds: ['i1'],
+      scopeInstitutionIds: ['i1'],
+    } as never;
+    await service.cash({ from: '2026-11-01', to: '2026-11-30' }, scoped);
+    const where = wherePassed();
+    expect(where.kind).toBeUndefined();
+    expect(where.OR).toEqual([
+      { kind: { not: 'income' } },
+      { payment: { child: { group: { institutionId: { in: ['i1'] } } } } },
+    ]);
+  });
+
+  it('applies the direction filter to the category sheet', async () => {
+    prisma.payment.findMany.mockResolvedValue([
+      {
+        category: 'meals',
+        method: 'cash',
+        amount: new Prisma.Decimal('10'),
+        child: { group: { institution: { type: 'school_class' } } },
+      },
+      {
+        category: 'meals',
+        method: 'cash',
+        amount: new Prisma.Decimal('7'),
+        child: { group: { institution: { type: 'kindergarten' } } },
+      },
+    ]);
+    const report = await service.cash(
+      { from: '2026-11-01', to: '2026-11-30', direction: 'school' },
+      admin,
+    );
+    expect(
+      report.sheets.find((s) => s.name === 'За категоріями оплат')?.totals,
+    ).toMatchObject({ total: '10.00' });
+  });
+
   it('queries only confirmed non-voided payments for the category sheet', async () => {
     await service.cash({ from: '2026-11-01', to: '2026-11-30' }, admin);
     expect(

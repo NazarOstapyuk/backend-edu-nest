@@ -144,9 +144,11 @@ export class ReportsController {
 
   private async respond(report: Report, query: ReportQueryDto, res: Response) {
     if (query.format !== 'xlsx') return report;
-    const suffix = report.period
-      ? `_${report.period.from}_${report.period.to}`
-      : `_${isoDay(kyivToday())}`;
+    const suffix = report.datedFileName
+      ? ''
+      : report.period
+        ? `_${report.period.from}_${report.period.to}`
+        : `_${isoDay(kyivToday())}`;
     res.set({
       'Content-Type':
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

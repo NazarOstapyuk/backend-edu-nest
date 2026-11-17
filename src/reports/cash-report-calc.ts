@@ -37,6 +37,7 @@ export interface CashReportEntry {
   payer: string | null;
   periodFrom: Date | null;
   periodTo: Date | null;
+  employeeId: string;
   employee: string;
   recipient: string | null;
   transferStatus: CashTransferStatus | null;
@@ -113,8 +114,8 @@ const signedAmount = (entry: CashReportEntry): Prisma.Decimal => {
 const entryCategory = (entry: CashReportEntry): string => {
   if (entry.kind === 'income' && entry.paymentCategory)
     return CATEGORY_LABELS[entry.paymentCategory];
-  if (entry.kind === 'expense' && entry.expenseCategory)
-    return CASH_EXPENSE_LABELS[entry.expenseCategory];
+  if (entry.kind === 'expense')
+    return CASH_EXPENSE_LABELS[entry.expenseCategory ?? 'other'];
   return '';
 };
 
@@ -272,13 +273,16 @@ const directionSheet = (active: CashReportEntry[]): ReportSheet => {
 };
 
 const employeeSheet = (active: CashReportEntry[]): ReportSheet => {
-  const names = [...new Set(active.map((e) => e.employee))].sort((a, b) =>
-    a.localeCompare(b),
+  const people = new Map(active.map((e) => [e.employeeId, e.employee]));
+  const ids = [...people.keys()].sort(
+    (a, b) =>
+      (people.get(a) ?? '').localeCompare(people.get(b) ?? '') ||
+      a.localeCompare(b),
   );
-  const rows = names.map((name): ReportRow => {
-    const own = active.filter((e) => e.employee === name);
+  const rows = ids.map((id): ReportRow => {
+    const own = active.filter((e) => e.employeeId === id);
     return {
-      employee: name,
+      employee: people.get(id) ?? '',
       count: own.length,
       income: sumOf(own, 'income'),
       expense: sumOf(own, 'expense'),
@@ -377,7 +381,8 @@ export function cashReport(input: CashReportInput): Report {
   return {
     title: 'Каса',
     fileName: input.shiftDay ? shiftFileName(input.shiftDay) : 'каса',
-    period: periodOf(input.period),
+    period: input.shiftDay ? null : periodOf(input.period),
+    datedFileName: input.shiftDay !== null,
     columns: [
       { key: 'date', label: 'Дата і час', type: 'text' },
       { key: 'desk', label: 'Каса', type: 'text' },
