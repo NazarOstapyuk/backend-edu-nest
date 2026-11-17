@@ -1,5 +1,6 @@
 import {
   Controller,
+  ForbiddenException,
   Get,
   Query,
   Res,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { PermissionArea, PermissionLevel } from '@prisma/client';
 import type { Response } from 'express';
+import { hasPermission } from '../access/access-calc';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -120,6 +122,24 @@ export class ReportsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     return this.respond(await this.activity.payroll(query, user), query, res);
+  }
+
+  @Get('cash')
+  @PermissionAny(
+    [PermissionArea.cash, PermissionArea.cash_control],
+    PermissionLevel.view,
+  )
+  async cash(
+    @Query() query: ReportQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (
+      !query.shiftId &&
+      !hasPermission(user, PermissionArea.cash_control, PermissionLevel.view)
+    )
+      throw new ForbiddenException('Insufficient permissions');
+    return this.respond(await this.finance.cash(query, user), query, res);
   }
 
   private async respond(report: Report, query: ReportQueryDto, res: Response) {

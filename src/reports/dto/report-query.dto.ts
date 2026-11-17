@@ -1,4 +1,9 @@
-import { GroupKind } from '@prisma/client';
+import {
+  CashDirection,
+  CashEntryKind,
+  FinanceCategory,
+  GroupKind,
+} from '@prisma/client';
 import { IsEnum, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class ReportQueryDto {
@@ -33,6 +38,30 @@ export class ReportQueryDto {
   @IsOptional()
   @IsUUID('4')
   tariffId?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  deskId?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  employeeId?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  shiftId?: string;
+
+  @IsOptional()
+  @IsEnum(CashDirection)
+  direction?: CashDirection;
+
+  @IsOptional()
+  @IsEnum(FinanceCategory)
+  category?: FinanceCategory;
+
+  @IsOptional()
+  @IsEnum(CashEntryKind)
+  entryKind?: CashEntryKind;
 
   @IsOptional()
   @IsIn(['json', 'xlsx'])

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ChargeSource, PaymentStatus } from '@prisma/client';
+import { ChargeSource, PaymentStatus, Prisma } from '@prisma/client';
 import { scopeIds } from '../access/access-calc';
+import { directionForInstitution } from '../cash/cash-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { kyivDayStart } from '../audit/audit-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
@@ -15,6 +16,7 @@ import {
   debtsReport,
   paymentsReport,
 } from './reports-calc';
+import { cashReport } from './cash-report-calc';
 import { Report } from './report.types';
 
 const tariffSelect = { tariff: { select: { id: true, name: true } } };
@@ -222,6 +224,155 @@ export class FinanceReportsService {
       adaptations: toMap(visits, (v) => v.tariff),
       attendances: toMap(attendances, (a) => a.lesson.classGroup.singleTariff),
     };
+  }
+
+  async cash(query: ReportQueryDto, user: AuthenticatedUser): Promise<Report> {
+    const shift = query.shiftId
+      ? await this.prisma.cashShift.findUnique({
+          where: { id: query.shiftId },
+          select: { openedAt: true },
+        })
+      : null;
+    if (query.shiftId && !shift) throw new NotFoundException('Shift not found');
+    const shiftDay = shift ? kyivToday(shift.openedAt) : null;
+    const period = shiftDay
+      ? { from: shiftDay, to: shiftDay }
+      : reportPeriod(query.from, query.to);
+    const range = {
+      gte: kyivDayStart(isoDay(period.from)),
+      lt: kyivDayStart(isoDay(addDays(period.to, 1))),
+    };
+    const filter = await resolveFilter(this.prisma, user, query);
+    const byPayment = Boolean(
+      query.kind ||
+      query.groupId ||
+      query.childId ||
+      query.category ||
+      filter.institutionIds,
+    );
+    const child = childFilterWhere(filter, query.childId);
+    const entryWhere: Prisma.CashEntryWhereInput =
+      byPayment && query.entryKind && query.entryKind !== 'income'
+        ? { id: { in: [] } }
+        : {
+            ...(query.shiftId
+              ? { shiftId: query.shiftId }
+              : { createdAt: range }),
+            ...(query.deskId ? { deskId: query.deskId } : {}),
+            ...(query.employeeId ? { createdById: query.employeeId } : {}),
+            ...(query.direction ? { direction: query.direction } : {}),
+            ...(byPayment
+              ? {
+                  kind: 'income',
+                  payment: {
+                    ...(query.category ? { category: query.category } : {}),
+                    child,
+                  },
+                }
+              : query.entryKind
+                ? { kind: query.entryKind }
+                : {}),
+          };
+    const [entries, payments, shifts] = await Promise.all([
+      this.prisma.cashEntry.findMany({
+        where: entryWhere,
+        include: {
+          desk: { select: { name: true } },
+          createdBy: { select: { firstName: true, lastName: true } },
+          recipient: { select: { firstName: true, lastName: true } },
+          payment: {
+            select: {
+              category: true,
+              payerName: true,
+              periodFrom: true,
+              periodTo: true,
+              child: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  group: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          voidedAt: null,
+          status: PaymentStatus.confirmed,
+          ...(query.shiftId
+            ? { cashEntry: { shiftId: query.shiftId } }
+            : { receivedAt: range }),
+          ...(query.category ? { category: query.category } : {}),
+          child,
+        },
+        select: {
+          category: true,
+          method: true,
+          amount: true,
+          child: {
+            select: {
+              group: { select: { institution: { select: { type: true } } } },
+            },
+          },
+        },
+      }),
+      this.prisma.cashShift.findMany({
+        where: {
+          ...(query.shiftId ? { id: query.shiftId } : { openedAt: range }),
+          ...(query.deskId ? { deskId: query.deskId } : {}),
+        },
+        include: {
+          desk: { select: { name: true } },
+          openedBy: { select: { firstName: true, lastName: true } },
+          closedBy: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: { openedAt: 'asc' },
+      }),
+    ]);
+    return cashReport({
+      period,
+      shiftDay,
+      entries: entries.map((e) => ({
+        createdAt: e.createdAt,
+        desk: e.desk.name,
+        kind: e.kind,
+        direction: e.direction,
+        amount: e.amount,
+        sign: e.sign,
+        paymentCategory: e.payment?.category ?? null,
+        expenseCategory: e.expenseCategory,
+        child: e.payment ? fullName(e.payment.child) : null,
+        group: e.payment?.child.group?.name ?? null,
+        payer: e.payment?.payerName ?? null,
+        periodFrom: e.payment?.periodFrom ?? null,
+        periodTo: e.payment?.periodTo ?? null,
+        employee: fullName(e.createdBy),
+        recipient: e.recipient ? fullName(e.recipient) : null,
+        transferStatus: e.transferStatus,
+        comment: e.comment,
+        voidedAt: e.voidedAt,
+      })),
+      payments: payments.map((p) => ({
+        category: p.category,
+        method: p.method,
+        amount: p.amount,
+        direction: directionForInstitution(p.child.group?.institution?.type),
+      })),
+      shifts: shifts.map((s) => ({
+        desk: s.desk.name,
+        openedAt: s.openedAt,
+        openedBy: fullName(s.openedBy),
+        closedAt: s.closedAt,
+        closedBy: s.closedBy ? fullName(s.closedBy) : null,
+        openingCounted: s.openingCounted,
+        closingExpected: s.closingExpected,
+        closingCounted: s.closingCounted,
+        closingNote: s.closingNote,
+      })),
+    });
   }
 
   async debts(query: ReportQueryDto, user: AuthenticatedUser): Promise<Report> {

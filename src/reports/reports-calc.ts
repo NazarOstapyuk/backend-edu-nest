@@ -1,4 +1,8 @@
 import {
+  CashDirection,
+  CashEntryKind,
+  CashExpenseCategory,
+  CashTransferStatus,
   ChargeSource,
   DailyStatus,
   FinanceCategory,
@@ -78,8 +82,8 @@ export interface DebtChild {
   payments: PaymentLike[];
 }
 
-const NO_CATEGORY = 'Без категорії';
-const TOTAL_LABEL = 'Разом';
+export const NO_CATEGORY = 'Без категорії';
+export const TOTAL_LABEL = 'Разом';
 
 export const CATEGORY_LABELS: Record<FinanceCategory, string> = {
   tuition: 'Навчання',
@@ -107,6 +111,33 @@ const SOURCE_LABELS: Record<ChargeSource, string> = {
   extra_package: 'Пакет занять',
   extra_session: 'Разове заняття',
   meals: 'Харчування',
+};
+
+export const CASH_KIND_LABELS: Record<CashEntryKind, string> = {
+  income: 'Надходження',
+  expense: 'Видаток',
+  transfer: 'Передача',
+  correction: 'Коригування',
+};
+
+export const CASH_DIRECTION_LABELS: Record<CashDirection, string> = {
+  kindergarten: 'Садок',
+  school: 'Школа',
+  shared: 'Спільне',
+};
+
+export const CASH_EXPENSE_LABELS: Record<CashExpenseCategory, string> = {
+  household: 'Господарські',
+  materials: 'Матеріали',
+  supplier: 'Постачальники',
+  refund: 'Повернення',
+  other: 'Інше',
+};
+
+export const CASH_TRANSFER_LABELS: Record<CashTransferStatus, string> = {
+  pending: 'Очікує',
+  confirmed: 'Підтверджено',
+  disputed: 'Оскаржено',
 };
 
 const NO_TARIFF = 'Без тарифу';
@@ -197,12 +228,12 @@ export const chargeDay = (c: {
   createdAt: Date;
 }): Date => c.periodStart ?? kyivToday(c.createdAt);
 
-const periodOf = (period: PeriodRef) => ({
+export const periodOf = (period: PeriodRef) => ({
   from: isoDay(period.from),
   to: isoDay(period.to),
 });
 
-const moneyTotals = (rows: ReportRow[], keys: string[]): ReportRow =>
+export const moneyTotals = (rows: ReportRow[], keys: string[]): ReportRow =>
   Object.fromEntries(
     keys.map((key) => [
       key,
