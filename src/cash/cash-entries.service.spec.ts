@@ -271,9 +271,33 @@ describe('CashEntriesService', () => {
       );
     });
 
+    it('rejects voiding a correction', async () => {
+      mockPrisma.cashEntry.findUnique.mockResolvedValue(
+        entryRow({ kind: 'correction' }),
+      );
+      await expect(
+        service.voidEntry('e1', { reason: 'oops' }, 'u1'),
+      ).rejects.toThrow(
+        new BadRequestException('Corrections cannot be voided'),
+      );
+    });
+
+    it('rejects voiding a confirmed transfer', async () => {
+      mockPrisma.cashEntry.findUnique.mockResolvedValue(
+        entryRow({ kind: 'transfer', transferStatus: 'confirmed' }),
+      );
+      await expect(
+        service.voidEntry('e1', { reason: 'oops' }, 'u1'),
+      ).rejects.toThrow(new BadRequestException('Transfer already confirmed'));
+    });
+
     it('voids an entry under the desk lock', async () => {
       await service.voidEntry('e1', { reason: 'oops' }, 'u1');
-      expect(mockPrisma.$queryRaw).toHaveBeenCalled();
+      const lockOrder = mockPrisma.$queryRaw.mock.invocationCallOrder[0];
+      const reads = mockPrisma.cashEntry.findUnique.mock.invocationCallOrder;
+      expect(reads).toHaveLength(2);
+      expect(lockOrder).toBeGreaterThan(reads[0]);
+      expect(lockOrder).toBeLessThan(reads[1]);
       expect(mockPrisma.cashEntry.update).toHaveBeenCalled();
     });
   });

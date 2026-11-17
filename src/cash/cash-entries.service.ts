@@ -182,6 +182,12 @@ export class CashEntriesService {
       if (entry.kind === 'income') {
         throw new BadRequestException('Income is voided through the payment');
       }
+      if (entry.kind === 'correction') {
+        throw new BadRequestException('Corrections cannot be voided');
+      }
+      if (entry.transferStatus === 'confirmed') {
+        throw new BadRequestException('Transfer already confirmed');
+      }
       const updated = await tx.cashEntry.update({
         where: { id },
         data: {
