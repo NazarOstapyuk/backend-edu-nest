@@ -35,7 +35,10 @@ export interface CashShiftReport {
   entries: CashEntryView[];
 }
 
-const lockDesk = async (tx: Prisma.TransactionClient, deskId: string) => {
+export const lockDesk = async (
+  tx: Prisma.TransactionClient,
+  deskId: string,
+) => {
   await tx.$queryRaw`SELECT id FROM "CashDesk" WHERE id = ${deskId} FOR UPDATE`;
 };
 
