@@ -188,6 +188,16 @@ describe('CashShiftsService', () => {
       ).rejects.toThrow(new BadRequestException('Shift is closed'));
     });
 
+    it('rejects a shift closed by a concurrent request after the lock', async () => {
+      mockPrisma.cashShift.findUnique
+        .mockResolvedValueOnce(open)
+        .mockResolvedValueOnce(shiftRow({ closedAt: new Date() }));
+      await expect(
+        service.close('s1', { denominations: {} }, 'u1'),
+      ).rejects.toThrow(new BadRequestException('Shift is closed'));
+      expect(mockPrisma.cashEntry.findMany).not.toHaveBeenCalled();
+    });
+
     it('locks the desk before reading entries', async () => {
       await service.close(
         's1',

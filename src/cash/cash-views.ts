@@ -1,9 +1,9 @@
+import { Prisma } from '@prisma/client';
 import type {
   CashDirection,
   CashEntryKind,
   CashExpenseCategory,
   CashTransferStatus,
-  Prisma,
 } from '@prisma/client';
 import { formatMoney } from '../finance/finance-calc';
 import { isoDay } from '../tariffs/dates';
@@ -249,3 +249,7 @@ export const shiftView = (
         : null,
   };
 };
+
+export const isUniqueViolation = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === 'P2002';

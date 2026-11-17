@@ -18,6 +18,7 @@ import {
 import {
   entryInclude,
   entryView,
+  isUniqueViolation,
   shiftInclude,
   shiftView,
   totalsSelect,
@@ -33,10 +34,6 @@ export interface CashShiftReport {
   shift: CashShiftView;
   entries: CashEntryView[];
 }
-
-const isUniqueViolation = (error: unknown): boolean =>
-  error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === 'P2002';
 
 const lockDesk = async (tx: Prisma.TransactionClient, deskId: string) => {
   await tx.$queryRaw`SELECT id FROM "CashDesk" WHERE id = ${deskId} FOR UPDATE`;
@@ -203,13 +200,24 @@ export class CashShiftsService {
     }
     const shifts = await this.prisma.cashShift.findMany({
       where,
-      include: {
-        ...shiftInclude,
-        entries: { select: totalsSelect },
-      },
+      include: shiftInclude,
       orderBy: { openedAt: 'desc' },
     });
-    return shifts.map((shift) => shiftView(shift, shift.entries));
+    const openIds = shifts
+      .filter((shift) => shift.closedAt === null)
+      .map((shift) => shift.id);
+    const entries = openIds.length
+      ? await this.prisma.cashEntry.findMany({
+          where: { shiftId: { in: openIds } },
+          select: { shiftId: true, ...totalsSelect },
+        })
+      : [];
+    return shifts.map((shift) =>
+      shiftView(
+        shift,
+        entries.filter((entry) => entry.shiftId === shift.id),
+      ),
+    );
   }
 
   async report(id: string): Promise<CashShiftReport> {

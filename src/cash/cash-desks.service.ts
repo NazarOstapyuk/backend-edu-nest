@@ -3,11 +3,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, type CashDesk } from '@prisma/client';
+import type { CashDesk } from '@prisma/client';
 import { formatMoney } from '../finance/finance-calc';
 import { PrismaService } from '../prisma/prisma.service';
 import { shiftTotals, expectedBalance, type CashTotals } from './cash-calc';
-import { person, personSelect, totalsSelect, type Person } from './cash-views';
+import {
+  isUniqueViolation,
+  person,
+  personSelect,
+  totalsSelect,
+  type Person,
+} from './cash-views';
 import type { CreateDeskDto } from './dto/create-desk.dto';
 import type { UpdateDeskDto } from './dto/update-desk.dto';
 
@@ -34,10 +40,6 @@ export interface CashDeskState {
     difference: string;
   } | null;
 }
-
-const isUniqueViolation = (error: unknown): boolean =>
-  error instanceof Prisma.PrismaClientKnownRequestError &&
-  error.code === 'P2002';
 
 @Injectable()
 export class CashDesksService {

@@ -31,12 +31,14 @@ describe('countTotal', () => {
     expect(countTotal({ '100000': 2, '50': 3 }).toFixed(2)).toBe('2001.50');
   });
 
-  it.each([{ '300': 1 }, { '100': -1 }, { '100': 1.5 }, { '100': 100001 }])(
-    'rejects %j',
-    (input) => {
-      expect(() => countTotal(input)).toThrow(BadRequestException);
-    },
-  );
+  it.each<Record<string, number>>([
+    { '300': 1 },
+    { '100': -1 },
+    { '100': 1.5 },
+    { '100': 100001 },
+  ])('rejects %j', (input) => {
+    expect(() => countTotal(input)).toThrow(BadRequestException);
+  });
 });
 
 describe('shiftTotals', () => {
