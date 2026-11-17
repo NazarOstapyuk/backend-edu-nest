@@ -184,13 +184,21 @@ describe('cashReport', () => {
         income: '100.00',
         expense: '0.00',
         transfer: '20.00',
+        correction: '0.00',
       },
-      { direction: 'Школа', income: '0.00', expense: '0.00', transfer: '0.00' },
+      {
+        direction: 'Школа',
+        income: '0.00',
+        expense: '0.00',
+        transfer: '0.00',
+        correction: '0.00',
+      },
       {
         direction: 'Спільне',
         income: '0.00',
         expense: '30.00',
         transfer: '0.00',
+        correction: '0.00',
       },
     ]);
     expect(by('За працівниками')?.rows).toEqual([
@@ -200,6 +208,7 @@ describe('cashReport', () => {
         income: '100.00',
         expense: '30.00',
         transfer: '20.00',
+        correction: '0.00',
       },
     ]);
   });
@@ -253,6 +262,46 @@ describe('cashReport', () => {
       expected: null,
       difference: null,
     });
+  });
+
+  it('adds signed corrections to the direction and employee sheets', () => {
+    const report = build([
+      entry({ amount: d('100') }),
+      entry({ kind: 'correction', amount: d('5'), sign: 1 }),
+      entry({ kind: 'correction', amount: d('8'), sign: -1 }),
+      entry({
+        kind: 'correction',
+        amount: d('40'),
+        sign: 1,
+        voidedAt: new Date(),
+      }),
+    ]);
+    const by = (name: string) => report.sheets.find((s) => s.name === name);
+    expect(report.totals?.amount).toBe('97.00');
+    expect(by('За напрямами')?.rows[0]).toMatchObject({ correction: '-3.00' });
+    expect(by('За напрямами')?.totals).toMatchObject({
+      income: '100.00',
+      correction: '-3.00',
+    });
+    expect(by('За працівниками')?.rows[0]).toMatchObject({
+      correction: '-3.00',
+    });
+    expect(by('За працівниками')?.totals).toMatchObject({
+      correction: '-3.00',
+    });
+    expect(
+      by('За напрямами')?.columns.find((c) => c.key === 'correction')?.label,
+    ).toBe('Коригування');
+  });
+
+  it('labels who opened and closed a shift neutrally', () => {
+    const columns = build([]).sheets.find((s) => s.name === 'Зміни')?.columns;
+    expect(columns?.find((c) => c.key === 'openedBy')?.label).toBe(
+      'Хто відкрив',
+    );
+    expect(columns?.find((c) => c.key === 'closedBy')?.label).toBe(
+      'Хто закрив',
+    );
   });
 
   it('groups the employee sheet by id, not by name', () => {

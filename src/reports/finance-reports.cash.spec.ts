@@ -107,6 +107,39 @@ describe('FinanceReportsService cash', () => {
     ]);
   });
 
+  it('keeps non-income entries when an institution is selected', async () => {
+    prisma.institution.findUnique.mockResolvedValue({ id: 'i2' });
+    await service.cash(
+      { from: '2026-11-01', to: '2026-11-30', institutionId: 'i2' },
+      admin,
+    );
+    const where = wherePassed();
+    expect(where.kind).toBeUndefined();
+    expect(where.payment).toBeUndefined();
+    expect(where.OR).toEqual([
+      { kind: { not: 'income' } },
+      { payment: { child: { group: { institutionId: { in: ['i2'] } } } } },
+    ]);
+  });
+
+  it('ignores scope and institution in shift mode', async () => {
+    const scoped = {
+      ...(admin as object),
+      accessScope: AccessScope.institutions,
+      institutionIds: ['i1'],
+      scopeInstitutionIds: ['i1'],
+    } as never;
+    prisma.cashShift.findUnique.mockResolvedValue({
+      openedAt: new Date('2026-11-10T06:00:00.000Z'),
+    });
+    await service.cash({ shiftId: 's1', institutionId: 'i9' }, scoped);
+    expect(wherePassed()).toEqual({ shiftId: 's1' });
+    expect(prisma.institution.findUnique).not.toHaveBeenCalled();
+    expect(
+      (prisma.payment.findMany.mock.calls as Call[])[0][0].where.child,
+    ).toEqual({});
+  });
+
   it('applies the direction filter to the category sheet', async () => {
     prisma.payment.findMany.mockResolvedValue([
       {

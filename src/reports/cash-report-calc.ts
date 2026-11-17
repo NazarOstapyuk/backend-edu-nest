@@ -131,6 +131,11 @@ const sumOf = (entries: CashReportEntry[], kind: CashEntryKind): string =>
     sumMoney(entries.filter((e) => e.kind === kind).map((e) => e.amount)),
   );
 
+const correctionOf = (entries: CashReportEntry[]): string =>
+  formatMoney(
+    sumMoney(entries.filter((e) => e.kind === 'correction').map(signedAmount)),
+  );
+
 const categorySheet = (payments: CashReportPayment[]): ReportSheet => {
   const order = [
     ...Object.entries(CATEGORY_LABELS).flatMap(([key, label]) =>
@@ -254,6 +259,7 @@ const directionSheet = (active: CashReportEntry[]): ReportSheet => {
       income: sumOf(own, 'income'),
       expense: sumOf(own, 'expense'),
       transfer: sumOf(own, 'transfer'),
+      correction: correctionOf(own),
     };
   });
   return {
@@ -263,11 +269,12 @@ const directionSheet = (active: CashReportEntry[]): ReportSheet => {
       { key: 'income', label: 'Надходження', type: 'money' },
       { key: 'expense', label: 'Видатки', type: 'money' },
       { key: 'transfer', label: 'Передачі', type: 'money' },
+      { key: 'correction', label: 'Коригування', type: 'money' },
     ],
     rows,
     totals: {
       direction: TOTAL_LABEL,
-      ...moneyTotals(rows, ['income', 'expense', 'transfer']),
+      ...moneyTotals(rows, ['income', 'expense', 'transfer', 'correction']),
     },
   };
 };
@@ -287,6 +294,7 @@ const employeeSheet = (active: CashReportEntry[]): ReportSheet => {
       income: sumOf(own, 'income'),
       expense: sumOf(own, 'expense'),
       transfer: sumOf(own, 'transfer'),
+      correction: correctionOf(own),
     };
   });
   return {
@@ -297,12 +305,13 @@ const employeeSheet = (active: CashReportEntry[]): ReportSheet => {
       { key: 'income', label: 'Надходження', type: 'money' },
       { key: 'expense', label: 'Видатки', type: 'money' },
       { key: 'transfer', label: 'Передачі', type: 'money' },
+      { key: 'correction', label: 'Коригування', type: 'money' },
     ],
     rows,
     totals: {
       employee: TOTAL_LABEL,
       count: active.length,
-      ...moneyTotals(rows, ['income', 'expense', 'transfer']),
+      ...moneyTotals(rows, ['income', 'expense', 'transfer', 'correction']),
     },
   };
 };
@@ -336,9 +345,9 @@ const shiftSheet = (shifts: CashReportShift[]): ReportSheet => {
     columns: [
       { key: 'desk', label: 'Каса', type: 'text' },
       { key: 'opened', label: 'Відкрито', type: 'text' },
-      { key: 'openedBy', label: 'Відкрив', type: 'text' },
+      { key: 'openedBy', label: 'Хто відкрив', type: 'text' },
       { key: 'closed', label: 'Закрито', type: 'text' },
-      { key: 'closedBy', label: 'Закрив', type: 'text' },
+      { key: 'closedBy', label: 'Хто закрив', type: 'text' },
       { key: 'opening', label: 'На початок', type: 'money' },
       { key: 'expected', label: 'Очікувано', type: 'money' },
       { key: 'counted', label: 'Пораховано', type: 'money' },

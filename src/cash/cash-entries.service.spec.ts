@@ -229,9 +229,7 @@ describe('CashEntriesService', () => {
         id: 's1',
         closedAt: null,
       });
-      mockPrisma.cashEntry.update.mockResolvedValue(
-        entryRow({ voidedAt: new Date(), voidedBy: person }),
-      );
+      mockPrisma.cashEntry.updateMany.mockResolvedValue({ count: 1 });
     });
 
     it('rejects a missing entry', async () => {
@@ -295,10 +293,50 @@ describe('CashEntriesService', () => {
       await service.voidEntry('e1', { reason: 'oops' }, 'u1');
       const lockOrder = mockPrisma.$queryRaw.mock.invocationCallOrder[0];
       const reads = mockPrisma.cashEntry.findUnique.mock.invocationCallOrder;
-      expect(reads).toHaveLength(2);
       expect(lockOrder).toBeGreaterThan(reads[0]);
       expect(lockOrder).toBeLessThan(reads[1]);
-      expect(mockPrisma.cashEntry.update).toHaveBeenCalled();
+      expect(mockPrisma.cashEntry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'e1',
+            voidedAt: null,
+            OR: [
+              { transferStatus: null },
+              { transferStatus: { not: 'confirmed' } },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('rejects when the entry was voided concurrently', async () => {
+      mockPrisma.cashEntry.findUnique
+        .mockResolvedValueOnce(entryRow({ kind: 'transfer' }))
+        .mockResolvedValueOnce(
+          entryRow({ kind: 'transfer', transferStatus: 'pending' }),
+        )
+        .mockResolvedValueOnce(
+          entryRow({ kind: 'transfer', voidedAt: new Date() }),
+        );
+      mockPrisma.cashEntry.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        service.voidEntry('e1', { reason: 'oops' }, 'u1'),
+      ).rejects.toThrow(new BadRequestException('Entry is voided'));
+    });
+
+    it('rejects when the transfer was confirmed concurrently', async () => {
+      mockPrisma.cashEntry.findUnique
+        .mockResolvedValueOnce(entryRow({ kind: 'transfer' }))
+        .mockResolvedValueOnce(
+          entryRow({ kind: 'transfer', transferStatus: 'pending' }),
+        )
+        .mockResolvedValueOnce(
+          entryRow({ kind: 'transfer', transferStatus: 'confirmed' }),
+        );
+      mockPrisma.cashEntry.updateMany.mockResolvedValue({ count: 0 });
+      await expect(
+        service.voidEntry('e1', { reason: 'oops' }, 'u1'),
+      ).rejects.toThrow(new BadRequestException('Transfer already confirmed'));
     });
   });
 
@@ -391,11 +429,21 @@ describe('CashEntriesService', () => {
       );
     });
 
+    it('rejects when the transfer was voided concurrently', async () => {
+      mockPrisma.cashEntry.findUnique
+        .mockResolvedValueOnce(transfer())
+        .mockResolvedValueOnce(transfer({ voidedAt: new Date() }));
+      mockPrisma.cashEntry.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.confirm('e1', 'u2')).rejects.toThrow(
+        new BadRequestException('Entry is voided'),
+      );
+    });
+
     it('confirms a pending transfer', async () => {
       await service.confirm('e1', 'u2');
       expect(mockPrisma.cashEntry.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'e1', transferStatus: 'pending' },
+          where: { id: 'e1', transferStatus: 'pending', voidedAt: null },
         }),
       );
       expect(mockPrisma.cashAlert.create).not.toHaveBeenCalled();

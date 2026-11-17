@@ -188,15 +188,30 @@ export class CashEntriesService {
       if (entry.transferStatus === 'confirmed') {
         throw new BadRequestException('Transfer already confirmed');
       }
-      const updated = await tx.cashEntry.update({
-        where: { id },
+      const { count } = await tx.cashEntry.updateMany({
+        where: {
+          id,
+          voidedAt: null,
+          OR: [
+            { transferStatus: null },
+            { transferStatus: { not: 'confirmed' } },
+          ],
+        },
         data: {
           voidedAt: new Date(),
           voidedById: userId,
           voidReason: dto.reason.trim(),
         },
+      });
+      const updated = await tx.cashEntry.findUnique({
+        where: { id },
         include: entryInclude,
       });
+      if (!updated) throw new NotFoundException('Entry not found');
+      if (count === 0) {
+        if (updated.voidedAt) throw new BadRequestException('Entry is voided');
+        throw new BadRequestException('Transfer already confirmed');
+      }
       return entryView(updated);
     });
   }
@@ -261,7 +276,7 @@ export class CashEntriesService {
         throw new BadRequestException('Transfer already settled');
       }
       const { count } = await tx.cashEntry.updateMany({
-        where: { id, transferStatus: 'pending' },
+        where: { id, transferStatus: 'pending', voidedAt: null },
         data: {
           transferStatus: status,
           transferNote: note ?? null,
@@ -269,6 +284,8 @@ export class CashEntriesService {
         },
       });
       if (count === 0) {
+        const current = await tx.cashEntry.findUnique({ where: { id } });
+        if (current?.voidedAt) throw new BadRequestException('Entry is voided');
         throw new BadRequestException('Transfer already settled');
       }
       if (status === 'disputed') {

@@ -6,7 +6,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { kyivDayStart } from '../audit/audit-calc';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { addDays, isoDay, kyivToday } from '../tariffs/dates';
-import { childFilterWhere, reportPeriod, resolveFilter } from './report-query';
+import {
+  type ReportFilter,
+  childFilterWhere,
+  reportPeriod,
+  resolveFilter,
+} from './report-query';
 import { ReportQueryDto } from './dto/report-query.dto';
 import {
   ChargeTariffSources,
@@ -242,13 +247,15 @@ export class FinanceReportsService {
       gte: kyivDayStart(isoDay(period.from)),
       lt: kyivDayStart(isoDay(addDays(period.to, 1))),
     };
-    const filter = await resolveFilter(this.prisma, user, query);
+    const filter: ReportFilter = query.shiftId
+      ? {
+          kind: query.kind ?? null,
+          institutionIds: null,
+          groupId: query.groupId ?? null,
+        }
+      : await resolveFilter(this.prisma, user, query);
     const byPayment = Boolean(
-      query.kind ||
-      query.groupId ||
-      query.childId ||
-      query.category ||
-      query.institutionId,
+      query.kind || query.groupId || query.childId || query.category,
     );
     const scopedOnly = !byPayment && filter.institutionIds !== null;
     const child = childFilterWhere(filter, query.childId);
