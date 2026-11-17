@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { BackupsModule } from '../backups/backups.module';
+import { CashModule } from '../cash/cash.module';
 import { DailyNotesModule } from '../daily-notes/daily-notes.module';
 import { OnlinePaymentsModule } from '../online-payments/online-payments.module';
 import { StaffTasksModule } from '../staff-tasks/staff-tasks.module';
@@ -14,6 +15,7 @@ import { DashboardService } from './dashboard.service';
     DailyNotesModule,
     OnlinePaymentsModule,
     StaffTasksModule,
+    CashModule,
   ],
   controllers: [DashboardController],
   providers: [DashboardService],

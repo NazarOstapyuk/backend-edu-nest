@@ -15,6 +15,13 @@ import { kyivDayStart } from '../audit/audit-calc';
 import { CalendarService } from '../attendance/calendar.service';
 import { canManageRegister } from '../attendance/register.service';
 import { BackupsService } from '../backups/backups.service';
+import {
+  CashAlertsService,
+  type CashAlertView,
+  type UnclosedShiftView,
+} from '../cash/cash-alerts.service';
+import { CashEntriesService } from '../cash/cash-entries.service';
+import type { CashEntryView } from '../cash/cash-views';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { DailyNotesService } from '../daily-notes/daily-notes.service';
 import { formatMoney, sumMoney } from '../finance/finance-calc';
@@ -56,6 +63,8 @@ export interface TodayDashboard {
   payroll?: { month: string; count: number; names: string[]; more: number };
   backups?: { configured: boolean; stale: boolean };
   tasks?: TasksDashboard;
+  cash?: { alerts: CashAlertView[]; unclosed: UnclosedShiftView[] };
+  cashTransfers?: { items: CashEntryView[] };
 }
 
 @Injectable()
@@ -67,6 +76,8 @@ export class DashboardService {
     private onlinePayments: OnlinePaymentsService,
     private notes: DailyNotesService,
     private tasks: StaffTasksService,
+    private cashAlerts: CashAlertsService,
+    private cashEntries: CashEntriesService,
   ) {}
 
   async today(user: AuthenticatedUser): Promise<TodayDashboard> {
@@ -85,6 +96,19 @@ export class DashboardService {
       const tasks = await this.tasks.dashboard(user);
       if (tasks) result.tasks = tasks;
     });
+    add(async () => {
+      const items = await this.cashEntries.myTransfers(user.id);
+      if (items.length > 0) result.cashTransfers = { items };
+    });
+    if (can(user, PermissionArea.cash_control)) {
+      add(async () => {
+        const [alerts, unclosed] = await Promise.all([
+          this.cashAlerts.list(false),
+          this.cashAlerts.unclosed(),
+        ]);
+        result.cash = { alerts, unclosed };
+      });
+    }
     if (canManageRegister(user) || isTeacher) {
       add(async () => {
         result.register = await this.register(user, today);

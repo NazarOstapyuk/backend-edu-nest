@@ -39,6 +39,7 @@ const allView: AuthenticatedUser['permissions'] = {
   backups: 'view',
   settings: 'view',
   audit: 'view',
+  cash_control: 'view',
 };
 
 const containing = (value: object): object =>
@@ -62,6 +63,8 @@ describe('DashboardService', () => {
   const onlinePayments = { config: jest.fn() };
   const notes = { pending: jest.fn() };
   const tasks = { dashboard: jest.fn() };
+  const cashAlerts = { list: jest.fn(), unclosed: jest.fn() };
+  const cashEntries = { myTransfers: jest.fn() };
 
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date('2026-10-16T10:00:00.000Z'));
@@ -78,6 +81,9 @@ describe('DashboardService', () => {
     onlinePayments.config.mockReturnValue({ enabled: false });
     notes.pending.mockResolvedValue([]);
     tasks.dashboard.mockResolvedValue(null);
+    cashAlerts.list.mockResolvedValue([]);
+    cashAlerts.unclosed.mockResolvedValue([]);
+    cashEntries.myTransfers.mockResolvedValue([]);
     service = new DashboardService(
       prisma as never,
       calendar as never,
@@ -85,6 +91,8 @@ describe('DashboardService', () => {
       onlinePayments as never,
       notes as never,
       tasks as never,
+      cashAlerts as never,
+      cashEntries as never,
     );
   });
 
@@ -440,6 +448,7 @@ describe('DashboardService', () => {
     const result = await service.today(makeUser({ role: Role.root }));
     expect(Object.keys(result).sort()).toEqual([
       'backups',
+      'cash',
       'date',
       'debts',
       'meals',
@@ -449,6 +458,38 @@ describe('DashboardService', () => {
       'payroll',
       'register',
     ]);
+  });
+
+  it('adds the cash section for cash_control view', async () => {
+    const alert = { id: 'a1', type: 'discrepancy' };
+    const shift = { shiftId: 's1', deskId: 'd1' };
+    cashAlerts.list.mockResolvedValue([alert]);
+    cashAlerts.unclosed.mockResolvedValue([shift]);
+    const result = await service.today(
+      makeUser({ permissions: { cash_control: 'view' } }),
+    );
+    expect(result.cash).toEqual({ alerts: [alert], unclosed: [shift] });
+    expect(cashAlerts.list).toHaveBeenCalledWith(false);
+  });
+
+  it('has no cash section without cash_control', async () => {
+    const result = await service.today(makeUser());
+    expect(result).not.toHaveProperty('cash');
+    expect(cashAlerts.list).not.toHaveBeenCalled();
+  });
+
+  it('gives a teacher pending cash transfers', async () => {
+    const teacher = makeUser({ role: Role.teacher });
+    const items = [{ id: 'e1' }];
+    cashEntries.myTransfers.mockResolvedValue(items);
+    const result = await service.today(teacher);
+    expect(result.cashTransfers).toEqual({ items });
+    expect(cashEntries.myTransfers).toHaveBeenCalledWith('u1');
+  });
+
+  it('omits cashTransfers when nothing is pending', async () => {
+    const result = await service.today(makeUser({ role: Role.teacher }));
+    expect(result).not.toHaveProperty('cashTransfers');
   });
 
   it('marks groups with unmarked children on a working day', async () => {

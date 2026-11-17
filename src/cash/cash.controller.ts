@@ -19,6 +19,7 @@ import {
 import { Roles } from '../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
 import { VoidDto } from '../finance/dto/void.dto';
+import { CashAlertsService } from './cash-alerts.service';
 import { CashDesksService } from './cash-desks.service';
 import { CashEntriesService } from './cash-entries.service';
 import { CashShiftsService } from './cash-shifts.service';
@@ -37,6 +38,7 @@ export class CashController {
     private desks: CashDesksService,
     private shifts: CashShiftsService,
     private entries: CashEntriesService,
+    private alerts: CashAlertsService,
   ) {}
 
   @PermissionAny(
@@ -163,5 +165,29 @@ export class CashController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.entries.dispute(id, dto, user.id);
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.view)
+  @Get('alerts')
+  listAlerts(@Query('all') all?: string) {
+    return this.alerts.list(all === '1');
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.view)
+  @Get('alerts/count')
+  alertsCount() {
+    return this.alerts.count();
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.view)
+  @Post('alerts/ack-all')
+  ackAllAlerts(@CurrentUser() user: AuthenticatedUser) {
+    return this.alerts.ackAll(user.id);
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.view)
+  @Post('alerts/:id/ack')
+  ackAlert(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.alerts.ack(id, user.id);
   }
 }
