@@ -3,10 +3,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PaymentStatus } from '@prisma/client';
+import { Payment, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { scopeIds } from '../access/access-calc';
 import { assertChildInScope } from '../access/scope';
 import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { directionForInstitution } from '../cash/cash-calc';
+import { CashAlertsService } from '../cash/cash-alerts.service';
+import { CashShiftsService, lockDesk } from '../cash/cash-shifts.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AllocationItem, applyAllocations } from './allocations';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -15,7 +18,11 @@ import { money } from './finance-calc';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private shifts: CashShiftsService,
+    private alerts: CashAlertsService,
+  ) {}
 
   async create(
     childId: string,
@@ -26,6 +33,9 @@ export class PaymentsService {
     await assertChildInScope(this.prisma, scopeIds(user), childId);
     const child = await this.prisma.child.findUnique({
       where: { id: childId },
+      include: {
+        group: { select: { institution: { select: { type: true } } } },
+      },
     });
     if (!child) throw new NotFoundException('Child not found');
     if (money(dto.amount).lte(0)) {
@@ -37,7 +47,21 @@ export class PaymentsService {
       throw new BadRequestException('Date is in the future');
     }
 
+    const isCash = dto.method === PaymentMethod.cash;
+    if (isCash && !dto.cashDeskId) {
+      throw new BadRequestException('Cash desk is required');
+    }
+    const periodFrom = dto.periodFrom ? new Date(dto.periodFrom) : null;
+    const periodTo = dto.periodTo ? new Date(dto.periodTo) : null;
+    if (periodFrom && periodTo && periodTo.getTime() < periodFrom.getTime()) {
+      throw new BadRequestException('Period end is before start');
+    }
+
     return this.prisma.$transaction(async (tx) => {
+      const shift =
+        isCash && dto.cashDeskId
+          ? await this.shifts.lockOpenShift(tx, dto.cashDeskId)
+          : null;
       const payment = await tx.payment.create({
         data: {
           childId,
@@ -48,9 +72,25 @@ export class PaymentsService {
           reference: dto.reference?.trim() ?? '',
           receivedAt,
           note: dto.note,
+          payerName: dto.payerName?.trim() || null,
+          periodFrom,
+          periodTo,
           createdById: userId,
         },
       });
+      if (shift) {
+        await tx.cashEntry.create({
+          data: {
+            deskId: shift.deskId,
+            shiftId: shift.id,
+            kind: 'income',
+            amount: dto.amount,
+            direction: directionForInstitution(child.group?.institution.type),
+            paymentId: payment.id,
+            createdById: userId,
+          },
+        });
+      }
       if (dto.allocations?.length) {
         await applyAllocations(tx, payment.id, dto.allocations, userId);
       }
@@ -100,6 +140,8 @@ export class PaymentsService {
       if (!payment) throw new NotFoundException('Payment not found');
       if (payment.voidedAt) throw new BadRequestException('Payment is voided');
 
+      const cash = await this.voidCashEntry(tx, payment, reason, userId);
+
       const data = {
         voidedAt: new Date(),
         voidedById: userId,
@@ -109,8 +151,69 @@ export class PaymentsService {
         where: { paymentId: id, voidedAt: null },
         data,
       });
-      return tx.payment.update({ where: { id }, data });
+      const updated = await tx.payment.update({ where: { id }, data });
+      if (cash) {
+        await this.alerts.create(tx, {
+          deskId: cash.deskId,
+          shiftId: cash.shiftId,
+          entryId: cash.entryId,
+          type: 'payment_void',
+          amount: payment.amount,
+          actorId: userId,
+        });
+      }
+      return updated;
     });
+  }
+
+  private async voidCashEntry(
+    tx: Prisma.TransactionClient,
+    payment: Payment,
+    reason: string,
+    userId: string,
+  ) {
+    const entry = await tx.cashEntry.findUnique({
+      where: { paymentId: payment.id },
+    });
+    if (!entry || entry.voidedAt) return null;
+    await lockDesk(tx, entry.deskId);
+    const entryShift = await tx.cashShift.findUnique({
+      where: { id: entry.shiftId },
+    });
+    if (entryShift && !entryShift.closedAt) {
+      await tx.cashEntry.update({
+        where: { id: entry.id },
+        data: {
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: reason,
+        },
+      });
+      return {
+        deskId: entry.deskId,
+        shiftId: entry.shiftId,
+        entryId: entry.id,
+      };
+    }
+    const open = await this.shifts.lockOpenShift(tx, entry.deskId);
+    const balance = await this.shifts.balance(tx, open);
+    if (payment.amount.gt(balance)) {
+      throw new BadRequestException('Not enough cash');
+    }
+    const correction = await tx.cashEntry.create({
+      data: {
+        deskId: entry.deskId,
+        shiftId: open.id,
+        kind: 'correction',
+        amount: payment.amount,
+        sign: -1,
+        direction: entry.direction,
+        correctsId: entry.id,
+        comment: `Скасування оплати: ${reason}`,
+        createdById: userId,
+      },
+    });
+    return { deskId: entry.deskId, shiftId: open.id, entryId: correction.id };
   }
 
   async voidAllocation(

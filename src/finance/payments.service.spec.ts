@@ -9,6 +9,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CashAlertsService } from '../cash/cash-alerts.service';
+import { CashShiftsService } from '../cash/cash-shifts.service';
 import { PaymentsService } from './payments.service';
 
 const d = (value: string) => new Prisma.Decimal(value);
@@ -16,6 +18,12 @@ const d = (value: string) => new Prisma.Decimal(value);
 const mockPrisma = {
   child: { findUnique: jest.fn(), findFirst: jest.fn() },
   payment: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  cashEntry: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  cashShift: { findUnique: jest.fn() },
   charge: { findMany: jest.fn() },
   allocation: {
     findMany: jest.fn(),
@@ -26,6 +34,9 @@ const mockPrisma = {
   $queryRaw: jest.fn(),
   $transaction: jest.fn(),
 };
+
+const mockShifts = { lockOpenShift: jest.fn(), balance: jest.fn() };
+const mockAlerts = { create: jest.fn() };
 
 const payment = (over: Record<string, unknown> = {}) => ({
   id: 'p1',
@@ -78,6 +89,7 @@ describe('PaymentsService', () => {
       fn(mockPrisma),
     );
     mockPrisma.allocation.findMany.mockResolvedValue([]);
+    mockPrisma.cashEntry.findUnique.mockResolvedValue(null);
     mockPrisma.allocation.create.mockImplementation(({ data }) =>
       Promise.resolve({ id: 'a1', ...data }),
     );
@@ -85,6 +97,8 @@ describe('PaymentsService', () => {
       providers: [
         PaymentsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: CashShiftsService, useValue: mockShifts },
+        { provide: CashAlertsService, useValue: mockAlerts },
       ],
     }).compile();
     service = module.get(PaymentsService);
@@ -268,7 +282,15 @@ describe('PaymentsService', () => {
       reference: 'Receipt 15',
       receivedAt: '2026-10-11',
       category: FinanceCategory.tuition,
+      cashDeskId: 'desk-1',
     };
+
+    beforeEach(() => {
+      mockShifts.lockOpenShift.mockResolvedValue({
+        id: 's1',
+        deskId: 'desk-1',
+      });
+    });
 
     it('creates a confirmed payment without allocations', async () => {
       mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
@@ -287,6 +309,9 @@ describe('PaymentsService', () => {
           reference: 'Receipt 15',
           receivedAt: new Date('2026-10-11'),
           note: undefined,
+          payerName: null,
+          periodFrom: null,
+          periodTo: null,
           createdById: 'u1',
         },
       });
@@ -384,6 +409,154 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('create cash', () => {
+    const cashDto = {
+      amount: '1000.00',
+      method: PaymentMethod.cash,
+      receivedAt: '2026-10-11',
+      cashDeskId: 'desk-1',
+    };
+    const shift = { id: 's1', deskId: 'desk-1' };
+
+    beforeEach(() => {
+      mockPrisma.payment.create.mockResolvedValue(payment());
+      mockShifts.lockOpenShift.mockResolvedValue(shift);
+    });
+
+    it('requires a desk for cash', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await expect(
+        service.create(
+          'child-1',
+          { ...cashDto, cashDeskId: undefined },
+          'u1',
+          fullAdmin,
+        ),
+      ).rejects.toThrow('Cash desk is required');
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses without an open shift and creates nothing', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+      mockShifts.lockOpenShift.mockRejectedValue(
+        new BadRequestException('No open cash shift'),
+      );
+
+      await expect(
+        service.create('child-1', cashDto, 'u1', fullAdmin),
+      ).rejects.toThrow('No open cash shift');
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('records income with school direction for a school_class child', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'child-1',
+        group: { institution: { type: 'school_class' } },
+      });
+
+      await service.create('child-1', cashDto, 'u1', fullAdmin);
+
+      expect(mockShifts.lockOpenShift).toHaveBeenCalledWith(
+        mockPrisma,
+        'desk-1',
+      );
+      expect(mockPrisma.cashEntry.create).toHaveBeenCalledWith({
+        data: {
+          deskId: 'desk-1',
+          shiftId: 's1',
+          kind: 'income',
+          amount: '1000.00',
+          direction: 'school',
+          paymentId: 'p1',
+          createdById: 'u1',
+        },
+      });
+    });
+
+    it('uses shared direction for a child without a group', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({
+        id: 'child-1',
+        group: null,
+      });
+
+      await service.create('child-1', cashDto, 'u1', fullAdmin);
+
+      const [[args]] = mockPrisma.cashEntry.create.mock.calls as [
+        [{ data: { direction: string } }],
+      ];
+      expect(args.data.direction).toBe('shared');
+    });
+
+    it('ignores the desk for card payments', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await service.create(
+        'child-1',
+        { ...cashDto, method: PaymentMethod.card },
+        'u1',
+        fullAdmin,
+      );
+
+      expect(mockShifts.lockOpenShift).not.toHaveBeenCalled();
+      expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('stores trimmed payer name and period', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await service.create(
+        'child-1',
+        {
+          ...cashDto,
+          payerName: '  Ivan  ',
+          periodFrom: '2026-09-01',
+          periodTo: '2026-09-30',
+        },
+        'u1',
+        fullAdmin,
+      );
+
+      const [[args]] = mockPrisma.payment.create.mock.calls as [
+        [{ data: Record<string, unknown> }],
+      ];
+      expect(args.data.payerName).toBe('Ivan');
+      expect(args.data.periodFrom).toEqual(new Date('2026-09-01'));
+      expect(args.data.periodTo).toEqual(new Date('2026-09-30'));
+    });
+
+    it('turns an empty payer name into null', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await service.create(
+        'child-1',
+        { ...cashDto, payerName: '   ' },
+        'u1',
+        fullAdmin,
+      );
+
+      const [[args]] = mockPrisma.payment.create.mock.calls as [
+        [{ data: { payerName: unknown } }],
+      ];
+      expect(args.data.payerName).toBeNull();
+    });
+
+    it('rejects a period that ends before it starts', async () => {
+      mockPrisma.child.findUnique.mockResolvedValue({ id: 'child-1' });
+
+      await expect(
+        service.create(
+          'child-1',
+          { ...cashDto, periodFrom: '2026-09-30', periodTo: '2026-09-01' },
+          'u1',
+          fullAdmin,
+        ),
+      ).rejects.toThrow('Period end is before start');
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('void', () => {
     it('voids the payment and its active allocations', async () => {
       mockPrisma.payment.findUnique.mockResolvedValue(payment());
@@ -406,6 +579,130 @@ describe('PaymentsService', () => {
       expect(mockPrisma.payment.update).toHaveBeenCalledWith({
         where: { id: 'p1' },
         data,
+      });
+    });
+
+    describe('with a cash entry', () => {
+      const entry = (over: Record<string, unknown> = {}) => ({
+        id: 'e1',
+        deskId: 'desk-1',
+        shiftId: 's1',
+        direction: 'school',
+        voidedAt: null,
+        ...over,
+      });
+      const openShift = { id: 's1', deskId: 'desk-1', closedAt: null };
+      const closedShift = { id: 's1', deskId: 'desk-1', closedAt: new Date() };
+
+      beforeEach(() => {
+        mockPrisma.payment.findUnique.mockResolvedValue(payment());
+        mockPrisma.payment.update.mockResolvedValue(
+          payment({ voidedAt: new Date() }),
+        );
+      });
+
+      it('voids the entry when its shift is open', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
+        mockPrisma.cashShift.findUnique.mockResolvedValue(openShift);
+
+        await service.void('p1', 'wrong child', 'u1', fullAdmin);
+
+        expect(mockPrisma.cashEntry.update).toHaveBeenCalledWith({
+          where: { id: 'e1' },
+          data: {
+            voidedAt: expect.any(Date) as Date,
+            voidedById: 'u1',
+            voidReason: 'wrong child',
+          },
+        });
+        expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+        expect(mockAlerts.create).toHaveBeenCalledWith(mockPrisma, {
+          deskId: 'desk-1',
+          shiftId: 's1',
+          entryId: 'e1',
+          type: 'payment_void',
+          amount: d('1000.00'),
+          actorId: 'u1',
+        });
+        expect(mockPrisma.payment.update).toHaveBeenCalled();
+      });
+
+      it('creates a negative correction in the open shift when the entry shift is closed', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
+        mockPrisma.cashShift.findUnique.mockResolvedValue(closedShift);
+        mockShifts.lockOpenShift.mockResolvedValue({ id: 's2' });
+        mockShifts.balance.mockResolvedValue(d('5000.00'));
+        mockPrisma.cashEntry.create.mockResolvedValue({ id: 'e2' });
+
+        await service.void('p1', 'wrong child', 'u1', fullAdmin);
+
+        expect(mockShifts.lockOpenShift).toHaveBeenCalledWith(
+          mockPrisma,
+          'desk-1',
+        );
+        expect(mockPrisma.cashEntry.create).toHaveBeenCalledWith({
+          data: {
+            deskId: 'desk-1',
+            shiftId: 's2',
+            kind: 'correction',
+            amount: d('1000.00'),
+            sign: -1,
+            direction: 'school',
+            correctsId: 'e1',
+            comment: 'Скасування оплати: wrong child',
+            createdById: 'u1',
+          },
+        });
+        expect(mockPrisma.cashEntry.update).not.toHaveBeenCalled();
+        expect(mockAlerts.create).toHaveBeenCalledWith(mockPrisma, {
+          deskId: 'desk-1',
+          shiftId: 's2',
+          entryId: 'e2',
+          type: 'payment_void',
+          amount: d('1000.00'),
+          actorId: 'u1',
+        });
+      });
+
+      it('refuses when the shift is closed and no shift is open', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
+        mockPrisma.cashShift.findUnique.mockResolvedValue(closedShift);
+        mockShifts.lockOpenShift.mockRejectedValue(
+          new BadRequestException('No open cash shift'),
+        );
+
+        await expect(service.void('p1', 'x', 'u1', fullAdmin)).rejects.toThrow(
+          'No open cash shift',
+        );
+        expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+        expect(mockPrisma.allocation.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses the correction when the open shift has not enough cash', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
+        mockPrisma.cashShift.findUnique.mockResolvedValue(closedShift);
+        mockShifts.lockOpenShift.mockResolvedValue({ id: 's2' });
+        mockShifts.balance.mockResolvedValue(d('999.99'));
+
+        await expect(service.void('p1', 'x', 'u1', fullAdmin)).rejects.toThrow(
+          'Not enough cash',
+        );
+        expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+        expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+      });
+
+      it('leaves the cash side alone when the entry is already voided', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(
+          entry({ voidedAt: new Date() }),
+        );
+
+        await service.void('p1', 'x', 'u1', fullAdmin);
+
+        expect(mockPrisma.cashEntry.update).not.toHaveBeenCalled();
+        expect(mockPrisma.cashEntry.create).not.toHaveBeenCalled();
+        expect(mockAlerts.create).not.toHaveBeenCalled();
+        expect(mockPrisma.payment.update).toHaveBeenCalled();
       });
     });
 

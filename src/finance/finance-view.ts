@@ -10,6 +10,7 @@ import {
   sumMoney,
   summarize,
 } from './finance-calc';
+import { isoDay } from '../tariffs/dates';
 
 const personSelect = {
   select: { id: true, firstName: true, lastName: true },
@@ -149,6 +150,9 @@ export const toPaymentView = (payment: LoadedPayment) => ({
   reference: payment.reference,
   receivedAt: payment.receivedAt,
   note: payment.note,
+  payerName: payment.payerName,
+  periodFrom: payment.periodFrom ? isoDay(payment.periodFrom) : null,
+  periodTo: payment.periodTo ? isoDay(payment.periodTo) : null,
   createdAt: payment.createdAt,
   createdBy: payment.createdBy,
   voidedAt: payment.voidedAt,

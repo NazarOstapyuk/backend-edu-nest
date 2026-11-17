@@ -7,6 +7,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   ValidateNested,
@@ -38,6 +39,23 @@ export class CreatePaymentDto {
   @MaxLength(1000)
   @IsOptional()
   note?: string;
+
+  @IsUUID()
+  @IsOptional()
+  cashDeskId?: string;
+
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  payerName?: string;
+
+  @IsDateString()
+  @IsOptional()
+  periodFrom?: string;
+
+  @IsDateString()
+  @IsOptional()
+  periodTo?: string;
 
   @IsArray()
   @ValidateNested({ each: true })
