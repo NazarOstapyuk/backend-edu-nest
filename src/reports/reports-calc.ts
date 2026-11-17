@@ -86,6 +86,10 @@ export const CATEGORY_LABELS: Record<FinanceCategory, string> = {
   adaptation: 'Адаптація',
   extra_classes: 'Додаткові заняття',
   meals: 'Харчування',
+  individual_lessons: 'Індивідуальні заняття',
+  deposit: 'Гарантійні внески',
+  events: 'Екскурсії та заходи',
+  other: 'Інші платежі',
 };
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {

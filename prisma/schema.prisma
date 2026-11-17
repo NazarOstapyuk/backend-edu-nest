@@ -107,6 +107,13 @@ model User {
   extraHoursTeacher        PayrollExtraHours[]    @relation("PayrollExtraHoursTeacher")
   extraHoursCreated        PayrollExtraHours[]    @relation("PayrollExtraHoursCreatedBy")
   extraHoursVoided         PayrollExtraHours[]    @relation("PayrollExtraHoursVoidedBy")
+  cashShiftsOpened         CashShift[]            @relation("CashShiftOpenedBy")
+  cashShiftsClosed         CashShift[]            @relation("CashShiftClosedBy")
+  cashEntriesCreated       CashEntry[]            @relation("CashEntryCreatedBy")
+  cashEntriesVoided        CashEntry[]            @relation("CashEntryVoidedBy")
+  cashEntriesReceived      CashEntry[]            @relation("CashEntryRecipient")
+  cashAlertsAcknowledged   CashAlert[]            @relation("CashAlertAcknowledgedBy")
+  cashAlertsCaused         CashAlert[]            @relation("CashAlertActor")
   teacherAbsences          TeacherAbsence[]       @relation("TeacherAbsenceTeacher")
   teacherAbsencesCreated   TeacherAbsence[]       @relation("TeacherAbsenceCreatedBy")
   teacherAbsencesVoided    TeacherAbsence[]       @relation("TeacherAbsenceVoidedBy")
@@ -232,6 +239,10 @@ enum FinanceCategory {
   adaptation
   extra_classes
   meals
+  individual_lessons
+  deposit
+  events
+  other
 }
 
 enum ChargeSource {
@@ -301,6 +312,9 @@ model Payment {
   receivedAt DateTime
   note       String?
   externalId String?          @unique
+  payerName  String?
+  periodFrom DateTime?        @db.Date
+  periodTo   DateTime?        @db.Date
 
   createdById String?
   createdBy   User?    @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -313,6 +327,7 @@ model Payment {
 
   allocations Allocation[]
   invoice     PaymentInvoice?
+  cashEntry   CashEntry?
 
   @@index([childId])
 }
@@ -1321,6 +1336,8 @@ enum PermissionArea {
   backups
   settings
   audit
+  cash
+  cash_control
 }
 
 enum PermissionLevel {
@@ -1727,4 +1744,136 @@ model StaffTaskAssignee {
 
   @@unique([taskId, userId])
   @@index([userId])
+}
+
+enum CashEntryKind {
+  income
+  expense
+  transfer
+  correction
+}
+
+enum CashDirection {
+  kindergarten
+  school
+  shared
+}
+
+enum CashExpenseCategory {
+  household
+  materials
+  supplier
+  refund
+  other
+}
+
+enum CashTransferStatus {
+  pending
+  confirmed
+  disputed
+}
+
+enum CashAlertType {
+  shift_closed
+  discrepancy
+  opening_discrepancy
+  large_withdrawal
+  payment_void
+  correction
+  transfer_disputed
+}
+
+model CashDesk {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  isActive    Boolean  @default(true)
+  largeAmount Decimal  @default(5000.00) @db.Decimal(10, 2)
+  closeBy     String   @default("20:00")
+  createdAt   DateTime @default(now())
+
+  shifts  CashShift[]
+  entries CashEntry[]
+  alerts  CashAlert[]
+}
+
+model CashShift {
+  id              String   @id @default(uuid())
+  deskId          String
+  desk            CashDesk @relation(fields: [deskId], references: [id], onDelete: Restrict)
+  openedById      String
+  openedBy        User     @relation("CashShiftOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  openedAt        DateTime @default(now())
+  openingExpected Decimal  @db.Decimal(10, 2)
+  openingCounted  Decimal  @db.Decimal(10, 2)
+  openingNote     String?
+
+  closedAt        DateTime?
+  closedById      String?
+  closedBy        User?     @relation("CashShiftClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  closingExpected Decimal?  @db.Decimal(10, 2)
+  closingCounted  Decimal?  @db.Decimal(10, 2)
+  denominations   Json?
+  closingNote     String?
+  totals          Json?
+
+  entries CashEntry[]
+  alerts  CashAlert[]
+
+  @@index([deskId, openedAt])
+}
+
+model CashEntry {
+  id              String               @id @default(uuid())
+  deskId          String
+  desk            CashDesk             @relation(fields: [deskId], references: [id], onDelete: Restrict)
+  shiftId         String
+  shift           CashShift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  kind            CashEntryKind
+  amount          Decimal              @db.Decimal(10, 2)
+  direction       CashDirection
+  expenseCategory CashExpenseCategory?
+  paymentId       String?              @unique
+  payment         Payment?             @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  recipientId     String?
+  recipient       User?                @relation("CashEntryRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  transferStatus  CashTransferStatus?
+  transferNote    String?
+  confirmedAt     DateTime?
+  sign            Int                  @default(1)
+  correctsId      String?
+  comment         String?
+
+  createdById String
+  createdBy   User     @relation("CashEntryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+
+  voidedAt   DateTime?
+  voidedById String?
+  voidedBy   User?     @relation("CashEntryVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason String?
+
+  alerts CashAlert[]
+
+  @@index([shiftId])
+  @@index([recipientId, transferStatus])
+}
+
+model CashAlert {
+  id               String        @id @default(uuid())
+  deskId           String
+  desk             CashDesk      @relation(fields: [deskId], references: [id], onDelete: Restrict)
+  shiftId          String?
+  shift            CashShift?    @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  entryId          String?
+  entry            CashEntry?    @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  type             CashAlertType
+  amount           Decimal?      @db.Decimal(10, 2)
+  actorId          String?
+  actor            User?         @relation("CashAlertActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt        DateTime      @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  acknowledgedBy   User?         @relation("CashAlertAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: Restrict)
+
+  @@index([acknowledgedAt])
 }

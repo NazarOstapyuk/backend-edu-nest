@@ -101,12 +101,16 @@ describe('summarize', () => {
     });
   });
 
-  it('returns all four categories in enum order', () => {
+  it('returns all categories in enum order', () => {
     expect(summarize([], []).categories.map((c) => c.category)).toEqual([
       FinanceCategory.tuition,
       FinanceCategory.adaptation,
       FinanceCategory.extra_classes,
       FinanceCategory.meals,
+      FinanceCategory.individual_lessons,
+      FinanceCategory.deposit,
+      FinanceCategory.events,
+      FinanceCategory.other,
     ]);
   });
 

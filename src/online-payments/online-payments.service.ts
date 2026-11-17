@@ -62,6 +62,10 @@ const CATEGORY_LABEL: Record<FinanceCategory, string> = {
   adaptation: 'Адаптація',
   extra_classes: 'Додаткові заняття',
   meals: 'Харчування',
+  individual_lessons: 'Індивідуальні заняття',
+  deposit: 'Гарантійні внески',
+  events: 'Екскурсії та заходи',
+  other: 'Інші платежі',
 };
 
 const requestInclude = {

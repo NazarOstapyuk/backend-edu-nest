@@ -69,8 +69,8 @@ describe('levels and permissions', () => {
   });
 
   it('builds full maps and maps rows', () => {
-    expect(ALL_AREAS).toHaveLength(12);
-    expect(Object.keys(allPermissions(PermissionLevel.view))).toHaveLength(12);
+    expect(ALL_AREAS).toHaveLength(14);
+    expect(Object.keys(allPermissions(PermissionLevel.view))).toHaveLength(14);
     expect(
       toPermissionMap([
         { area: PermissionArea.meals, level: PermissionLevel.edit },
