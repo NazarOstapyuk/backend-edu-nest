@@ -15,7 +15,7 @@ import {
   packageRemaining,
   packageState,
 } from '../classes/consumption';
-import { kyivToday } from '../tariffs/dates';
+import { isoDay, kyivToday } from '../tariffs/dates';
 import { childMoney, isOverdue } from './cabinet-calc';
 
 const moneyCharge = {
@@ -276,6 +276,9 @@ export class ParentCabinetService {
           method: true,
           status: true,
           receivedAt: true,
+          payerName: true,
+          periodFrom: true,
+          periodTo: true,
           voidedAt: true,
           allocations: {
             select: {
@@ -315,6 +318,9 @@ export class ParentCabinetService {
         amount: formatMoney(p.amount),
         method: p.method,
         category: p.category,
+        payerName: p.payerName,
+        periodFrom: p.periodFrom ? isoDay(p.periodFrom) : null,
+        periodTo: p.periodTo ? isoDay(p.periodTo) : null,
         allocated: formatMoney(activeAllocated(p.allocations)),
         free: formatMoney(paymentFree(p)),
         allocations: p.allocations

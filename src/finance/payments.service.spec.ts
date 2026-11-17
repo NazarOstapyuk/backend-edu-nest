@@ -604,6 +604,7 @@ describe('PaymentsService', () => {
       it('voids the entry when its shift is open', async () => {
         mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
         mockPrisma.cashShift.findUnique.mockResolvedValue(openShift);
+        mockShifts.balance.mockResolvedValue(d('1000.00'));
 
         await service.void('p1', 'wrong child', 'u1', fullAdmin);
 
@@ -625,6 +626,20 @@ describe('PaymentsService', () => {
           actorId: 'u1',
         });
         expect(mockPrisma.payment.update).toHaveBeenCalled();
+      });
+
+      it('refuses to void an entry in an open shift when cash would go negative', async () => {
+        mockPrisma.cashEntry.findUnique.mockResolvedValue(entry());
+        mockPrisma.cashShift.findUnique.mockResolvedValue(openShift);
+        mockShifts.balance.mockResolvedValue(d('999.99'));
+
+        await expect(service.void('p1', 'x', 'u1', fullAdmin)).rejects.toThrow(
+          'Not enough cash',
+        );
+        expect(mockShifts.balance).toHaveBeenCalledWith(mockPrisma, openShift);
+        expect(mockPrisma.cashEntry.update).not.toHaveBeenCalled();
+        expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+        expect(mockPrisma.allocation.updateMany).not.toHaveBeenCalled();
       });
 
       it('creates a negative correction in the open shift when the entry shift is closed', async () => {

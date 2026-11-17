@@ -194,6 +194,9 @@ describe('ParentCabinetService', () => {
         method: PaymentMethod.cash,
         status: PaymentStatus.confirmed,
         receivedAt: new Date('2026-09-05T10:00:00Z'),
+        payerName: 'Ivan',
+        periodFrom: day('2026-09-01'),
+        periodTo: null,
         voidedAt: null,
         allocations: [
           {
@@ -237,6 +240,9 @@ describe('ParentCabinetService', () => {
       amount: '400.00',
       method: PaymentMethod.cash,
       category: FinanceCategory.tuition,
+      payerName: 'Ivan',
+      periodFrom: '2026-09-01',
+      periodTo: null,
       allocated: '400.00',
       free: '0.00',
       allocations: [

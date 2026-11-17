@@ -181,6 +181,10 @@ export class PaymentsService {
       where: { id: entry.shiftId },
     });
     if (entryShift && !entryShift.closedAt) {
+      const shiftBalance = await this.shifts.balance(tx, entryShift);
+      if (payment.amount.gt(shiftBalance)) {
+        throw new BadRequestException('Not enough cash');
+      }
       await tx.cashEntry.update({
         where: { id: entry.id },
         data: {
