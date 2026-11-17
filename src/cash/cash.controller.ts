@@ -1,0 +1,93 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { PermissionArea, PermissionLevel } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import {
+  Permission,
+  PermissionAny,
+} from '../common/decorators/permission.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user.type';
+import { CashDesksService } from './cash-desks.service';
+import { CashShiftsService } from './cash-shifts.service';
+import { CountDto } from './dto/count.dto';
+import { CreateDeskDto } from './dto/create-desk.dto';
+import { ShiftsQueryDto } from './dto/shifts-query.dto';
+import { UpdateDeskDto } from './dto/update-desk.dto';
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('cash')
+export class CashController {
+  constructor(
+    private desks: CashDesksService,
+    private shifts: CashShiftsService,
+  ) {}
+
+  @PermissionAny(
+    [PermissionArea.cash, PermissionArea.cash_control, PermissionArea.finance],
+    PermissionLevel.view,
+  )
+  @Get('desks')
+  listDesks(@Query('all') all?: string) {
+    return this.desks.list(all === '1');
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.edit)
+  @Post('desks')
+  createDesk(@Body() dto: CreateDeskDto) {
+    return this.desks.create(dto);
+  }
+
+  @Permission(PermissionArea.cash_control, PermissionLevel.edit)
+  @Patch('desks/:id')
+  updateDesk(@Param('id') id: string, @Body() dto: UpdateDeskDto) {
+    return this.desks.update(id, dto);
+  }
+
+  @Permission(PermissionArea.cash, PermissionLevel.edit)
+  @Post('desks/:id/shifts')
+  openShift(
+    @Param('id') id: string,
+    @Body() dto: CountDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.shifts.open(id, dto, user.id);
+  }
+
+  @Permission(PermissionArea.cash, PermissionLevel.edit)
+  @Post('shifts/:id/close')
+  closeShift(
+    @Param('id') id: string,
+    @Body() dto: CountDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.shifts.close(id, dto, user.id);
+  }
+
+  @PermissionAny(
+    [PermissionArea.cash, PermissionArea.cash_control],
+    PermissionLevel.view,
+  )
+  @Get('shifts')
+  listShifts(@Query() query: ShiftsQueryDto) {
+    return this.shifts.list(query);
+  }
+
+  @PermissionAny(
+    [PermissionArea.cash, PermissionArea.cash_control],
+    PermissionLevel.view,
+  )
+  @Get('shifts/:id')
+  getShift(@Param('id') id: string) {
+    return this.shifts.report(id);
+  }
+}
