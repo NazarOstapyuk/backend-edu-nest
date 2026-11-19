@@ -65,6 +65,40 @@ describe('FinanceReportsService', () => {
       );
     });
 
+    it('narrows by a single payment method', async () => {
+      await service.payments(
+        { from: '2026-10-01', to: '2026-10-31', method: 'cash' },
+        user(AccessScope.all),
+      );
+      expect(prisma.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            method: { in: [PaymentMethod.cash] },
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('narrows cashless to card, bank transfer and online', async () => {
+      await service.payments(
+        { from: '2026-10-01', to: '2026-10-31', method: 'cashless' },
+        user(AccessScope.all),
+      );
+      expect(prisma.payment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            method: {
+              in: [
+                PaymentMethod.card,
+                PaymentMethod.bank_transfer,
+                PaymentMethod.online,
+              ],
+            },
+          }) as unknown,
+        }),
+      );
+    });
+
     it('maps rows into the report', async () => {
       prisma.payment.findMany.mockResolvedValue([
         {

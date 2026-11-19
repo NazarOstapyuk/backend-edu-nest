@@ -5,6 +5,10 @@ import {
   GroupKind,
 } from '@prisma/client';
 import { IsEnum, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  PAYMENT_METHOD_FILTERS,
+  type PaymentMethodFilter,
+} from '../reports-calc';
 
 export class ReportQueryDto {
   @IsOptional()
@@ -38,6 +42,10 @@ export class ReportQueryDto {
   @IsOptional()
   @IsUUID('4')
   tariffId?: string;
+
+  @IsOptional()
+  @IsIn(PAYMENT_METHOD_FILTERS)
+  method?: PaymentMethodFilter;
 
   @IsOptional()
   @IsUUID('4')

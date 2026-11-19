@@ -14,6 +14,20 @@ describe('ReportQueryDto', () => {
     const dto = plainToInstance(ReportQueryDto, { institutionId: 'x' });
     expect(await validate(dto, { whitelist: true })).toHaveLength(1);
   });
+  it('accepts known payment method filters and rejects other values', async () => {
+    for (const method of [
+      'cash',
+      'cashless',
+      'card',
+      'bank_transfer',
+      'online',
+    ]) {
+      const ok = plainToInstance(ReportQueryDto, { method });
+      expect(await validate(ok, { whitelist: true })).toEqual([]);
+    }
+    const bad = plainToInstance(ReportQueryDto, { method: 'cheque' });
+    expect(await validate(bad, { whitelist: true })).toHaveLength(1);
+  });
   it('accepts a uuid tariffId and rejects other values', async () => {
     const id = '0b7e6a52-6f4d-4c1b-8d3e-2f6c1a9b7e10';
     const ok = plainToInstance(ReportQueryDto, { tariffId: id });

@@ -19,6 +19,7 @@ import {
   chargeTariff,
   chargesReport,
   debtsReport,
+  paymentMethodsFor,
   paymentsReport,
 } from './reports-calc';
 import { cashReport } from './cash-report-calc';
@@ -50,6 +51,7 @@ export class FinanceReportsService {
   ): Promise<Report> {
     const period = reportPeriod(query.from, query.to);
     const filter = await resolveFilter(this.prisma, user, query);
+    const methods = paymentMethodsFor(query.method);
     const rows = await this.prisma.payment.findMany({
       where: {
         voidedAt: null,
@@ -59,6 +61,7 @@ export class FinanceReportsService {
           lt: kyivDayStart(isoDay(addDays(period.to, 1))),
         },
         child: childFilterWhere(filter, query.childId),
+        ...(methods ? { method: { in: methods } } : {}),
       },
       select: {
         receivedAt: true,

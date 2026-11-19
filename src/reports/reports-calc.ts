@@ -48,6 +48,29 @@ export interface PaymentRow {
   note: string | null;
 }
 
+export const PAYMENT_METHOD_FILTERS = [
+  'cash',
+  'cashless',
+  'card',
+  'bank_transfer',
+  'online',
+] as const;
+
+export type PaymentMethodFilter = (typeof PAYMENT_METHOD_FILTERS)[number];
+
+export function paymentMethodsFor(
+  filter: PaymentMethodFilter | undefined,
+): PaymentMethod[] | null {
+  if (!filter) return null;
+  if (filter === 'cashless')
+    return [
+      PaymentMethod.card,
+      PaymentMethod.bank_transfer,
+      PaymentMethod.online,
+    ];
+  return [filter];
+}
+
 export interface TariffRef {
   id: string;
   name: string;
