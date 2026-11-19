@@ -54,6 +54,6 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.logout(user.id, res, requestMeta(req));
+    return this.authService.logout(user.id, req, res, requestMeta(req));
   }
 }

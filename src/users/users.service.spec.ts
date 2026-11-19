@@ -19,6 +19,7 @@ import { openPassword, sealPassword } from './password-vault';
 
 const mockPrisma = {
   userPasswordCopy: { upsert: jest.fn() },
+  authSession: { deleteMany: jest.fn() },
   user: {
     findUnique: jest.fn(),
     create: jest.fn(),
@@ -637,11 +638,29 @@ describe('UsersService', () => {
       await service.update('p1', { password: 'newpass1' }, adminActor);
 
       const data = dataOf(mockPrisma.user.update);
-      expect(data).toMatchObject({
-        mustChangePassword: true,
-        refreshToken: null,
-      });
+      expect(data).toMatchObject({ mustChangePassword: true });
       expect(typeof data.password).toBe('string');
+      expect(mockPrisma.authSession.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'p1' },
+      });
+    });
+
+    it('drops every session of a deactivated user', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+
+      await service.update('p1', { isActive: false }, adminActor);
+
+      expect(mockPrisma.authSession.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'p1' },
+      });
+    });
+
+    it('keeps sessions on an ordinary edit', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(parent);
+
+      await service.update('p1', { firstName: 'Olena' }, adminActor);
+
+      expect(mockPrisma.authSession.deleteMany).not.toHaveBeenCalled();
     });
 
     it('refuses to clear the phone of a parent', async () => {

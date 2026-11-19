@@ -5,31 +5,98 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
-import { AuthService } from './auth.service';
+import {
+  AuthService,
+  REFRESH_GRACE_MS,
+  hashToken,
+  sessionTokenState,
+} from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+
+type Session = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  previousTokenHash: string | null;
+  rotatedAt: Date | null;
+  expiresAt: Date;
+  createdAt: Date;
+  lastUsedAt: Date;
+  userAgent: string | null;
+};
+
+type SessionWhere = {
+  id?: string | { not: string };
+  userId?: string;
+  tokenHash?: string;
+  expiresAt?: { lte: Date };
+};
+
+const sessions = new Map<string, Session>();
+
+const matches = (s: Session, where: SessionWhere) => {
+  if (typeof where.id === 'string' && s.id !== where.id) return false;
+  if (typeof where.id === 'object' && s.id === where.id.not) return false;
+  if (where.userId !== undefined && s.userId !== where.userId) return false;
+  if (where.tokenHash !== undefined && s.tokenHash !== where.tokenHash)
+    return false;
+  if (where.expiresAt && s.expiresAt.getTime() > where.expiresAt.lte.getTime())
+    return false;
+  return true;
+};
 
 const mockPrisma = {
   user: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
+  },
+  userPasswordCopy: { upsert: jest.fn() },
+  authSession: {
+    create: jest.fn(({ data }: { data: Partial<Session> }) => {
+      const row = {
+        previousTokenHash: null,
+        rotatedAt: null,
+        ...data,
+      } as Session;
+      sessions.set(row.id, row);
+      return Promise.resolve(row);
+    }),
+    findUnique: jest.fn(({ where }: { where: { id: string } }) =>
+      Promise.resolve(sessions.get(where.id) ?? null),
+    ),
+    updateMany: jest.fn(
+      ({ where, data }: { where: SessionWhere; data: Partial<Session> }) => {
+        let count = 0;
+        for (const s of sessions.values()) {
+          if (!matches(s, where)) continue;
+          Object.assign(s, data);
+          count++;
+        }
+        return Promise.resolve({ count });
+      },
+    ),
+    deleteMany: jest.fn(({ where }: { where: SessionWhere }) => {
+      let count = 0;
+      for (const s of [...sessions.values()]) {
+        if (!matches(s, where)) continue;
+        sessions.delete(s.id);
+        count++;
+      }
+      return Promise.resolve({ count });
+    }),
   },
 };
 
-const mockJwt = {
-  signAsync: jest.fn().mockResolvedValue('signed-token'),
-  verify: jest.fn(),
+const config: Record<string, string> = {
+  JWT_SECRET: 'secret',
+  JWT_ACCESS_EXPIRES: '1h',
+  JWT_REFRESH_EXPIRES: '60d',
 };
 
 const mockConfig = {
-  get: jest.fn((key: string) => {
-    const map: Record<string, string> = {
-      JWT_SECRET: 'secret',
-      JWT_ACCESS_EXPIRES: '15m',
-      JWT_REFRESH_EXPIRES: '30d',
-    };
-    return map[key];
-  }),
+  get: jest.fn((key: string) => config[key]),
 };
 
 const mockAudit = {
@@ -43,16 +110,31 @@ const mockRes = {
   clearCookie: jest.fn(),
 };
 
+const res = mockRes as unknown as Response;
+
+const reqWith = (token?: string) =>
+  ({ cookies: token ? { refreshToken: token } : {} }) as unknown as Request;
+
+const lastCookie = (name: string) => {
+  const calls = mockRes.cookie.mock.calls.filter(
+    (call: unknown[]) => call[0] === name,
+  );
+  return calls[calls.length - 1] as [string, string, { maxAge: number }];
+};
+
 describe('AuthService', () => {
   let service: AuthService;
+  let jwt: JwtService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    sessions.clear();
+    jwt = new JwtService({ secret: 'secret' });
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: JwtService, useValue: mockJwt },
+        { provide: JwtService, useValue: jwt },
         { provide: ConfigService, useValue: mockConfig },
         { provide: AuditService, useValue: mockAudit },
       ],
@@ -63,9 +145,9 @@ describe('AuthService', () => {
   describe('login', () => {
     it('throws UnauthorizedException when user not found', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(
-        service.login('x', 'y', mockRes as unknown as Response, meta),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login('x', 'y', res, meta)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('throws UnauthorizedException when user is inactive', async () => {
@@ -75,54 +157,93 @@ describe('AuthService', () => {
         isActive: false,
         role: 'admin',
       });
-      await expect(
-        service.login('x', 'pass', mockRes as unknown as Response, meta),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login('x', 'pass', res, meta)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('throws UnauthorizedException when password does not match', async () => {
-      const hashed = await bcrypt.hash('correct', 10);
+      const hashed = await bcrypt.hash('correct', 4);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: '1',
         password: hashed,
         isActive: true,
         role: 'admin',
       });
-      await expect(
-        service.login('x', 'wrong', mockRes as unknown as Response, meta),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login('x', 'wrong', res, meta)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
-    it('sets two cookies on successful login', async () => {
-      const hashed = await bcrypt.hash('pass', 10);
+    it('sets two cookies and opens a session on successful login', async () => {
+      const hashed = await bcrypt.hash('pass', 4);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'uid',
         password: hashed,
         isActive: true,
         role: 'admin',
       });
-      mockPrisma.user.update.mockResolvedValue({});
-      await service.login('x', 'pass', mockRes as unknown as Response, meta);
+      await service.login('x', 'pass', res, meta);
       expect(mockRes.cookie).toHaveBeenCalledTimes(2);
-      expect(mockRes.cookie).toHaveBeenCalledWith(
-        'accessToken',
-        expect.any(String),
-        expect.any(Object),
-      );
-      expect(mockRes.cookie).toHaveBeenCalledWith(
-        'refreshToken',
-        expect.any(String),
-        expect.any(Object),
-      );
+      const [, refresh] = lastCookie('refreshToken');
+      const payload = jwt.decode<{ sub: string; sid: string }>(refresh);
+      expect(payload.sub).toBe('uid');
+      const session = sessions.get(payload.sid);
+      expect(session).toMatchObject({
+        userId: 'uid',
+        tokenHash: hashToken(refresh),
+        userAgent: 'jest',
+      });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('derives cookie lifetimes from the configured expiries', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'uid',
+        password: await bcrypt.hash('pass', 4),
+        isActive: true,
+        role: 'admin',
+      });
+      await service.login('x', 'pass', res, meta);
+      const hour = 60 * 60 * 1000;
+      const accessAge = lastCookie('accessToken')[2].maxAge;
+      const refreshAge = lastCookie('refreshToken')[2].maxAge;
+      expect(accessAge).toBeGreaterThan(hour - 5000);
+      expect(accessAge).toBeLessThanOrEqual(hour);
+      expect(refreshAge).toBeGreaterThan(60 * 24 * hour - 5000);
+      expect(refreshAge).toBeLessThanOrEqual(60 * 24 * hour);
+    });
+
+    it('drops expired sessions of the user on login', async () => {
+      sessions.set('old', {
+        id: 'old',
+        userId: 'uid',
+        tokenHash: 'x',
+        previousTokenHash: null,
+        rotatedAt: null,
+        expiresAt: new Date(Date.now() - 1000),
+        createdAt: new Date(),
+        lastUsedAt: new Date(),
+        userAgent: null,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'uid',
+        password: await bcrypt.hash('pass', 4),
+        isActive: true,
+        role: 'admin',
+      });
+      await service.login('x', 'pass', res, meta);
+      expect(sessions.has('old')).toBe(false);
+      expect(sessions.size).toBe(1);
     });
   });
 
   describe('login audit', () => {
     it('records an unknown login without a user id', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(
-        service.login('ghost', 'y', mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid credentials');
+      await expect(service.login('ghost', 'y', res, meta)).rejects.toThrow(
+        'Invalid credentials',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith({
         type: 'login_failed',
         reason: 'invalid_credentials',
@@ -140,9 +261,9 @@ describe('AuthService', () => {
         isActive: false,
         role: 'admin',
       });
-      await expect(
-        service.login('off', 'pass', mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Account is disabled');
+      await expect(service.login('off', 'pass', res, meta)).rejects.toThrow(
+        'Account is disabled',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith({
         type: 'login_failed',
         reason: 'account_disabled',
@@ -160,9 +281,9 @@ describe('AuthService', () => {
         isActive: true,
         role: 'admin',
       });
-      await expect(
-        service.login('known', 'wrong', mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid credentials');
+      await expect(service.login('known', 'wrong', res, meta)).rejects.toThrow(
+        'Invalid credentials',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith({
         type: 'login_failed',
         reason: 'invalid_credentials',
@@ -180,8 +301,7 @@ describe('AuthService', () => {
         isActive: true,
         role: 'admin',
       });
-      mockPrisma.user.update.mockResolvedValue({});
-      await service.login('ok', 'pass', mockRes as unknown as Response, meta);
+      await service.login('ok', 'pass', res, meta);
       expect(mockAudit.recordAuth).toHaveBeenCalledTimes(1);
       expect(mockAudit.recordAuth).toHaveBeenCalledWith({
         type: 'login_success',
@@ -194,6 +314,236 @@ describe('AuthService', () => {
     });
   });
 
+  describe('sessions', () => {
+    const activeUser = {
+      id: 'u1',
+      login: 'admin',
+      role: 'admin',
+      isActive: true,
+      mustChangePassword: false,
+    };
+
+    beforeEach(async () => {
+      activeUser.isActive = true;
+      mockPrisma.user.findUnique.mockImplementation(
+        ({ where }: { where: { id?: string; login?: string } }) =>
+          Promise.resolve(
+            where.id === 'u1' || where.login === 'admin'
+              ? { ...activeUser, password: passwordHash }
+              : null,
+          ),
+      );
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({ login: 'admin' });
+      passwordHash = passwordHash || (await bcrypt.hash('pass', 4));
+    });
+
+    let passwordHash = '';
+
+    const loginDevice = async () => {
+      await service.login('admin', 'pass', res, meta);
+      return lastCookie('refreshToken')[1];
+    };
+
+    const refresh = async (token: string) => {
+      await service.refresh(reqWith(token), res, meta);
+      return lastCookie('refreshToken')[1];
+    };
+
+    const sidOf = (token: string) => jwt.decode<{ sid: string }>(token).sid;
+
+    it('keeps several devices logged in independently', async () => {
+      const phone = await loginDevice();
+      const laptop = await loginDevice();
+      expect(sidOf(phone)).not.toBe(sidOf(laptop));
+
+      const phone2 = await refresh(phone);
+      const laptop2 = await refresh(laptop);
+      await expect(refresh(phone2)).resolves.toEqual(expect.any(String));
+      await expect(refresh(laptop2)).resolves.toEqual(expect.any(String));
+      expect(sessions.size).toBe(2);
+    });
+
+    it('rotates the refresh token and extends the session', async () => {
+      const first = await loginDevice();
+      const session = sessions.get(sidOf(first))!;
+      session.expiresAt = new Date(Date.now() + 60_000);
+
+      const second = await refresh(first);
+
+      expect(second).not.toBe(first);
+      expect(sidOf(second)).toBe(sidOf(first));
+      expect(session.tokenHash).toBe(hashToken(second));
+      expect(session.previousTokenHash).toBe(hashToken(first));
+      expect(session.rotatedAt).toBeInstanceOf(Date);
+      expect(session.expiresAt.getTime()).toBeGreaterThan(
+        Date.now() + 59 * 24 * 60 * 60 * 1000,
+      );
+      expect(mockRes.cookie).toHaveBeenCalledWith(
+        'accessToken',
+        expect.any(String),
+        expect.any(Object),
+      );
+    });
+
+    it('accepts the previous token within the grace window', async () => {
+      const first = await loginDevice();
+      const second = await refresh(first);
+
+      const third = await refresh(first);
+
+      const session = sessions.get(sidOf(first))!;
+      expect(session.tokenHash).toBe(hashToken(third));
+      expect(session.previousTokenHash).toBe(hashToken(second));
+      await expect(refresh(second)).resolves.toEqual(expect.any(String));
+    });
+
+    it('rejects the previous token after the grace window', async () => {
+      const first = await loginDevice();
+      await refresh(first);
+      const session = sessions.get(sidOf(first))!;
+      session.rotatedAt = new Date(Date.now() - REFRESH_GRACE_MS - 1000);
+
+      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+      expect(mockAudit.recordAuth).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'refresh_failed', userId: 'u1' }),
+      );
+    });
+
+    it('rejects a token two rotations old even within the window', async () => {
+      const first = await loginDevice();
+      const second = await refresh(first);
+      await refresh(second);
+
+      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('retries once when another request rotated concurrently', async () => {
+      const first = await loginDevice();
+      const session = sessions.get(sidOf(first))!;
+      const original =
+        mockPrisma.authSession.updateMany.getMockImplementation()!;
+      mockPrisma.authSession.updateMany.mockImplementationOnce((args) => {
+        session.previousTokenHash = session.tokenHash;
+        session.tokenHash = 'rotated-elsewhere';
+        session.rotatedAt = new Date();
+        return original(args);
+      });
+
+      const next = await refresh(first);
+
+      expect(session.tokenHash).toBe(hashToken(next));
+      expect(session.previousTokenHash).toBe('rotated-elsewhere');
+    });
+
+    it('rejects and deletes an expired session', async () => {
+      const first = await loginDevice();
+      const session = sessions.get(sidOf(first))!;
+      session.expiresAt = new Date(Date.now() - 1000);
+
+      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+      expect(sessions.has(session.id)).toBe(false);
+    });
+
+    it('rejects a token without a session id', async () => {
+      const legacy = await jwt.signAsync(
+        { sub: 'u1', role: 'admin' },
+        { expiresIn: '1d' },
+      );
+      await expect(refresh(legacy)).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('rejects a session of another user', async () => {
+      const first = await loginDevice();
+      sessions.get(sidOf(first))!.userId = 'u2';
+      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('rejects an inactive user', async () => {
+      const first = await loginDevice();
+      activeUser.isActive = false;
+      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('logout removes only the current session', async () => {
+      const phone = await loginDevice();
+      const laptop = await loginDevice();
+
+      await service.logout('u1', reqWith(phone), res, meta);
+
+      expect(sessions.has(sidOf(phone))).toBe(false);
+      expect(sessions.has(sidOf(laptop))).toBe(true);
+      await expect(refresh(laptop)).resolves.toEqual(expect.any(String));
+      await expect(refresh(phone)).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('logout does not touch a session of another user', async () => {
+      const phone = await loginDevice();
+      await service.logout('u2', reqWith(phone), res, meta);
+      expect(sessions.has(sidOf(phone))).toBe(true);
+    });
+
+    it('password change keeps the current session and ends the others', async () => {
+      const phone = await loginDevice();
+      const laptop = await loginDevice();
+
+      await service.changePassword(
+        'u1',
+        { currentPassword: 'pass', newPassword: 'newpass12' },
+        reqWith(phone),
+        res,
+        meta,
+      );
+
+      const fresh = lastCookie('refreshToken')[1];
+      expect(sidOf(fresh)).toBe(sidOf(phone));
+      expect([...sessions.keys()]).toEqual([sidOf(phone)]);
+      await expect(refresh(laptop)).rejects.toThrow('Invalid refresh token');
+      await expect(refresh(phone)).rejects.toThrow('Invalid refresh token');
+      await expect(refresh(fresh)).resolves.toEqual(expect.any(String));
+    });
+
+    it('password change without a session cookie opens a new session', async () => {
+      await loginDevice();
+
+      await service.changePassword(
+        'u1',
+        { currentPassword: 'pass', newPassword: 'newpass12' },
+        reqWith(),
+        res,
+        meta,
+      );
+
+      const fresh = lastCookie('refreshToken')[1];
+      expect([...sessions.keys()]).toEqual([sidOf(fresh)]);
+    });
+  });
+
+  describe('sessionTokenState', () => {
+    const now = new Date('2026-11-19T10:00:00.000Z');
+    const base = {
+      tokenHash: 'b'.repeat(64),
+      previousTokenHash: 'a'.repeat(64),
+      rotatedAt: new Date(now.getTime() - 30_000),
+      expiresAt: new Date(now.getTime() + 60_000),
+    };
+
+    it('classifies current, grace, expired and invalid tokens', () => {
+      expect(sessionTokenState(base, 'b'.repeat(64), now)).toBe('current');
+      expect(sessionTokenState(base, 'a'.repeat(64), now)).toBe('grace');
+      expect(sessionTokenState(base, 'c'.repeat(64), now)).toBe('invalid');
+      expect(
+        sessionTokenState(
+          { ...base, rotatedAt: new Date(now.getTime() - 61_000) },
+          'a'.repeat(64),
+          now,
+        ),
+      ).toBe('invalid');
+      expect(
+        sessionTokenState({ ...base, expiresAt: now }, 'b'.repeat(64), now),
+      ).toBe('expired');
+    });
+  });
+
   describe('refresh audit', () => {
     const failed = (userId: string | null, login: string) => ({
       type: 'refresh_failed',
@@ -203,87 +553,64 @@ describe('AuthService', () => {
       ip: '10.0.0.1',
       userAgent: 'jest',
     });
-    const reqWith = (token?: string) =>
-      ({ cookies: token ? { refreshToken: token } : {} }) as unknown as Request;
 
     it('does not record a missing cookie', async () => {
-      await expect(
-        service.refresh(reqWith(), mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid refresh token');
+      await expect(service.refresh(reqWith(), res, meta)).rejects.toThrow(
+        'Invalid refresh token',
+      );
       expect(mockAudit.recordAuth).not.toHaveBeenCalled();
     });
 
     it('records an undecodable token without a user id', async () => {
-      mockJwt.verify.mockImplementation(() => {
-        throw new Error('bad');
-      });
-      await expect(
-        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid refresh token');
+      await expect(service.refresh(reqWith('t'), res, meta)).rejects.toThrow(
+        'Invalid refresh token',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed(null, ''));
     });
 
     it('records the decoded sub when the user is missing', async () => {
-      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      const token = await jwt.signAsync({ sub: 'u1', role: 'admin', sid: 's' });
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(
-        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid refresh token');
+      await expect(service.refresh(reqWith(token), res, meta)).rejects.toThrow(
+        'Invalid refresh token',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', ''));
     });
 
     it('records the login of an inactive user', async () => {
-      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+      const token = await jwt.signAsync({ sub: 'u1', role: 'admin', sid: 's' });
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
         login: 'off',
         isActive: false,
-        refreshToken: 'h',
       });
-      await expect(
-        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid refresh token');
+      await expect(service.refresh(reqWith(token), res, meta)).rejects.toThrow(
+        'Invalid refresh token',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', 'off'));
     });
 
-    it('records a rotated token mismatch', async () => {
-      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
+    it('records an unknown session', async () => {
+      const token = await jwt.signAsync({ sub: 'u1', role: 'admin', sid: 's' });
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
         login: 'on',
         isActive: true,
-        refreshToken: await bcrypt.hash('other', 4),
       });
-      await expect(
-        service.refresh(reqWith('t'), mockRes as unknown as Response, meta),
-      ).rejects.toThrow('Invalid refresh token');
+      await expect(service.refresh(reqWith(token), res, meta)).rejects.toThrow(
+        'Invalid refresh token',
+      );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', 'on'));
-    });
-
-    it('does not record a successful refresh', async () => {
-      mockJwt.verify.mockReturnValue({ sub: 'u1', role: 'admin' });
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'u1',
-        login: 'on',
-        role: 'admin',
-        isActive: true,
-        refreshToken: await bcrypt.hash('t', 4),
-      });
-      mockPrisma.user.update.mockResolvedValue({});
-      await service.refresh(reqWith('t'), mockRes as unknown as Response, meta);
-      expect(mockAudit.recordAuth).not.toHaveBeenCalled();
     });
   });
 
   describe('logout', () => {
-    it('clears refreshToken in DB and clears both cookies', async () => {
-      mockPrisma.user.update.mockResolvedValue({ login: 'teacher1' });
-      await service.logout('uid', mockRes as unknown as Response, meta);
-      expect(mockPrisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'uid' },
-        data: { refreshToken: null },
-        select: { login: true },
+    it('clears both cookies and records the logout', async () => {
+      mockPrisma.user.findUniqueOrThrow.mockResolvedValue({
+        login: 'teacher1',
       });
+      await service.logout('uid', reqWith(), res, meta);
+      expect(mockPrisma.authSession.deleteMany).not.toHaveBeenCalled();
       expect(mockRes.clearCookie).toHaveBeenCalledWith(
         'accessToken',
         expect.any(Object),
@@ -322,7 +649,8 @@ describe('AuthService', () => {
         service.changePassword(
           'u1',
           { currentPassword: 'x', newPassword: 'newpass12' },
-          mockRes as unknown as Response,
+          reqWith(),
+          res,
           meta,
         ),
       ).rejects.toThrow('Invalid current password');
@@ -335,7 +663,8 @@ describe('AuthService', () => {
         service.changePassword(
           'u1',
           { currentPassword: 'oldpass1', newPassword: 'oldpass1' },
-          mockRes as unknown as Response,
+          reqWith(),
+          res,
           meta,
         ),
       ).rejects.toThrow('New password must differ from the current one');
@@ -347,7 +676,8 @@ describe('AuthService', () => {
       const result = await service.changePassword(
         'u1',
         { currentPassword: 'oldpass1', newPassword: 'newpass12' },
-        mockRes as unknown as Response,
+        reqWith(),
+        res,
         meta,
       );
 
@@ -357,10 +687,8 @@ describe('AuthService', () => {
           { data: Record<string, unknown> },
         ]
       )[0].data;
-      expect(firstUpdate).toMatchObject({
-        mustChangePassword: false,
-        refreshToken: null,
-      });
+      expect(firstUpdate).toMatchObject({ mustChangePassword: false });
+      expect(firstUpdate).not.toHaveProperty('refreshToken');
       expect(mockRes.cookie).toHaveBeenCalledTimes(2);
     });
   });
@@ -376,7 +704,8 @@ describe('AuthService', () => {
       await service.changePassword(
         'u1',
         { currentPassword: 'oldpass1', newPassword: 'newpass12' },
-        mockRes as unknown as Response,
+        reqWith(),
+        res,
         meta,
       );
       expect(mockAudit.recordAuth).toHaveBeenCalledWith({
@@ -400,7 +729,8 @@ describe('AuthService', () => {
         service.changePassword(
           'u1',
           { currentPassword: 'x', newPassword: 'newpass12' },
-          mockRes as unknown as Response,
+          reqWith(),
+          res,
           meta,
         ),
       ).rejects.toThrow('Invalid current password');

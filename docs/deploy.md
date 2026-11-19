@@ -66,8 +66,8 @@ openssl rand -hex 48   # JWT_SECRET
 POSTGRES_PASSWORD=<пароль бази>
 DATABASE_URL=postgresql://postgres:<пароль бази>@localhost:5432/edu_db
 JWT_SECRET=<секрет>
-JWT_ACCESS_EXPIRES=15m
-JWT_REFRESH_EXPIRES=30d
+JWT_ACCESS_EXPIRES=1h
+JWT_REFRESH_EXPIRES=60d
 ROOT_LOGIN=root
 ROOT_PASSWORD=<сильний пароль>
 NODE_ENV=production

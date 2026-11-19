@@ -19,11 +19,54 @@ import type { StringValue } from 'ms';
 import { JwtService } from '@nestjs/jwt';
 import { Request, Response } from 'express';
 import * as bcrypt from 'bcryptjs';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { storePasswordCopy } from '../users/password-vault';
 import { positionRef, positionSelect } from '../positions/position-select';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { RequestMeta } from '../audit/request-meta';
+
+export const REFRESH_GRACE_MS = 60 * 1000;
+const DEFAULT_ACCESS_EXPIRES = '1h';
+const DEFAULT_REFRESH_EXPIRES = '60d';
+
+type RefreshPayload = { sub: string; role: string; sid?: string };
+
+type SessionRow = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  previousTokenHash: string | null;
+  rotatedAt: Date | null;
+  expiresAt: Date;
+};
+
+export const hashToken = (token: string) =>
+  createHash('sha256').update(token).digest('hex');
+
+const sameHash = (a: string, b: string | null) =>
+  b !== null &&
+  a.length === b.length &&
+  timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+export function sessionTokenState(
+  session: Pick<
+    SessionRow,
+    'tokenHash' | 'previousTokenHash' | 'rotatedAt' | 'expiresAt'
+  >,
+  hash: string,
+  now: Date,
+): 'current' | 'grace' | 'expired' | 'invalid' {
+  if (session.expiresAt.getTime() <= now.getTime()) return 'expired';
+  if (sameHash(hash, session.tokenHash)) return 'current';
+  if (
+    sameHash(hash, session.previousTokenHash) &&
+    session.rotatedAt &&
+    now.getTime() - session.rotatedAt.getTime() <= REFRESH_GRACE_MS
+  )
+    return 'grace';
+  return 'invalid';
+}
 
 @Injectable()
 export class AuthService {
@@ -74,9 +117,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.generateTokens(user.id, user.role);
-    await this.storeRefreshToken(user.id, tokens.refreshToken);
-    this.setCookies(res, tokens);
+    await this.prisma.authSession.deleteMany({
+      where: { userId: user.id, expiresAt: { lte: new Date() } },
+    });
+    await this.startSession(user, res, meta);
     await this.audit.recordAuth({
       ...meta,
       type: AuthEventType.login_success,
@@ -107,7 +151,7 @@ export class AuthService {
       ?.refreshToken;
     if (!token) throw new UnauthorizedException('Invalid refresh token');
 
-    let payload: { sub: string; role: string };
+    let payload: RefreshPayload;
     try {
       payload = this.jwtService.verify(token, {
         secret: this.config.get<string>('JWT_SECRET'),
@@ -120,22 +164,41 @@ export class AuthService {
       where: { id: payload.sub },
     });
     if (!user) return this.refreshFailed(meta, payload.sub, '');
-    if (!user.isActive || !user.refreshToken)
+    if (!user.isActive || !payload.sid)
       return this.refreshFailed(meta, payload.sub, user.login);
 
-    const match = await bcrypt.compare(token, user.refreshToken);
-    if (!match) return this.refreshFailed(meta, payload.sub, user.login);
-
-    const tokens = await this.generateTokens(user.id, user.role);
-    await this.storeRefreshToken(user.id, tokens.refreshToken);
-    this.setCookies(res, tokens);
-    return { message: 'Token refreshed' };
+    const hash = hashToken(token);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const session = await this.prisma.authSession.findUnique({
+        where: { id: payload.sid },
+      });
+      if (!session || session.userId !== user.id)
+        return this.refreshFailed(meta, payload.sub, user.login);
+      const state = sessionTokenState(session, hash, new Date());
+      if (state === 'expired') {
+        await this.prisma.authSession.deleteMany({
+          where: { id: session.id },
+        });
+        return this.refreshFailed(meta, payload.sub, user.login);
+      }
+      if (state === 'invalid')
+        return this.refreshFailed(meta, payload.sub, user.login);
+      if (await this.rotateSession(session, user, res)) {
+        return { message: 'Token refreshed' };
+      }
+    }
+    return this.refreshFailed(meta, payload.sub, user.login);
   }
 
-  async logout(userId: string, res: Response, meta: RequestMeta) {
-    const user = await this.prisma.user.update({
+  async logout(userId: string, req: Request, res: Response, meta: RequestMeta) {
+    const sid = this.sessionIdOf(req);
+    if (sid) {
+      await this.prisma.authSession.deleteMany({
+        where: { id: sid, userId },
+      });
+    }
+    const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      data: { refreshToken: null },
       select: { login: true },
     });
     await this.audit.recordAuth({
@@ -206,6 +269,7 @@ export class AuthService {
   async changePassword(
     userId: string,
     dto: ChangePasswordDto,
+    req: Request,
     res: Response,
     meta: RequestMeta,
   ) {
@@ -223,13 +287,20 @@ export class AuthService {
       data: {
         password: await bcrypt.hash(dto.newPassword, 10),
         mustChangePassword: false,
-        refreshToken: null,
       },
     });
     await storePasswordCopy(this.prisma, userId, dto.newPassword);
-    const tokens = await this.generateTokens(user.id, user.role);
-    await this.storeRefreshToken(user.id, tokens.refreshToken);
-    this.setCookies(res, tokens);
+    const sid = this.sessionIdOf(req);
+    await this.prisma.authSession.deleteMany({
+      where: { userId, ...(sid ? { id: { not: sid } } : {}) },
+    });
+    const current = sid
+      ? await this.prisma.authSession.findUnique({ where: { id: sid } })
+      : null;
+    const rotated =
+      current?.userId === userId &&
+      (await this.rotateSession(current, user, res, true));
+    if (!rotated) await this.startSession(user, res, meta);
     await this.audit.recordAuth({
       ...meta,
       type: AuthEventType.password_changed,
@@ -253,46 +324,123 @@ export class AuthService {
     return this.getProfile(userId);
   }
 
-  private async generateTokens(userId: string, role: string) {
+  private sessionIdOf(req: Request): string | null {
+    const token: string | undefined = (req.cookies as Record<string, string>)
+      ?.refreshToken;
+    if (!token) return null;
+    try {
+      const payload = this.jwtService.decode<RefreshPayload | null>(token);
+      return typeof payload?.sid === 'string' ? payload.sid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async startSession(
+    user: { id: string; role: string },
+    res: Response,
+    meta: RequestMeta,
+  ) {
+    const sid = randomUUID();
+    const tokens = await this.generateTokens(user.id, user.role, sid);
+    const now = new Date();
+    await this.prisma.authSession.create({
+      data: {
+        id: sid,
+        userId: user.id,
+        tokenHash: hashToken(tokens.refreshToken),
+        expiresAt: tokens.refreshExpiresAt,
+        createdAt: now,
+        lastUsedAt: now,
+        userAgent: meta.userAgent,
+      },
+    });
+    this.setCookies(res, tokens);
+  }
+
+  private async rotateSession(
+    session: SessionRow,
+    user: { id: string; role: string },
+    res: Response,
+    forgetPrevious = false,
+  ): Promise<boolean> {
+    const tokens = await this.generateTokens(user.id, user.role, session.id);
+    const now = new Date();
+    const { count } = await this.prisma.authSession.updateMany({
+      where: { id: session.id, tokenHash: session.tokenHash },
+      data: {
+        tokenHash: hashToken(tokens.refreshToken),
+        previousTokenHash: forgetPrevious ? null : session.tokenHash,
+        rotatedAt: now,
+        lastUsedAt: now,
+        expiresAt: tokens.refreshExpiresAt,
+      },
+    });
+    if (count === 0) return false;
+    this.setCookies(res, tokens);
+    return true;
+  }
+
+  private async generateTokens(userId: string, role: string, sid: string) {
     const payload = { sub: userId, role };
     const secret = this.config.get<string>('JWT_SECRET');
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret,
-        expiresIn: this.config.get('JWT_ACCESS_EXPIRES') as StringValue,
+        expiresIn: this.accessExpires(),
       }),
-      this.jwtService.signAsync(payload, {
-        secret,
-        expiresIn: this.config.get('JWT_REFRESH_EXPIRES') as StringValue,
-      }),
+      this.jwtService.signAsync(
+        { ...payload, sid },
+        { secret, expiresIn: this.refreshExpires(), jwtid: randomUUID() },
+      ),
     ]);
-    return { accessToken, refreshToken };
+    return {
+      accessToken,
+      refreshToken,
+      accessExpiresAt: this.expiryOf(accessToken),
+      refreshExpiresAt: this.expiryOf(refreshToken),
+    };
   }
 
-  private async storeRefreshToken(userId: string, token: string) {
-    const hashed = await bcrypt.hash(token, 10);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: hashed },
-    });
+  private accessExpires(): StringValue {
+    return (this.config.get<string>('JWT_ACCESS_EXPIRES') ||
+      DEFAULT_ACCESS_EXPIRES) as StringValue;
+  }
+
+  private refreshExpires(): StringValue {
+    return (this.config.get<string>('JWT_REFRESH_EXPIRES') ||
+      DEFAULT_REFRESH_EXPIRES) as StringValue;
+  }
+
+  private expiryOf(token: string): Date {
+    const payload = this.jwtService.decode<{ exp?: number } | null>(token);
+    if (typeof payload?.exp !== 'number')
+      throw new Error('Signed token has no expiry');
+    return new Date(payload.exp * 1000);
   }
 
   private setCookies(
     res: Response,
-    tokens: { accessToken: string; refreshToken: string },
+    tokens: {
+      accessToken: string;
+      refreshToken: string;
+      accessExpiresAt: Date;
+      refreshExpiresAt: Date;
+    },
   ) {
     const cookieBase = {
       httpOnly: true,
       sameSite: 'lax' as const,
       secure: this.config.get<string>('NODE_ENV') === 'production',
     };
+    const now = Date.now();
     res.cookie('accessToken', tokens.accessToken, {
       ...cookieBase,
-      maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT_ACCESS_EXPIRES
+      maxAge: Math.max(0, tokens.accessExpiresAt.getTime() - now),
     });
     res.cookie('refreshToken', tokens.refreshToken, {
       ...cookieBase,
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days — matches JWT_REFRESH_EXPIRES
+      maxAge: Math.max(0, tokens.refreshExpiresAt.getTime() - now),
     });
   }
 }

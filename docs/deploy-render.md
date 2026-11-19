@@ -35,8 +35,8 @@
    | `NODE_ENV` | `production` |
    | `DATABASE_URL` | рядок з Neon |
    | `JWT_SECRET` | довгий випадковий рядок (наприклад, 96 символів з генератора паролів) |
-   | `JWT_ACCESS_EXPIRES` | `15m` |
-   | `JWT_REFRESH_EXPIRES` | `30d` |
+   | `JWT_ACCESS_EXPIRES` | `1h` (термін доступу; без змінної теж `1h`) |
+   | `JWT_REFRESH_EXPIRES` | `60d` (скільки живе вхід на одному пристрої; без змінної теж `60d`) |
    | `ROOT_LOGIN` | `root` |
    | `ROOT_PASSWORD` | сильний пароль |
    | `CORS_ORIGIN` | адреса Netlify, наприклад `https://edunest.netlify.app` |

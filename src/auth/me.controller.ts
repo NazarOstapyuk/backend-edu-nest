@@ -30,7 +30,13 @@ export class MeController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.changePassword(user.id, dto, res, requestMeta(req));
+    return this.authService.changePassword(
+      user.id,
+      dto,
+      req,
+      res,
+      requestMeta(req),
+    );
   }
 
   @Patch('contacts')

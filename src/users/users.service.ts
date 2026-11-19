@@ -535,7 +535,6 @@ export class UsersService {
       if (passwordHash) {
         data.password = passwordHash;
         data.mustChangePassword = true;
-        data.refreshToken = null;
       }
       if (dto.middleName !== undefined) data.middleName = dto.middleName;
       if (dto.phone !== undefined) data.phone = dto.phone;
@@ -602,6 +601,8 @@ export class UsersService {
         include: userInclude,
         omit: userOmit,
       });
+      if (passwordHash || dto.isActive === false)
+        await tx.authSession.deleteMany({ where: { userId: id } });
       if (dto.password) await storePasswordCopy(tx, id, dto.password);
       await this.audit.recordChange(tx, {
         actorId: actor.id,

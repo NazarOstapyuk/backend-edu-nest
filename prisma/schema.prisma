@@ -31,6 +31,21 @@ model UserPasswordCopy {
   updatedAt DateTime @updatedAt
 }
 
+model AuthSession {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash         String
+  previousTokenHash String?
+  rotatedAt         DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime  @default(now())
+  userAgent         String?
+
+  @@index([userId])
+}
+
 model User {
   id                       String                 @id @default(uuid())
   login                    String                 @unique
@@ -44,6 +59,7 @@ model User {
   mustChangePassword       Boolean                @default(false)
   refreshToken             String?
   passwordCopy             UserPasswordCopy?
+  sessions                 AuthSession[]
   isActive                 Boolean                @default(true)
   accessScope              AccessScope            @default(all)
   institutions             UserInstitution[]

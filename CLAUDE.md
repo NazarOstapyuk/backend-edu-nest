@@ -47,8 +47,8 @@ Optional online payments: `PAYMENT_PROVIDER` (`test` | `monobank`; empty disable
 ### Auth
 
 - JWT stored in **httpOnly cookies** (`accessToken`, `refreshToken`), not Authorization headers. `JwtStrategy` reads from `req.cookies.accessToken`; `cookie-parser` is required.
-- Both tokens are signed with the same `JWT_SECRET`. The refresh token is bcrypt-hashed and stored in `User.refreshToken`; `/auth/refresh` rotates it, `/auth/logout` nulls it.
-- Cookie `maxAge` values in `AuthService.setCookies` are hardcoded (15m / 30d) and must be kept in sync with `JWT_ACCESS_EXPIRES` / `JWT_REFRESH_EXPIRES`.
+- Both tokens are signed with the same `JWT_SECRET`. One `AuthSession` per login (device/browser): the refresh JWT carries `sid`, the session stores the SHA-256 of the current refresh token (`tokenHash`). `/auth/refresh` rotates it (`previousTokenHash`, `rotatedAt`, `expiresAt` extended); the previous token stays valid for 60 s after a rotation (`REFRESH_GRACE_MS`, concurrent tabs), anything else → 401 `Invalid refresh token`; an expired session is deleted. Rotation is conditional on the stored hash (one retry on a concurrent rotation). `/auth/logout` deletes only the session of the refresh cookie; `POST /me/password` keeps the current session and deletes the others; an admin password reset or deactivation (`PATCH /users/:id`) deletes all of the user's sessions; login deletes the user's expired sessions. `User.refreshToken` is legacy and unused (still omitted from responses); refresh tokens without `sid` are rejected.
+- Lifetimes: `JWT_ACCESS_EXPIRES` (default `1h`) and `JWT_REFRESH_EXPIRES` (default `60d`); cookie `maxAge` is derived from the signed tokens' `exp`, so it always follows the env vars.
 - `JwtStrategy.validate` re-fetches the user on every request and rejects inactive users; `req.user` is `AuthenticatedUser` (`{ id, role, login, mustChangePassword, accessScope, positionId, permissions, institutionIds, scopeInstitutionIds }`), accessed via `@CurrentUser()`.
 
 ### Authorization pattern
@@ -120,7 +120,7 @@ Spec: `docs/superpowers/specs/2026-10-11-classes-packages-design.md`. Code in `s
 
 Spec: `docs/superpowers/specs/2026-10-12-parent-cabinet-design.md`.
 
-- Parents are created by admins (phone required, `mustChangePassword = true`); an admin password reset (`PATCH /users/:id` with `password`) sets the flag again and drops the refresh token.
+- Parents are created by admins (phone required, `mustChangePassword = true`); an admin password reset (`PATCH /users/:id` with `password`) sets the flag again and deletes all the user's sessions.
 - `JwtAuthGuard` rejects every request with 403 `Password change required` while `mustChangePassword` is true, except handlers marked `@AllowWithoutPasswordChange()` (`GET /auth/me`, `POST /auth/logout`, `POST /me/password`). Mark new handlers only if a user must reach them before changing the password.
 - `GET /auth/me` returns the profile (names, phone, email, `mustChangePassword`); `POST /me/password` and `PATCH /me/contacts` work for every role.
 - `src/parent-cabinet/` serves `/me/family`, `/me/children/:id`, `/me/children/:id/finance` for role `parent` only. Every child id is checked against the parent's children (404 `Child not found` otherwise). Child views include `institution {id, name}|null`. Views exclude voided records, unconfirmed payments and internal fields; money comes from `finance-calc.ts`, overdue rules from `cabinet-calc.ts`.
