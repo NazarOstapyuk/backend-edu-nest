@@ -5,12 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
-import {
-  AuthService,
-  REFRESH_GRACE_MS,
-  hashToken,
-  sessionTokenState,
-} from './auth.service';
+import { AuthService, hashToken, sessionTokenState } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -397,11 +392,19 @@ describe('AuthService', () => {
       await expect(refresh(second)).resolves.toEqual(expect.any(String));
     });
 
-    it('rejects the previous token after the grace window', async () => {
+    it('keeps the previous token valid until the next rotation, however late', async () => {
       const first = await loginDevice();
       await refresh(first);
       const session = sessions.get(sidOf(first))!;
-      session.rotatedAt = new Date(Date.now() - REFRESH_GRACE_MS - 1000);
+      session.rotatedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      await expect(refresh(first)).resolves.toEqual(expect.any(String));
+    });
+
+    it('rejects a token two rotations old', async () => {
+      const first = await loginDevice();
+      const second = await refresh(first);
+      await refresh(second);
 
       await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(
@@ -409,12 +412,25 @@ describe('AuthService', () => {
       );
     });
 
-    it('rejects a token two rotations old even within the window', async () => {
-      const first = await loginDevice();
-      const second = await refresh(first);
-      await refresh(second);
+    it('signs typed access and refresh tokens with the session id', async () => {
+      const refreshToken = await loginDevice();
+      const accessToken = lastCookie('accessToken')[1];
+      const access = jwt.decode<{ typ: string; sid: string }>(accessToken);
+      const refreshPayload = jwt.decode<{ typ: string; sid: string }>(
+        refreshToken,
+      );
+      expect(access.typ).toBe('access');
+      expect(refreshPayload.typ).toBe('refresh');
+      expect(access.sid).toBe(refreshPayload.sid);
+    });
 
-      await expect(refresh(first)).rejects.toThrow('Invalid refresh token');
+    it('rejects an access token used as a refresh token', async () => {
+      await loginDevice();
+      const accessToken = lastCookie('accessToken')[1];
+
+      await expect(refresh(accessToken)).rejects.toThrow(
+        'Invalid refresh token',
+      );
     });
 
     it('retries once when another request rotated concurrently', async () => {
@@ -502,6 +518,43 @@ describe('AuthService', () => {
       await expect(refresh(fresh)).resolves.toEqual(expect.any(String));
     });
 
+    it('password change ignores an unsigned session cookie', async () => {
+      const phone = await loginDevice();
+      const forged = jwt.sign(
+        { sub: 'u1', role: 'admin', sid: sidOf(phone), typ: 'refresh' },
+        { secret: 'other' },
+      );
+
+      await service.changePassword(
+        'u1',
+        { currentPassword: 'pass', newPassword: 'newpass12' },
+        reqWith(forged),
+        res,
+        meta,
+      );
+
+      const fresh = lastCookie('refreshToken')[1];
+      expect([...sessions.keys()]).toEqual([sidOf(fresh)]);
+      expect(sidOf(fresh)).not.toBe(sidOf(phone));
+    });
+
+    it('password change drops the current session when its rotation fails', async () => {
+      const phone = await loginDevice();
+      mockPrisma.authSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await service.changePassword(
+        'u1',
+        { currentPassword: 'pass', newPassword: 'newpass12' },
+        reqWith(phone),
+        res,
+        meta,
+      );
+
+      const fresh = lastCookie('refreshToken')[1];
+      expect(sessions.has(sidOf(phone))).toBe(false);
+      expect([...sessions.keys()]).toEqual([sidOf(fresh)]);
+    });
+
     it('password change without a session cookie opens a new session', async () => {
       await loginDevice();
 
@@ -523,17 +576,16 @@ describe('AuthService', () => {
     const base = {
       tokenHash: 'b'.repeat(64),
       previousTokenHash: 'a'.repeat(64),
-      rotatedAt: new Date(now.getTime() - 30_000),
       expiresAt: new Date(now.getTime() + 60_000),
     };
 
-    it('classifies current, grace, expired and invalid tokens', () => {
+    it('classifies current, previous, expired and invalid tokens', () => {
       expect(sessionTokenState(base, 'b'.repeat(64), now)).toBe('current');
-      expect(sessionTokenState(base, 'a'.repeat(64), now)).toBe('grace');
+      expect(sessionTokenState(base, 'a'.repeat(64), now)).toBe('previous');
       expect(sessionTokenState(base, 'c'.repeat(64), now)).toBe('invalid');
       expect(
         sessionTokenState(
-          { ...base, rotatedAt: new Date(now.getTime() - 61_000) },
+          { ...base, previousTokenHash: null },
           'a'.repeat(64),
           now,
         ),
@@ -590,8 +642,30 @@ describe('AuthService', () => {
       expect(mockAudit.recordAuth).toHaveBeenCalledWith(failed('u1', 'off'));
     });
 
+    it('does not record a successful refresh', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        login: 'on',
+        role: 'admin',
+        isActive: true,
+        password: await bcrypt.hash('pass', 4),
+      });
+      await service.login('on', 'pass', res, meta);
+      const token = lastCookie('refreshToken')[1];
+      mockAudit.recordAuth.mockClear();
+
+      await service.refresh(reqWith(token), res, meta);
+
+      expect(mockAudit.recordAuth).not.toHaveBeenCalled();
+    });
+
     it('records an unknown session', async () => {
-      const token = await jwt.signAsync({ sub: 'u1', role: 'admin', sid: 's' });
+      const token = await jwt.signAsync({
+        sub: 'u1',
+        role: 'admin',
+        sid: 's',
+        typ: 'refresh',
+      });
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
         login: 'on',

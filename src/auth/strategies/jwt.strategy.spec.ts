@@ -37,6 +37,7 @@ describe('JwtStrategy', () => {
       permissions: [{ area: 'finance', level: 'view' }],
     },
     institutions: [{ institutionId: 'inst-k' }, { institutionId: 'inst-s' }],
+    sessions: [{ id: 's1' }],
     ...overrides,
   });
 
@@ -52,13 +53,22 @@ describe('JwtStrategy', () => {
   it('loads granted institutions', async () => {
     prisma.user.findUnique.mockResolvedValue(dbUser());
 
-    await strategy.validate(request(), { sub: 'u1', role: 'admin' });
+    await strategy.validate(request(), {
+      sub: 'u1',
+      sid: 's1',
+      typ: 'access',
+      role: 'admin',
+    });
 
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
       where: { id: 'u1' },
       include: {
         position: positionSelect,
         institutions: { select: { institutionId: true } },
+        sessions: {
+          where: { id: 's1', expiresAt: { gt: expect.any(Date) as Date } },
+          select: { id: true },
+        },
       },
     });
   });
@@ -68,6 +78,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request(), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -91,6 +103,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request(), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -105,6 +119,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request(), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -117,10 +133,14 @@ describe('JwtStrategy', () => {
 
     const empty = await strategy.validate(request(''), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
     const repeated = await strategy.validate(request(['inst-k', 'inst-s']), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -135,6 +155,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request('inst-s'), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -146,7 +168,12 @@ describe('JwtStrategy', () => {
     prisma.institution.findUnique.mockResolvedValue(null);
 
     await expect(
-      strategy.validate(request('missing'), { sub: 'u1', role: 'admin' }),
+      strategy.validate(request('missing'), {
+        sub: 'u1',
+        sid: 's1',
+        typ: 'access',
+        role: 'admin',
+      }),
     ).rejects.toThrow(new NotFoundException('Institution not found'));
   });
 
@@ -155,7 +182,12 @@ describe('JwtStrategy', () => {
     prisma.institution.findUnique.mockResolvedValue(institution('inst-x'));
 
     await expect(
-      strategy.validate(request('inst-x'), { sub: 'u1', role: 'admin' }),
+      strategy.validate(request('inst-x'), {
+        sub: 'u1',
+        sid: 's1',
+        typ: 'access',
+        role: 'admin',
+      }),
     ).rejects.toThrow(new ForbiddenException('Outside access scope'));
   });
 
@@ -169,6 +201,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request('inst-old'), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'root',
     });
 
@@ -182,6 +216,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request('inst-k'), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'parent',
     });
 
@@ -194,10 +230,14 @@ describe('JwtStrategy', () => {
 
     const outside = await strategy.validate(request('inst-x', true), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
     const unknown = await strategy.validate(request('missing', true), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'admin',
     });
 
@@ -213,6 +253,8 @@ describe('JwtStrategy', () => {
 
     const user = await strategy.validate(request('inst-k', true), {
       sub: 'u1',
+      sid: 's1',
+      typ: 'access',
       role: 'root',
     });
 
@@ -223,7 +265,51 @@ describe('JwtStrategy', () => {
     prisma.user.findUnique.mockResolvedValue(dbUser({ isActive: false }));
 
     await expect(
+      strategy.validate(request(), {
+        sub: 'u1',
+        sid: 's1',
+        typ: 'access',
+        role: 'admin',
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+  it('rejects a refresh token used as an access token', async () => {
+    prisma.user.findUnique.mockResolvedValue(dbUser());
+
+    await expect(
+      strategy.validate(request(), {
+        sub: 'u1',
+        role: 'admin',
+        sid: 's1',
+        typ: 'refresh',
+      }),
+    ).rejects.toThrow('Unauthorized');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects an access token without a session id', async () => {
+    await expect(
+      strategy.validate(request(), {
+        sub: 'u1',
+        role: 'admin',
+        typ: 'access',
+      }),
+    ).rejects.toThrow('Unauthorized');
+    await expect(
       strategy.validate(request(), { sub: 'u1', role: 'admin' }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('rejects an access token of an ended session', async () => {
+    prisma.user.findUnique.mockResolvedValue(dbUser({ sessions: [] }));
+
+    await expect(
+      strategy.validate(request(), {
+        sub: 'u1',
+        role: 'admin',
+        sid: 's1',
+        typ: 'access',
+      }),
     ).rejects.toThrow('Unauthorized');
   });
 });

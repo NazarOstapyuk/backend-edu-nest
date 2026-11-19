@@ -26,11 +26,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { RequestMeta } from '../audit/request-meta';
 
-export const REFRESH_GRACE_MS = 60 * 1000;
 const DEFAULT_ACCESS_EXPIRES = '1h';
 const DEFAULT_REFRESH_EXPIRES = '60d';
 
-type RefreshPayload = { sub: string; role: string; sid?: string };
+type RefreshPayload = { sub: string; role: string; sid?: string; typ?: string };
 
 type SessionRow = {
   id: string;
@@ -50,21 +49,13 @@ const sameHash = (a: string, b: string | null) =>
   timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function sessionTokenState(
-  session: Pick<
-    SessionRow,
-    'tokenHash' | 'previousTokenHash' | 'rotatedAt' | 'expiresAt'
-  >,
+  session: Pick<SessionRow, 'tokenHash' | 'previousTokenHash' | 'expiresAt'>,
   hash: string,
   now: Date,
-): 'current' | 'grace' | 'expired' | 'invalid' {
+): 'current' | 'previous' | 'expired' | 'invalid' {
   if (session.expiresAt.getTime() <= now.getTime()) return 'expired';
   if (sameHash(hash, session.tokenHash)) return 'current';
-  if (
-    sameHash(hash, session.previousTokenHash) &&
-    session.rotatedAt &&
-    now.getTime() - session.rotatedAt.getTime() <= REFRESH_GRACE_MS
-  )
-    return 'grace';
+  if (sameHash(hash, session.previousTokenHash)) return 'previous';
   return 'invalid';
 }
 
@@ -164,7 +155,7 @@ export class AuthService {
       where: { id: payload.sub },
     });
     if (!user) return this.refreshFailed(meta, payload.sub, '');
-    if (!user.isActive || !payload.sid)
+    if (!user.isActive || payload.typ !== 'refresh' || !payload.sid)
       return this.refreshFailed(meta, payload.sub, user.login);
 
     const hash = hashToken(token);
@@ -290,7 +281,7 @@ export class AuthService {
       },
     });
     await storePasswordCopy(this.prisma, userId, dto.newPassword);
-    const sid = this.sessionIdOf(req);
+    const sid = this.sessionIdOf(req, true);
     await this.prisma.authSession.deleteMany({
       where: { userId, ...(sid ? { id: { not: sid } } : {}) },
     });
@@ -300,7 +291,13 @@ export class AuthService {
     const rotated =
       current?.userId === userId &&
       (await this.rotateSession(current, user, res, true));
-    if (!rotated) await this.startSession(user, res, meta);
+    if (!rotated) {
+      if (sid)
+        await this.prisma.authSession.deleteMany({
+          where: { id: sid, userId },
+        });
+      await this.startSession(user, res, meta);
+    }
     await this.audit.recordAuth({
       ...meta,
       type: AuthEventType.password_changed,
@@ -324,13 +321,18 @@ export class AuthService {
     return this.getProfile(userId);
   }
 
-  private sessionIdOf(req: Request): string | null {
+  private sessionIdOf(req: Request, verify = false): string | null {
     const token: string | undefined = (req.cookies as Record<string, string>)
       ?.refreshToken;
     if (!token) return null;
     try {
-      const payload = this.jwtService.decode<RefreshPayload | null>(token);
-      return typeof payload?.sid === 'string' ? payload.sid : null;
+      const payload = verify
+        ? this.jwtService.verify<RefreshPayload>(token, {
+            secret: this.config.get<string>('JWT_SECRET'),
+          })
+        : this.jwtService.decode<RefreshPayload | null>(token);
+      if (payload?.typ !== 'refresh') return null;
+      return typeof payload.sid === 'string' ? payload.sid : null;
     } catch {
       return null;
     }
@@ -382,15 +384,15 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, role: string, sid: string) {
-    const payload = { sub: userId, role };
+    const payload = { sub: userId, role, sid };
     const secret = this.config.get<string>('JWT_SECRET');
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret,
-        expiresIn: this.accessExpires(),
-      }),
       this.jwtService.signAsync(
-        { ...payload, sid },
+        { ...payload, typ: 'access' },
+        { secret, expiresIn: this.accessExpires() },
+      ),
+      this.jwtService.signAsync(
+        { ...payload, typ: 'refresh' },
         { secret, expiresIn: this.refreshExpires(), jwtid: randomUUID() },
       ),
     ]);

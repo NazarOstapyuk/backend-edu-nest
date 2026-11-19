@@ -49,16 +49,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(
     req: Request,
-    payload: { sub: string; role: string },
+    payload: { sub: string; role: string; sid?: string; typ?: string },
   ): Promise<AuthenticatedUser> {
+    if (payload.typ !== 'access' || typeof payload.sid !== 'string')
+      throw new UnauthorizedException();
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       include: {
         position: positionSelect,
         institutions: { select: { institutionId: true } },
+        sessions: {
+          where: { id: payload.sid, expiresAt: { gt: new Date() } },
+          select: { id: true },
+        },
       },
     });
-    if (!user || !user.isActive) throw new UnauthorizedException();
+    if (!user || !user.isActive || user.sessions.length === 0)
+      throw new UnauthorizedException();
     const institutionIds = user.institutions.map((row) => row.institutionId);
     const selected =
       user.role === Role.parent ? null : selectedInstitution(req);
